@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.js.map
+*.d.ts.map
+.radiator/
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/

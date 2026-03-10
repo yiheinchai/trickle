@@ -1,0 +1,17 @@
+{
+  "name": "trickle",
+  "version": "0.1.0",
+  "description": "Runtime type observability for JavaScript applications",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "keywords": ["observability", "types", "runtime", "lambda", "express"],
+  "license": "MIT"
+}

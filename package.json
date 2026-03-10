@@ -1,0 +1,12 @@
+{
+  "name": "trickle-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run --workspace=packages/backend dev",
+    "build": "npm run --workspaces build",
+    "start": "npm run --workspace=packages/backend start"
+  }
+}
