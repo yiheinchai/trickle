@@ -48,6 +48,7 @@ trickle dev
 - [tRPC Router Generation](#trpc-router-generation)
 - [Type Search](#type-search)
 - [Axios Client](#axios-client)
+- [Auto-Detect & Generate](#auto-detect--generate)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2242,6 +2243,66 @@ node test-axios-e2e.js
 
 ---
 
+## Auto-Detect & Generate
+
+Instead of remembering which `--flag` to use, run `trickle auto` and it figures out what your project needs by reading `package.json`.
+
+```bash
+# Auto-detect and generate everything your project needs
+trickle auto
+
+# Custom output directory
+trickle auto -d src/generated
+```
+
+It detects these dependencies and generates the matching files:
+
+| Dependency | Generated File | Format |
+|---|---|---|
+| *(always)* | `types.d.ts` | TypeScript types |
+| *(always)* | `guards.ts` | Type guard functions |
+| `axios` | `axios-client.ts` | Typed Axios client |
+| *(no axios)* | `api-client.ts` | Typed fetch client |
+| `@tanstack/react-query` | `hooks.ts` | React Query hooks |
+| `swr` | `swr-hooks.ts` | SWR hooks |
+| `zod` | `schemas.ts` | Zod schemas |
+| `@trpc/server` | `trpc-router.ts` | tRPC router |
+| `class-validator` / `@nestjs/common` | `dtos.ts` | class-validator DTOs |
+| `express` | `handlers.d.ts` + `middleware.ts` | Express types |
+| `msw` | `msw-handlers.ts` | MSW mock handlers |
+| `pydantic` *(Python)* | `models.py` | Pydantic models |
+
+Example:
+
+```
+  trickle auto
+  ──────────────────────────────────────────────────
+  Project: /path/to/my-app
+  Output:  .trickle
+
+  Detected dependencies:
+    TypeScript types ← always generated
+    Axios client ← axios detected
+    Zod schemas ← zod detected
+    SWR hooks ← swr detected
+    Type guards ← runtime type checking
+
+  ✓ types.d.ts (42 lines)
+  ✓ axios-client.ts (85 lines)
+  ✓ schemas.ts (63 lines)
+  ✓ swr-hooks.ts (71 lines)
+  ✓ guards.ts (55 lines)
+
+  5 files generated
+```
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-auto-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2563,6 +2624,20 @@ npx trickle search email --json         # JSON output
 |------|-------------|
 | `--env <env>` | Filter by environment |
 | `--json` | Output raw JSON |
+
+### `trickle auto`
+
+Auto-detect project dependencies and generate only the relevant type files.
+
+```bash
+npx trickle auto              # Generate to .trickle/
+npx trickle auto -d src/gen   # Custom output directory
+```
+
+| Flag | Description |
+|------|-------------|
+| `-d, --dir <path>` | Output directory (default: .trickle) |
+| `--env <env>` | Filter by environment |
 
 ### `trickle replay`
 
@@ -2900,6 +2975,7 @@ trickle/
 ├── test-trpc-e2e.js        # tRPC router generation test
 ├── test-search-e2e.js      # Type search test
 ├── test-axios-e2e.js       # Axios client generation test
+├── test-auto-e2e.js        # Auto-detect & generate test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2964,6 +3040,7 @@ node test-graphql-e2e.js     # GraphQL schema generation
 node test-trpc-e2e.js        # tRPC router generation
 node test-search-e2e.js      # Type search
 node test-axios-e2e.js       # Axios client generation
+node test-auto-e2e.js        # Auto-detect & generate
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

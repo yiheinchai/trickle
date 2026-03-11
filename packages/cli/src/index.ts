@@ -24,6 +24,7 @@ import { sampleCommand } from "./commands/sample";
 import { auditCommand } from "./commands/audit";
 import { captureCommand } from "./commands/capture";
 import { searchCommand } from "./commands/search";
+import { autoCommand } from "./commands/auto";
 
 const program = new Command();
 
@@ -291,6 +292,16 @@ program
   .option("--json", "Output raw JSON")
   .action(async (query: string, opts) => {
     await searchCommand(query, opts);
+  });
+
+// trickle auto
+program
+  .command("auto")
+  .description("Auto-detect project dependencies and generate only the relevant type files")
+  .option("-d, --dir <path>", "Output directory (default: .trickle)")
+  .option("--env <env>", "Filter by environment")
+  .action(async (opts) => {
+    await autoCommand(opts);
   });
 
 // Handle unhandled rejections
