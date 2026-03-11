@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -86,10 +86,17 @@ router.get("/", (req: Request, res: Response) => {
       return;
     }
 
+    const format = (req.query.format as string)?.toLowerCase();
     const isPython = (language as string)?.toLowerCase() === "python";
-    const types = isPython
-      ? generatePythonTypes(functions)
-      : generateAllTypes(functions);
+
+    let types: string;
+    if (format === "client") {
+      types = generateApiClient(functions);
+    } else if (isPython) {
+      types = generatePythonTypes(functions);
+    } else {
+      types = generateAllTypes(functions);
+    }
 
     res.json({ types });
   } catch (err) {

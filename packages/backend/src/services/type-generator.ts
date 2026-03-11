@@ -4,12 +4,14 @@ import { TypeNode } from "../types";
 
 function toPascalCase(name: string): string {
   // Sanitize route-style names like "GET /api/users/:id" → "GetApiUsersId"
-  // Split on non-alphanumeric chars, also split camelCase boundaries
+  // Also handles camelCase/PascalCase input by splitting on boundaries
   return name
     .replace(/[^a-zA-Z0-9]+/g, " ")  // replace non-alphanumeric with spaces
+    .replace(/([a-z])([A-Z])/g, "$1 $2")  // split camelCase: "userId" → "user Id"
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")  // split acronyms: "XMLParser" → "XML Parser"
     .trim()
     .split(/\s+/)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join("");
 }
 
@@ -543,6 +545,236 @@ export function generatePythonTypes(
     sections.push("");
     sections.push("");
   }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
+// ── Typed API client generation ──
+
+interface ParsedRoute {
+  method: string;       // GET, POST, PUT, DELETE, PATCH
+  path: string;         // /api/users/:id
+  pathParams: string[]; // ["id"]
+  funcName: string;     // camelCase: getApiUsersById
+  typeName: string;     // PascalCase: GetApiUsersById
+}
+
+function parseRouteName(name: string): ParsedRoute | null {
+  const match = name.match(/^(GET|POST|PUT|DELETE|PATCH)\s+(.+)$/i);
+  if (!match) return null;
+
+  const method = match[1].toUpperCase();
+  const path = match[2];
+
+  // Extract path params like :id, :userId
+  const pathParams: string[] = [];
+  path.replace(/:(\w+)/g, (_, param) => {
+    pathParams.push(param);
+    return _;
+  });
+
+  const typeName = toPascalCase(name);
+  // For camelCase: lowercase the HTTP method prefix (e.g., GETApiUsers → getApiUsers)
+  const methodLower = method.charAt(0).toUpperCase() + method.slice(1).toLowerCase();
+  const pathPart = toPascalCase(path);
+  const funcName = method.toLowerCase() + pathPart;
+
+  return { method, path, pathParams, funcName, typeName };
+}
+
+function toCamelCase(name: string): string {
+  const pascal = toPascalCase(name);
+  return pascal.charAt(0).toLowerCase() + pascal.slice(1);
+}
+
+/**
+ * Generate a fully-typed fetch-based API client from runtime-observed routes.
+ *
+ * Output is a single TypeScript file with:
+ * - All request/response interfaces
+ * - A `createTrickleClient(baseUrl)` factory that returns typed fetch wrappers
+ * - Proper path parameter substitution
+ * - Request body typing for POST/PUT/PATCH
+ */
+export function generateApiClient(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  // Filter to route-style functions only
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express/FastAPI app to generate a typed client.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated typed API client by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --client` to update");
+  sections.push("");
+
+  // Generate interfaces for each route
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+
+    // --- Input types (only for methods with body) ---
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      // argsType is typically an object with { body, params, query } from Express instrumentation
+      if (fn.argsType.kind === "object") {
+        const bodyNode = fn.argsType.properties["body"];
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          const inputName = `${baseName}Input`;
+          sections.push(renderInterface(inputName, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+          sections.push("");
+        }
+      } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+        const el = fn.argsType.elements[0];
+        if (el.kind === "object") {
+          const bodyNode = el.properties["body"];
+          if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+            const inputName = `${baseName}Input`;
+            sections.push(renderInterface(inputName, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+            sections.push("");
+          }
+        }
+      }
+    }
+
+    // --- Path params type (if route has :params) ---
+    if (parsed.pathParams.length > 0) {
+      // Try to extract from argsType.properties.params
+      let paramsNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["params"]) {
+        paramsNode = fn.argsType.properties["params"];
+      }
+      // Only generate if we have object-typed params
+      if (paramsNode && paramsNode.kind === "object" && Object.keys(paramsNode.properties).length > 0) {
+        const paramsName = `${baseName}Params`;
+        sections.push(renderInterface(paramsName, paramsNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+      }
+    }
+
+    // --- Query params type ---
+    if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+      const queryNode = fn.argsType.properties["query"];
+      if (queryNode.kind === "object" && Object.keys(queryNode.properties).length > 0) {
+        const queryName = `${baseName}Query`;
+        sections.push(renderInterface(queryName, queryNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+      }
+    }
+
+    // --- Output type ---
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      const outputName = `${baseName}Output`;
+      sections.push(renderInterface(outputName, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      sections.push("");
+    } else {
+      const outputName = `${baseName}Output`;
+      const retStr = typeNodeToTS(fn.returnType, extracted, baseName, undefined, 0);
+      sections.push(`export type ${outputName} = ${retStr};`);
+      sections.push("");
+    }
+  }
+
+  // Emit extracted sub-interfaces
+  const emitted = new Set<string>();
+  const extractedLines: string[] = [];
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    extractedLines.push(renderInterface(iface.name, iface.node, extracted));
+    extractedLines.push("");
+  }
+
+  if (extractedLines.length > 0) {
+    // Insert extracted interfaces before the main interfaces
+    sections.splice(4, 0, ...extractedLines);
+  }
+
+  // --- Generate the client factory ---
+  sections.push("// ── API Client ──");
+  sections.push("");
+  sections.push("export function createTrickleClient(baseUrl: string) {");
+  sections.push("  async function request<T>(method: string, path: string, body?: unknown, query?: Record<string, string>): Promise<T> {");
+  sections.push("    const url = new URL(path, baseUrl);");
+  sections.push("    if (query) { for (const [k, v] of Object.entries(query)) { if (v !== undefined) url.searchParams.set(k, v); } }");
+  sections.push("    const opts: RequestInit = { method, headers: { 'Content-Type': 'application/json' } };");
+  sections.push("    if (body !== undefined) opts.body = JSON.stringify(body);");
+  sections.push("    const res = await fetch(url.toString(), opts);");
+  sections.push("    if (!res.ok) throw new Error(`${method} ${path}: HTTP ${res.status}`);");
+  sections.push("    return res.json() as Promise<T>;");
+  sections.push("  }");
+  sections.push("");
+  sections.push("  return {");
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+    const outputType = `${baseName}Output`;
+    const hasBody = ["POST", "PUT", "PATCH"].includes(parsed.method);
+
+    // Determine if we have a typed input
+    let hasInputType = false;
+    if (hasBody && fn.argsType.kind === "object") {
+      const bodyNode = fn.argsType.properties["body"];
+      hasInputType = !!(bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0);
+    }
+
+    // Build path expression with template literals for path params
+    let pathExpr: string;
+    if (parsed.pathParams.length > 0) {
+      pathExpr = "`" + parsed.path.replace(/:(\w+)/g, (_, param) => `\${${toCamelCase(param)}}`) + "`";
+    } else {
+      pathExpr = `"${parsed.path}"`;
+    }
+
+    // Build method signature
+    const params: string[] = [];
+    if (parsed.pathParams.length > 0) {
+      for (const p of parsed.pathParams) {
+        params.push(`${toCamelCase(p)}: string`);
+      }
+    }
+    if (hasInputType) {
+      params.push(`input: ${baseName}Input`);
+    }
+
+    const bodyArg = hasInputType ? "input" : "undefined";
+    const paramStr = params.length > 0 ? params.join(", ") : "";
+
+    // Generate JSDoc comment
+    sections.push(`    /** ${parsed.method} ${parsed.path} */`);
+    sections.push(`    ${parsed.funcName}: (${paramStr}): Promise<${outputType}> =>`);
+    sections.push(`      request<${outputType}>("${parsed.method}", ${pathExpr}, ${bodyArg}),`);
+    sections.push("");
+  }
+
+  sections.push("  };");
+  sections.push("}");
+  sections.push("");
+  sections.push("export type TrickleClient = ReturnType<typeof createTrickleClient>;");
 
   return sections.join("\n").trimEnd() + "\n";
 }

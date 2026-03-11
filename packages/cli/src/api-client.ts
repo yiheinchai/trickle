@@ -195,6 +195,7 @@ export interface CodegenOpts {
   functionName?: string;
   env?: string;
   language?: string;
+  format?: string;
 }
 
 export async function fetchCodegen(opts?: CodegenOpts): Promise<{ types: string }> {
@@ -205,6 +206,7 @@ export async function fetchCodegen(opts?: CodegenOpts): Promise<{ types: string 
   return fetchJson(pathStr, {
     env: opts?.env,
     language: opts?.language,
+    format: opts?.format,
   });
 }
 
