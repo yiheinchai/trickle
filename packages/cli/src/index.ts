@@ -14,6 +14,7 @@ import { openapiCommand } from "./commands/openapi";
 import { checkCommand } from "./commands/check";
 import { devCommand } from "./commands/dev";
 import { testGenCommand } from "./commands/test-gen";
+import { dashboardCommand } from "./commands/dashboard";
 
 const program = new Command();
 
@@ -163,6 +164,14 @@ program
       return;
     }
     await testGenCommand(opts);
+  });
+
+// trickle dashboard
+program
+  .command("dashboard")
+  .description("Open the trickle web dashboard to explore observed types visually")
+  .action(async () => {
+    await dashboardCommand();
   });
 
 // Handle unhandled rejections

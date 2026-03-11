@@ -9,6 +9,7 @@ import tailRouter from "./routes/tail";
 import codegenRouter from "./routes/codegen";
 import mockRouter from "./routes/mock";
 import diffRouter from "./routes/diff";
+import dashboardRouter from "./routes/dashboard";
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.use("/api/tail", tailRouter);
 app.use("/api/codegen", codegenRouter);
 app.use("/api/mock-config", mockRouter);
 app.use("/api/diff", diffRouter);
+app.use("/dashboard", dashboardRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => {

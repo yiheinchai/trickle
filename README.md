@@ -28,6 +28,7 @@ trickle dev
 - [Express Handler Types](#express-handler-types)
 - [API Test Generation](#api-test-generation)
 - [Breaking Change Detection](#breaking-change-detection)
+- [Web Dashboard](#web-dashboard)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -90,6 +91,7 @@ npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
+npx trickle dashboard            # Open web dashboard
 npx trickle tail                 # Live stream of events
 ```
 
@@ -1066,6 +1068,37 @@ node test-check-e2e.js
 
 ---
 
+## Web Dashboard
+
+A live web UI for exploring your observed API types visually. Opens in your browser with one command.
+
+```bash
+npx trickle dashboard
+```
+
+Or visit `http://localhost:4888/dashboard` directly while the backend is running.
+
+### Features
+
+- **Route overview**: All observed routes with HTTP method badges and last-seen timestamps
+- **Type tree viewer**: Click any route to expand and see its response type, request body, path params, and query params rendered as a syntax-highlighted type tree
+- **Sample data**: View actual sample responses captured at runtime
+- **Live updates**: SSE connection to the backend — new type observations appear automatically with a notification banner
+- **Search**: Filter routes by path, method, or any text
+- **Method tabs**: Quick filter by HTTP method (GET, POST, PUT, DELETE)
+- **Stats bar**: At-a-glance counts of total functions, API routes, and methods
+- **Dark theme**: Clean dark UI designed for developer comfort
+- **Zero dependencies**: Self-contained HTML page served by the backend — no React, no build step
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-dashboard-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1273,6 +1306,16 @@ npx trickle mock --no-cors
 | `-p, --port <port>` | Port to listen on (default: 3000) |
 | `--no-cors` | Disable CORS headers |
 
+### `trickle dashboard`
+
+Open the web dashboard to explore observed types visually.
+
+```bash
+npx trickle dashboard
+```
+
+Opens `http://localhost:4888/dashboard` in your default browser.
+
 ### `trickle tail`
 
 Live stream of events.
@@ -1464,6 +1507,7 @@ TypeNode =
 │  codegen         │  TypeScript/Python/client/hooks/zod gen  │
 │  mock            │  mock API server from observed types    │
 │  diff            │  cross-function type drift report       │
+│  dashboard       │  live web UI for exploring types         │
 │  test            │  generate API tests from observations   │
 │  check           │  breaking change detection (CI-ready)   │
 │  openapi         │  generate OpenAPI 3.0 spec              │
@@ -1531,6 +1575,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-dashboard-e2e.js   # Web dashboard test
 ├── test-test-gen-e2e.js    # API test generation test
 ├── test-react-query-e2e.js # React Query hook generation test
 ├── test-zod-e2e.js         # Zod schema generation test
@@ -1571,6 +1616,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-dashboard-e2e.js   # Web dashboard
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation
