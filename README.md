@@ -135,24 +135,25 @@ npx trickle tail                 # Live stream of events
 
 ## Run Any Command
 
-Prefix any command with `trickle run` to capture runtime types from all function calls — zero code changes needed. Works with Node.js, Python, test runners, and any script.
+Prefix any command with `trickle run` to capture runtime types from all function calls — zero code changes needed. Works with Node.js, Python, test runners, and any script. Auto-detects the runtime from file extensions.
 
 ```bash
-# Node.js (CJS and ESM — both work automatically)
+# Just pass a file — trickle auto-detects the runtime
+trickle run app.js                 # → detects Node.js
+trickle run app.ts                 # → detects TypeScript (uses tsx/ts-node/bun)
+trickle run app.mjs                # → detects ESM
+trickle run script.py              # → detects Python
+
+# Or specify the runtime explicitly
 trickle run "node app.js"          # CommonJS
 trickle run "node app.mjs"         # ES Modules
+trickle run "ts-node app.ts"
+trickle run "python script.py"
 
 # Test runners
 trickle run "vitest run"
 trickle run "jest --runInBand"
 trickle run "pytest tests/"
-
-# TypeScript
-trickle run "ts-node app.ts"
-trickle run "npx tsx app.ts"
-
-# Python
-trickle run "python script.py"
 ```
 
 After the command finishes, trickle shows a summary with inline type signatures:
@@ -189,6 +190,28 @@ trickle run "node app.js" --annotate src/helpers.js
 # Annotate all files in a directory
 trickle run "node app.js" --annotate src/
 ```
+
+### Project config (`.tricklerc.json`)
+
+Create a `.tricklerc.json` in your project root to set defaults. Then `trickle run app.js` applies them automatically — no flags needed:
+
+```json
+{
+  "stubs": "src/",
+  "annotate": "src/",
+  "exclude": ["node_modules", "dist", "test"]
+}
+```
+
+```bash
+# With config, this one command does everything:
+trickle run app.js
+# → auto-detects Node.js, observes types, generates stubs in src/, annotates src/
+```
+
+Config can also live in `package.json` under the `"trickle"` key. CLI flags always override config values.
+
+Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for your project.
 
 **How it works:** Auto-detects CJS vs ESM. For CJS, injects `-r trickle/observe` (patches `Module._load`). For ESM, injects `--import trickle/observe-esm` (uses Node.js loader hooks to transform exports). For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
 
@@ -2938,15 +2961,16 @@ trickle annotate src/helpers.js --dry-run  # Preview without writing
 | `--dry-run` | Preview changes without modifying the file |
 | `--jsdoc` | Force JSDoc comments (default for `.js` files) |
 
-### `trickle run <command>`
+### `trickle run [command]`
 
-Run any command with universal type observation — zero code changes needed. Auto-detects CJS vs ESM for Node.js.
+Run any command or file with universal type observation — zero code changes needed. Auto-detects runtime from file extension (`.js` → Node, `.ts` → tsx/ts-node, `.py` → Python, `.mjs` → ESM). Reads `.tricklerc.json` for default settings.
 
 ```bash
-trickle run "node app.js"         # Node.js (CJS)
-trickle run "node app.mjs"        # Node.js (ESM)
+trickle run app.js                # Auto-detect Node.js
+trickle run app.ts                # Auto-detect TypeScript
+trickle run script.py             # Auto-detect Python
+trickle run "node app.js"         # Explicit runtime
 trickle run "vitest run"          # Test runners
-trickle run "python script.py"    # Python
 ```
 
 | Flag | Description |

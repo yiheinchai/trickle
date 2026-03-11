@@ -66,14 +66,14 @@ program
 
 // trickle run <command>
 program
-  .command("run <command>")
-  .description("Run any command with universal type observation — zero code changes needed")
+  .command("run [command]")
+  .description("Run any command or file with universal type observation — zero code changes needed")
   .option("--module <name>", "Module name for captured functions")
   .option("--include <patterns>", "Comma-separated substrings — only observe matching modules")
   .option("--exclude <patterns>", "Comma-separated substrings — skip matching modules")
   .option("--stubs <dir>", "Auto-generate .d.ts/.pyi type stubs in this directory after the run")
   .option("--annotate <path>", "Auto-annotate this file or directory with types after the run")
-  .action(async (command: string, opts) => {
+  .action(async (command: string | undefined, opts) => {
     await runCommand(command, opts);
   });
 

@@ -21,12 +21,155 @@ export interface RunOptions {
   annotate?: string;
 }
 
+// ── .tricklerc.json config ──
+
+interface TrickleConfig {
+  stubs?: string;
+  annotate?: string | string[];
+  include?: string | string[];
+  exclude?: string | string[];
+}
+
+function loadProjectConfig(): TrickleConfig | null {
+  const configNames = [".tricklerc.json", ".tricklerc", "trickle.config.json"];
+  for (const name of configNames) {
+    const p = path.resolve(name);
+    if (fs.existsSync(p)) {
+      try {
+        return JSON.parse(fs.readFileSync(p, "utf-8"));
+      } catch {
+        return null;
+      }
+    }
+  }
+  // Also check package.json "trickle" field
+  const pkgPath = path.resolve("package.json");
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      if (pkg.trickle && typeof pkg.trickle === "object") {
+        return pkg.trickle as TrickleConfig;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function mergeConfigWithOpts(opts: RunOptions, config: TrickleConfig | null): RunOptions {
+  if (!config) return opts;
+  const merged = { ...opts };
+
+  // CLI flags override config
+  if (!merged.stubs && config.stubs) {
+    merged.stubs = config.stubs;
+  }
+  if (!merged.annotate && config.annotate) {
+    // If array, join first item (run --annotate takes a single path)
+    merged.annotate = Array.isArray(config.annotate)
+      ? config.annotate[0]
+      : config.annotate;
+  }
+  if (!merged.include && config.include) {
+    merged.include = Array.isArray(config.include)
+      ? config.include.join(",")
+      : config.include;
+  }
+  if (!merged.exclude && config.exclude) {
+    merged.exclude = Array.isArray(config.exclude)
+      ? config.exclude.join(",")
+      : config.exclude;
+  }
+  return merged;
+}
+
+// ── Auto-detect runtime from file extension ──
+
+function autoDetectCommand(input: string): string {
+  // If it already starts with a known runtime, return as-is
+  if (/^(node|ts-node|tsx|nodemon|bun|deno|python3?|python3?\.\d+|vitest|jest|mocha|npx|bunx|pytest|uvicorn|gunicorn|flask|django-admin)\b/.test(input)) {
+    return input;
+  }
+
+  // Check if the first token is a file path
+  const parts = input.split(/\s+/);
+  const file = parts[0];
+  const rest = parts.slice(1).join(" ");
+  const ext = path.extname(file).toLowerCase();
+
+  // Resolve relative to cwd
+  const resolved = path.resolve(file);
+  const fileExists = fs.existsSync(resolved);
+
+  if (!fileExists) {
+    // Not a file — might be a custom command, return as-is
+    return input;
+  }
+
+  switch (ext) {
+    case ".js":
+    case ".cjs":
+      return rest ? `node ${file} ${rest}` : `node ${file}`;
+
+    case ".mjs":
+      return rest ? `node ${file} ${rest}` : `node ${file}`;
+
+    case ".ts":
+    case ".tsx":
+    case ".mts": {
+      // Find best available TS runtime
+      const tsRunner = findTsRunner();
+      return rest ? `${tsRunner} ${file} ${rest}` : `${tsRunner} ${file}`;
+    }
+
+    case ".py":
+      return rest ? `python ${file} ${rest}` : `python ${file}`;
+
+    default:
+      return input;
+  }
+}
+
+function findTsRunner(): string {
+  // Check for tsx (fastest, most compatible)
+  try {
+    const { execSync } = require("child_process");
+    execSync("tsx --version", { stdio: "ignore" });
+    return "tsx";
+  } catch {
+    // not available
+  }
+
+  // Check for ts-node
+  try {
+    const { execSync } = require("child_process");
+    execSync("ts-node --version", { stdio: "ignore" });
+    return "ts-node";
+  } catch {
+    // not available
+  }
+
+  // Check for bun (supports TS natively)
+  try {
+    const { execSync } = require("child_process");
+    execSync("bun --version", { stdio: "ignore" });
+    return "bun";
+  } catch {
+    // not available
+  }
+
+  // Fallback to npx tsx
+  return "npx tsx";
+}
+
 /**
  * `trickle run <command>` — Run any command with universal type observation.
  *
  * Auto-detects JS or Python, injects the right instrumentation, starts the
  * backend if needed, and shows a summary of captured types after exit.
  * With --stubs or --annotate, also generates type files automatically.
+ * Reads .tricklerc.json for project defaults.
  */
 export async function runCommand(
   command: string | undefined,
@@ -36,11 +179,19 @@ export async function runCommand(
     console.error(chalk.red("\n  Usage: trickle run <command>\n"));
     console.error(chalk.gray("  Examples:"));
     console.error(chalk.gray('    trickle run "node app.js"'));
+    console.error(chalk.gray("    trickle run app.ts              # auto-detects TypeScript runtime"));
+    console.error(chalk.gray("    trickle run script.py            # auto-detects Python"));
     console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
-    console.error(chalk.gray('    trickle run "python script.py" --annotate src/helpers.py'));
     console.error("");
     process.exit(1);
   }
+
+  // Load project config
+  const config = loadProjectConfig();
+  opts = mergeConfigWithOpts(opts, config);
+
+  // Auto-detect runtime from file extension
+  const resolvedCommand = autoDetectCommand(command);
 
   const backendUrl = getBackendUrl();
 
@@ -78,7 +229,7 @@ export async function runCommand(
 
   // Detect language and inject instrumentation
   const { instrumentedCommand, env: extraEnv } = injectObservation(
-    command,
+    resolvedCommand,
     backendUrl,
     opts,
   );
@@ -87,11 +238,19 @@ export async function runCommand(
   console.log("");
   console.log(chalk.bold("  trickle run"));
   console.log(chalk.gray("  " + "─".repeat(50)));
-  console.log(chalk.gray(`  Command:   ${command}`));
-  if (instrumentedCommand !== command) {
+  if (resolvedCommand !== command) {
+    console.log(chalk.gray(`  File:      ${command}`));
+    console.log(chalk.gray(`  Resolved:  ${resolvedCommand}`));
+  } else {
+    console.log(chalk.gray(`  Command:   ${command}`));
+  }
+  if (instrumentedCommand !== resolvedCommand) {
     console.log(chalk.gray(`  Injected:  ${instrumentedCommand}`));
   }
   console.log(chalk.gray(`  Backend:   ${backendUrl}`));
+  if (config) {
+    console.log(chalk.gray(`  Config:    .tricklerc.json`));
+  }
   if (opts.stubs) {
     console.log(chalk.gray(`  Stubs:     ${opts.stubs}`));
   }

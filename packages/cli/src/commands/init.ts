@@ -114,6 +114,31 @@ function detectProject(dir: string, forcePython: boolean): ProjectInfo {
   return info;
 }
 
+function createTrickleConfig(dir: string, info: ProjectInfo): boolean {
+  const configPath = path.join(dir, ".tricklerc.json");
+  if (fs.existsSync(configPath)) return false;
+
+  // Also check for package.json "trickle" field
+  if (info.packageJson && (info.packageJson as Record<string, unknown>).trickle) {
+    return false;
+  }
+
+  const config: Record<string, unknown> = {};
+
+  // Suggest stubs directory based on project structure
+  if (fs.existsSync(path.join(dir, "src"))) {
+    config.stubs = "src/";
+  } else {
+    config.stubs = ".";
+  }
+
+  // Default exclude patterns
+  config.exclude = ["node_modules", "dist", "build", "__pycache__"];
+
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  return true;
+}
+
 function ensureTrickleDir(dir: string): string {
   const trickleDir = path.join(dir, ".trickle");
   if (!fs.existsSync(trickleDir)) {
@@ -319,7 +344,15 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   }
   console.log("");
 
-  // Step 2: Create .trickle directory
+  // Step 2: Create .tricklerc.json
+  const configCreated = createTrickleConfig(dir, info);
+  if (configCreated) {
+    console.log(`  ${chalk.green("+")} Created ${chalk.bold(".tricklerc.json")} — project config`);
+  } else {
+    console.log(`  ${chalk.gray("-")} .tricklerc.json already exists`);
+  }
+
+  // Step 3: Create .trickle directory
   const trickleDir = ensureTrickleDir(dir);
   console.log(`  ${chalk.green("+")} Created ${chalk.bold(".trickle/")} directory`);
 
@@ -367,36 +400,20 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   console.log(chalk.bold("  Next steps:"));
   console.log("");
 
-  if (info.isPython) {
-    console.log(chalk.white("  1. Start your app with trickle:"));
-    console.log(chalk.cyan(`     python -m trickle ${info.entryFile || "app.py"}`));
-    console.log("");
-    console.log(chalk.white("  2. In another terminal, start type generation:"));
-    console.log(chalk.cyan("     trickle codegen --python --watch --out .trickle/types.pyi"));
-    console.log("");
-    console.log(chalk.white("  3. Make some requests — types appear automatically!"));
-  } else {
-    const hasStartScript = info.packageJson?.scripts &&
-      (info.packageJson.scripts as Record<string, string>)["trickle:start"];
-
-    console.log(chalk.white("  1. Start your app with trickle:"));
-    if (hasStartScript) {
-      console.log(chalk.cyan("     npm run trickle:start"));
-    } else if (info.entryFile) {
-      console.log(chalk.cyan(`     node -r trickle/register ${info.entryFile}`));
-    } else {
-      console.log(chalk.cyan("     node -r trickle/register your-app.js"));
-    }
-    console.log("");
-    console.log(chalk.white("  2. In another terminal, start type generation:"));
-    console.log(chalk.cyan("     npm run trickle:dev"));
-    console.log("");
-    console.log(chalk.white("  3. Make some requests — types appear in your IDE!"));
-    console.log("");
-    console.log(chalk.gray("  Other commands:"));
-    console.log(chalk.gray("     npm run trickle:client  — generate typed API client"));
-    console.log(chalk.gray("     npm run trickle:mock    — start mock API server"));
-  }
+  const entryFile = info.entryFile || (info.isPython ? "app.py" : "app.js");
+  console.log(chalk.white("  1. Run your app with trickle (one command does everything):"));
+  console.log(chalk.cyan(`     trickle run ${entryFile}`));
+  console.log("");
+  console.log(chalk.white("  2. That's it! trickle auto-detects the runtime, observes types,"));
+  console.log(chalk.white("     and generates stubs from .tricklerc.json settings."));
+  console.log("");
+  console.log(chalk.gray("  Customize .tricklerc.json:"));
+  console.log(chalk.gray('     { "stubs": "src/", "annotate": "src/", "exclude": ["test"] }'));
+  console.log("");
+  console.log(chalk.gray("  Other commands:"));
+  console.log(chalk.gray("     trickle functions         — list observed functions"));
+  console.log(chalk.gray("     trickle types <name>      — see types + sample data"));
+  console.log(chalk.gray("     trickle annotate src/     — add type annotations to source files"));
 
   console.log("");
 }
