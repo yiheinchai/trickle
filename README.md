@@ -15,6 +15,7 @@ trickle dev
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Run Any Command](#run-any-command)
 - [Dev Mode](#dev-mode)
 - [Proxy Mode (Zero-Change)](#proxy-mode-zero-change)
 - [Zero-Code Instrumentation](#zero-code-instrumentation)
@@ -55,6 +56,7 @@ trickle dev
 - [API Overview](#api-overview)
 - [Type-Annotated API Tracing](#type-annotated-api-tracing)
 - [Portable Type Bundles](#portable-type-bundles)
+- [Universal Function Observation](#universal-function-observation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -125,6 +127,62 @@ npx trickle mock                 # Start a mock API server
 npx trickle proxy -t http://localhost:3000  # Zero-change type capture
 npx trickle dashboard            # Open web dashboard
 npx trickle tail                 # Live stream of events
+```
+
+---
+
+## Run Any Command
+
+Prefix any command with `trickle run` to capture runtime types from all function calls — zero code changes needed. Works with Node.js, Python, test runners, and any script.
+
+```bash
+# Node.js scripts
+trickle run "node app.js"
+
+# Test runners
+trickle run "vitest run"
+trickle run "jest --runInBand"
+trickle run "pytest tests/"
+
+# TypeScript
+trickle run "ts-node app.ts"
+trickle run "npx tsx app.ts"
+
+# Python
+trickle run "python script.py"
+```
+
+After the command finishes, trickle shows a summary of what was captured:
+
+```
+  Summary
+  ──────────────────────────────────────────────────
+  Functions observed: 5 total, 5 new
+
+    + parseConfig [helpers]
+    + processItems [helpers]
+    + fetchData [helpers]
+    + transformResponse [helpers]
+    + calculateStats [helpers]
+
+  Explore results:
+    trickle functions          # list all captured functions
+    trickle types parseConfig  # see types + sample data
+    trickle errors             # see captured errors
+  ──────────────────────────────────────────────────
+```
+
+**How it works:** For JS, injects `-r trickle/observe` which patches `Module._load` to wrap all exported functions from user modules. For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
+
+| Flag | Description |
+|------|-------------|
+| `--include <patterns>` | Only observe modules matching these comma-separated substrings |
+| `--exclude <patterns>` | Skip modules matching these comma-separated substrings |
+
+**Test:**
+
+```bash
+node test-run-e2e.js
 ```
 
 ---
@@ -2601,7 +2659,95 @@ node test-pack-e2e.js
 
 ---
 
+## Universal Function Observation
+
+Observe **any** function — not just Express routes. Wrap test helpers, SDK clients, utility functions, or entire modules to capture runtime types and sample data for every call. Perfect for debugging e2e tests, understanding unfamiliar APIs, or documenting what your code actually does at runtime.
+
+### Explicit: `observe()`
+
+Wrap all functions on an object (module exports, helper collections, etc.):
+
+```ts
+import { observe } from 'trickle';
+import * as helpers from './myTestHelpers';
+
+// Every function on helpers is now observed
+const { getCpaStatus, getAlerts, makeRepayment } = observe(helpers, {
+  module: 'cpa-e2e',  // shown in `trickle functions`
+});
+
+// Use them normally — types + sample data captured transparently
+const status = await getCpaStatus('acc_123');
+const alerts = await getAlerts(status);
+```
+
+Wrap a single function with `observeFn()`:
+
+```ts
+import { observeFn } from 'trickle';
+
+const tracedFetch = observeFn(fetchUser, { module: 'api', name: 'fetchUser' });
+const user = await tracedFetch('user_123');
+```
+
+### Auto-register: `node -r trickle/observe`
+
+For CommonJS apps, auto-wrap all exported functions from your user modules (not `node_modules`):
+
+```bash
+node -r trickle/observe app.js
+```
+
+| Environment Variable | Description |
+|---|---|
+| `TRICKLE_OBSERVE_INCLUDE` | Comma-separated substrings — only wrap matching modules |
+| `TRICKLE_OBSERVE_EXCLUDE` | Comma-separated substrings — skip matching modules |
+| `TRICKLE_BACKEND_URL` | Backend URL (default: `http://localhost:4888`) |
+| `TRICKLE_ENABLED` | Set to `0` or `false` to disable |
+| `TRICKLE_DEBUG` | Set to `1` for debug logging |
+
+### After running: query what was captured
+
+```bash
+trickle functions                  # See all observed functions
+trickle types getCpaStatus         # See return type shape + sample data
+trickle errors                     # See which calls threw + with what args
+```
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `module` | auto-detected | Module name shown in `trickle functions` |
+| `environment` | auto-detected | Environment label |
+| `sampleRate` | `1` | Fraction of calls to capture (0–1) |
+| `maxDepth` | `5` | Max depth for type inference |
+| `enabled` | `true` | Set to `false` for passthrough |
+
+**Test:**
+
+```bash
+node test-observe-e2e.js
+```
+
+---
+
 ## CLI Reference
+
+### `trickle run <command>`
+
+Run any command with universal type observation — zero code changes needed.
+
+```bash
+trickle run "node app.js"         # Node.js
+trickle run "vitest run"          # Test runners
+trickle run "python script.py"    # Python
+```
+
+| Flag | Description |
+|------|-------------|
+| `--include <patterns>` | Only observe matching modules (comma-separated) |
+| `--exclude <patterns>` | Skip matching modules (comma-separated) |
 
 ### `trickle dev [command]`
 

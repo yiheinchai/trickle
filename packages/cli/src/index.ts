@@ -32,6 +32,7 @@ import { overviewCommand } from "./commands/overview";
 import { traceCommand } from "./commands/trace";
 import { packCommand } from "./commands/pack";
 import { unpackCommand } from "./commands/unpack";
+import { runCommand } from "./commands/run";
 
 const program = new Command();
 
@@ -59,6 +60,17 @@ program
   .option("--python", "Generate Python type stubs instead of TypeScript")
   .action(async (command: string | undefined, opts) => {
     await devCommand(command, opts);
+  });
+
+// trickle run <command>
+program
+  .command("run <command>")
+  .description("Run any command with universal type observation — zero code changes needed")
+  .option("--module <name>", "Module name for captured functions")
+  .option("--include <patterns>", "Comma-separated substrings — only observe matching modules")
+  .option("--exclude <patterns>", "Comma-separated substrings — skip matching modules")
+  .action(async (command: string, opts) => {
+    await runCommand(command, opts);
   });
 
 // trickle functions
