@@ -2,6 +2,7 @@ import { configure as configureTransport, flush } from './transport';
 import { wrapFunction } from './wrap';
 import { detectEnvironment } from './env-detect';
 import { GlobalOpts, TrickleOpts, WrapOptions } from './types';
+import { instrumentExpress, trickleMiddleware } from './express';
 
 let globalOpts: GlobalOpts = {
   backendUrl: 'http://localhost:4888',
@@ -106,34 +107,55 @@ export function trickleHandler<T extends (...args: any[]) => any>(handler: T, op
 }
 
 /**
- * Express middleware that wraps route handlers for type observation.
+ * Instrument an Express app by monkey-patching route methods to capture types.
+ *
+ * Must be called BEFORE defining routes:
+ *
+ *   const app = express();
+ *   trickleExpress(app);
+ *   app.get('/api/users', (req, res) => { ... });
+ *
+ * Each handler is wrapped to capture:
+ * - Input: `{ body, params, query }` from the request
+ * - Output: data passed to `res.json()` or `res.send()`
+ * - Errors: thrown exceptions or `next(err)` calls
+ */
+export function trickleExpress(
+  app: any,
+  opts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
+): void {
+  instrumentExpress(app, {
+    enabled: opts?.enabled ?? globalOpts.enabled,
+    environment: opts?.environment ?? globalOpts.environment ?? detectEnvironment(),
+    sampleRate: opts?.sampleRate ?? 1,
+    maxDepth: opts?.maxDepth ?? 5,
+  });
+}
+
+/**
+ * Auto-instrument a framework app. Currently supports Express.
  *
  * Usage:
- *   app.use(trickleExpress());
+ *   import { instrument } from 'trickle';
+ *   const app = express();
+ *   instrument(app);
  *
- * This patches app.get/post/put/delete/patch to wrap the handler functions.
- * Note: must be called before defining routes.
+ * Detects Express by checking for `app.listen` and `app.get` (function) on the object.
  */
-export function trickleExpress(): (
-  req: any,
-  res: any,
-  next: (...args: any[]) => void,
-) => void {
-  return function trickleMiddleware(req: any, res: any, next: (...args: any[]) => void): void {
-    // Attach trickle context to the request for downstream use
-    const startTime = Date.now();
-    const originalEnd = res.end;
+export function instrument(
+  app: any,
+  opts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
+): void {
+  // Detect Express-like app
+  if (app && typeof app.listen === 'function' && typeof app.get === 'function' && typeof app.use === 'function') {
+    trickleExpress(app, opts);
+    return;
+  }
 
-    res.end = function (...endArgs: any[]) {
-      // Capture response timing
-      const duration = Date.now() - startTime;
-      // Restore original
-      res.end = originalEnd;
-      return originalEnd.apply(res, endArgs);
-    };
-
-    next();
-  };
+  // Future: detect other frameworks here (Koa, Fastify, etc.)
+  if (typeof console !== 'undefined' && console.warn) {
+    console.warn('[trickle] instrument(): could not detect a supported framework on the provided object');
+  }
 }
 
 /**
@@ -172,3 +194,4 @@ function inferModule(): string {
 // Re-export public types
 export type { TypeNode, GlobalOpts, TrickleOpts, IngestPayload } from './types';
 export { flush } from './transport';
+export { instrumentExpress, trickleMiddleware } from './express';

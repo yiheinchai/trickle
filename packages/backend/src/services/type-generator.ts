@@ -3,9 +3,14 @@ import { TypeNode } from "../types";
 // ── Naming helpers ──
 
 function toPascalCase(name: string): string {
+  // Sanitize route-style names like "GET /api/users/:id" → "GetApiUsersId"
+  // Split on non-alphanumeric chars, also split camelCase boundaries
   return name
-    .replace(/[-_]+(.)/g, (_, c) => c.toUpperCase())
-    .replace(/^(.)/, (_, c) => c.toUpperCase());
+    .replace(/[^a-zA-Z0-9]+/g, " ")  // replace non-alphanumeric with spaces
+    .trim()
+    .split(/\s+/)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join("");
 }
 
 function toSnakeCase(name: string): string {
@@ -273,10 +278,13 @@ export function generateFunctionTypes(
 
   // ── Build function declaration ──
 
+  // Use camelCase version of baseName for function declaration identifier
+  const funcIdent = baseName.charAt(0).toLowerCase() + baseName.slice(1);
+
   let funcDecl: string;
   if (singleObjectArg) {
     const inputName = `${baseName}Input`;
-    funcDecl = `export declare function ${functionName}(input: ${inputName}): ${outputName};`;
+    funcDecl = `export declare function ${funcIdent}(input: ${inputName}): ${outputName};`;
   } else {
     // Build param list with proper types
     const params = argEntries.map((entry) => {
@@ -285,7 +293,7 @@ export function generateFunctionTypes(
       }
       return `${entry.paramName}: ${typeNodeToTS(entry.typeNode, extracted, baseName, entry.paramName, 0)}`;
     });
-    funcDecl = `export declare function ${functionName}(${params.join(", ")}): ${outputName};`;
+    funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${outputName};`;
   }
 
   // ── Assemble output ──

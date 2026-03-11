@@ -1,0 +1,386 @@
+import { TypeNode, IngestPayload, WrapOptions } from './types';
+import { inferType } from './type-inference';
+import { hashType } from './type-hash';
+import { TypeCache } from './cache';
+import { enqueue } from './transport';
+import { detectEnvironment } from './env-detect';
+
+const expressCache = new TypeCache();
+
+/** Options shared across Express instrumentation. */
+interface ExpressInstrumentOpts {
+  enabled: boolean;
+  environment: string;
+  sampleRate: number;
+  maxDepth: number;
+}
+
+/**
+ * Extract the interesting parts of an Express request as a plain object
+ * suitable for type inference. We deliberately avoid the full req object
+ * because it is enormous and contains circular references.
+ */
+function extractRequestInput(req: any): Record<string, unknown> {
+  const input: Record<string, unknown> = {};
+
+  try {
+    if (req.body !== undefined && req.body !== null && Object.keys(req.body).length > 0) {
+      input.body = req.body;
+    }
+  } catch {
+    // body might not be readable
+  }
+
+  try {
+    if (req.params && Object.keys(req.params).length > 0) {
+      input.params = req.params;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (req.query && Object.keys(req.query).length > 0) {
+      input.query = req.query;
+    }
+  } catch {
+    // ignore
+  }
+
+  return input;
+}
+
+/**
+ * Sanitize a sample value for safe serialization (local copy to avoid circular import).
+ */
+function sanitizeSample(value: unknown, depth: number = 3): unknown {
+  if (depth <= 0) return '[truncated]';
+  if (value === null || value === undefined) return value;
+
+  const t = typeof value;
+  if (t === 'string') {
+    const s = value as string;
+    return s.length > 200 ? s.substring(0, 200) + '...' : s;
+  }
+  if (t === 'number' || t === 'boolean') return value;
+  if (t === 'bigint') return String(value);
+  if (t === 'symbol') return String(value);
+  if (t === 'function') return `[Function: ${(value as Function).name || 'anonymous'}]`;
+
+  if (Array.isArray(value)) {
+    return value.slice(0, 5).map(item => sanitizeSample(item, depth - 1));
+  }
+
+  if (t === 'object') {
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof RegExp) return String(value);
+    if (value instanceof Error) return { error: value.message };
+    if (value instanceof Map) return `[Map: ${value.size} entries]`;
+    if (value instanceof Set) return `[Set: ${value.size} items]`;
+
+    const obj = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    const keys = Object.keys(obj).slice(0, 20);
+    for (const key of keys) {
+      try {
+        result[key] = sanitizeSample(obj[key], depth - 1);
+      } catch {
+        result[key] = '[unreadable]';
+      }
+    }
+    return result;
+  }
+
+  return String(value);
+}
+
+/**
+ * Emit a type payload for a single Express route invocation.
+ */
+function emitExpressPayload(
+  functionName: string,
+  environment: string,
+  maxDepth: number,
+  input: Record<string, unknown>,
+  output: unknown,
+  error?: unknown,
+): void {
+  try {
+    const functionKey = `express::${functionName}`;
+    const argsType = inferType(input, maxDepth);
+    const returnType = error ? ({ kind: 'unknown' } as TypeNode) : inferType(output, maxDepth);
+    const hash = hashType(argsType, returnType);
+
+    // For errors, always send. For success, use cache.
+    if (!error && !expressCache.shouldSend(functionKey, hash)) {
+      return;
+    }
+
+    if (!error) {
+      expressCache.markSent(functionKey, hash);
+    }
+
+    const payload: IngestPayload = {
+      functionName,
+      module: 'express',
+      language: 'js',
+      environment,
+      typeHash: hash,
+      argsType,
+      returnType,
+      sampleInput: sanitizeSample(input),
+      sampleOutput: error ? undefined : sanitizeSample(output),
+    };
+
+    if (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      payload.error = {
+        type: err.constructor?.name || 'Error',
+        message: err.message,
+        stackTrace: err.stack,
+        argsSnapshot: sanitizeSample(input),
+      };
+    }
+
+    enqueue(payload);
+  } catch {
+    // Never crash the user's app
+  }
+}
+
+/**
+ * Wrap a single Express route handler so that it captures request input
+ * (body, params, query) and response output (json/send payloads) as type data.
+ */
+function wrapExpressHandler(
+  handler: Function,
+  routeName: string,
+  opts: ExpressInstrumentOpts,
+): Function {
+  const wrapped = function (this: any, req: any, res: any, next: any) {
+    // Sample rate check
+    if (opts.sampleRate < 1 && Math.random() > opts.sampleRate) {
+      return handler.call(this, req, res, next);
+    }
+
+    const input = extractRequestInput(req);
+    let captured = false;
+
+    // Intercept res.json()
+    const originalJson = res.json;
+    if (typeof originalJson === 'function') {
+      res.json = function (data: any) {
+        if (!captured) {
+          captured = true;
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, data);
+        }
+        res.json = originalJson; // restore
+        return originalJson.call(res, data);
+      };
+    }
+
+    // Intercept res.send()
+    const originalSend = res.send;
+    if (typeof originalSend === 'function') {
+      res.send = function (data: any) {
+        if (!captured) {
+          captured = true;
+          // Only capture non-string data as typed output; strings are usually HTML
+          const output = typeof data === 'string' ? { __html: true } : data;
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, output);
+        }
+        res.send = originalSend; // restore
+        return originalSend.call(res, data);
+      };
+    }
+
+    // Wrap next to capture errors passed via next(err)
+    const wrappedNext = function (err?: any) {
+      if (err && !captured) {
+        captured = true;
+        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+      }
+      if (typeof next === 'function') {
+        return next(err);
+      }
+    };
+
+    try {
+      const result = handler.call(this, req, res, wrappedNext);
+
+      // Handle async handlers that return a promise
+      if (result && typeof result === 'object' && typeof result.then === 'function') {
+        return result.catch((err: unknown) => {
+          if (!captured) {
+            captured = true;
+            emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+          }
+          // Re-throw so Express error handling picks it up
+          throw err;
+        });
+      }
+
+      return result;
+    } catch (err) {
+      if (!captured) {
+        captured = true;
+        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+      }
+      throw err;
+    }
+  };
+
+  // Preserve function metadata
+  Object.defineProperty(wrapped, 'name', { value: handler.name || routeName, configurable: true });
+  Object.defineProperty(wrapped, 'length', { value: handler.length, configurable: true });
+
+  return wrapped;
+}
+
+/**
+ * Instrument an Express application by monkey-patching route registration methods.
+ *
+ * Must be called BEFORE routes are defined:
+ *
+ *   import express from 'express';
+ *   import { instrumentExpress } from 'trickle';
+ *
+ *   const app = express();
+ *   instrumentExpress(app);
+ *
+ *   app.get('/api/users', (req, res) => { ... });
+ *
+ * Each registered handler is wrapped to capture:
+ * - Input: `{ body, params, query }` from the request
+ * - Output: the data passed to `res.json()` or `res.send()`
+ * - Errors: exceptions or `next(err)` calls
+ */
+export function instrumentExpress(
+  app: any,
+  userOpts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
+): void {
+  const opts: ExpressInstrumentOpts = {
+    enabled: userOpts?.enabled !== false,
+    environment: userOpts?.environment || detectEnvironment(),
+    sampleRate: userOpts?.sampleRate ?? 1,
+    maxDepth: userOpts?.maxDepth ?? 5,
+  };
+
+  if (!opts.enabled) return;
+
+  const methods = ['get', 'post', 'put', 'delete', 'patch', 'all'] as const;
+
+  for (const method of methods) {
+    const original = app[method];
+    if (typeof original !== 'function') continue;
+
+    app[method] = function (this: any, path: string | RegExp, ...handlers: any[]) {
+      // Express allows non-string first args (RegExp, array of paths, etc.)
+      // We only label with a string path; otherwise fall back to the method name.
+      const pathStr = typeof path === 'string' ? path : String(path);
+      const routeName = `${method.toUpperCase()} ${pathStr}`;
+
+      const wrapped = handlers.map((handler: any) => {
+        if (typeof handler !== 'function') return handler;
+
+        try {
+          return wrapExpressHandler(handler, routeName, opts);
+        } catch {
+          // If wrapping fails for any reason, return the original handler
+          return handler;
+        }
+      });
+
+      return original.call(this, path, ...wrapped);
+    };
+  }
+}
+
+/**
+ * Express middleware that intercepts responses to capture type information.
+ *
+ * Use this when you prefer middleware over monkey-patching:
+ *
+ *   import express from 'express';
+ *   import { trickleMiddleware } from 'trickle';
+ *
+ *   const app = express();
+ *   app.use(trickleMiddleware());
+ *
+ * The middleware captures the route `METHOD /path` once the response is sent,
+ * by intercepting `res.json()` and `res.send()`.
+ */
+export function trickleMiddleware(
+  userOpts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
+): (req: any, res: any, next: (...args: any[]) => void) => void {
+  const opts: ExpressInstrumentOpts = {
+    enabled: userOpts?.enabled !== false,
+    environment: userOpts?.environment || detectEnvironment(),
+    sampleRate: userOpts?.sampleRate ?? 1,
+    maxDepth: userOpts?.maxDepth ?? 5,
+  };
+
+  return function trickleMiddlewareHandler(req: any, res: any, next: (...args: any[]) => void): void {
+    if (!opts.enabled) {
+      next();
+      return;
+    }
+
+    // Sample rate check
+    if (opts.sampleRate < 1 && Math.random() > opts.sampleRate) {
+      next();
+      return;
+    }
+
+    let captured = false;
+
+    // We derive the route name lazily once the response is being sent,
+    // because req.route is only populated after the handler matches.
+    function getRouteName(): string {
+      try {
+        if (req.route && req.route.path) {
+          return `${req.method} ${req.baseUrl || ''}${req.route.path}`;
+        }
+      } catch {
+        // ignore
+      }
+      return `${req.method || 'UNKNOWN'} ${req.originalUrl || req.url || '/'}`;
+    }
+
+    const input = extractRequestInput(req);
+
+    // Intercept res.json()
+    const originalJson = res.json;
+    if (typeof originalJson === 'function') {
+      res.json = function (data: any) {
+        if (!captured) {
+          captured = true;
+          const routeName = getRouteName();
+          // Re-extract input here because body parsers may have run since middleware was entered
+          const latestInput = extractRequestInput(req);
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, data);
+        }
+        res.json = originalJson;
+        return originalJson.call(res, data);
+      };
+    }
+
+    // Intercept res.send()
+    const originalSend = res.send;
+    if (typeof originalSend === 'function') {
+      res.send = function (data: any) {
+        if (!captured) {
+          captured = true;
+          const routeName = getRouteName();
+          const latestInput = extractRequestInput(req);
+          const output = typeof data === 'string' ? { __html: true } : data;
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, output);
+        }
+        res.send = originalSend;
+        return originalSend.call(res, data);
+      };
+    }
+
+    next();
+  };
+}
