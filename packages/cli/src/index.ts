@@ -114,6 +114,7 @@ program
   .option("--swr", "Generate typed SWR data-fetching hooks")
   .option("--pydantic", "Generate Pydantic BaseModel classes (Python)")
   .option("--class-validator", "Generate class-validator DTOs for NestJS")
+  .option("--graphql", "Generate GraphQL SDL schema from observed routes")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

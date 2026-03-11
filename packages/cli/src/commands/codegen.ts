@@ -18,6 +18,7 @@ export interface CodegenOptions {
   swr?: boolean;
   pydantic?: boolean;
   classValidator?: boolean;
+  graphql?: boolean;
   watch?: boolean;
 }
 
@@ -26,7 +27,7 @@ export async function codegenCommand(
   opts: CodegenOptions,
 ): Promise<void> {
   const language = opts.python ? "python" : undefined;
-  const format = opts.classValidator ? "class-validator" : opts.pydantic ? "pydantic" : opts.swr ? "swr" : opts.jsonSchema ? "json-schema" : opts.msw ? "msw" : opts.middleware ? "middleware" : opts.guards ? "guards" : opts.reactQuery ? "react-query" : opts.zod ? "zod" : opts.handlers ? "handlers" : opts.client ? "client" : undefined;
+  const format = opts.graphql ? "graphql" : opts.classValidator ? "class-validator" : opts.pydantic ? "pydantic" : opts.swr ? "swr" : opts.jsonSchema ? "json-schema" : opts.msw ? "msw" : opts.middleware ? "middleware" : opts.guards ? "guards" : opts.reactQuery ? "react-query" : opts.zod ? "zod" : opts.handlers ? "handlers" : opts.client ? "client" : undefined;
 
   async function generate(): Promise<string> {
     const result = await fetchCodegen({

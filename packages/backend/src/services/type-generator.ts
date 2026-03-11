@@ -3094,5 +3094,246 @@ export function generateClassValidatorDtos(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── GraphQL SDL Generation ──
+
+/**
+ * Convert a TypeNode to a GraphQL type string, accumulating named types.
+ */
+function typeNodeToGraphQL(
+  node: TypeNode,
+  namedTypes: Map<string, string>,
+  parentName: string,
+  propName?: string,
+): string {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string": return "String";
+        case "number": return "Float";
+        case "boolean": return "Boolean";
+        case "bigint": return "String";
+        case "null": return "String";
+        case "undefined": return "String";
+        case "symbol": return "String";
+        default: return "String";
+      }
+    case "array": {
+      const elementType = typeNodeToGraphQL(node.element, namedTypes, parentName, propName);
+      return `[${elementType}]`;
+    }
+    case "object": {
+      const typeName = propName
+        ? parentName + toPascalCase(propName)
+        : parentName;
+
+      const fields: string[] = [];
+      for (const [key, val] of Object.entries(node.properties)) {
+        const fieldType = typeNodeToGraphQL(val, namedTypes, typeName, key);
+        fields.push(`  ${key}: ${fieldType}`);
+      }
+
+      if (fields.length === 0) {
+        return "String";
+      }
+
+      const body = `type ${typeName} {\n${fields.join("\n")}\n}`;
+      namedTypes.set(typeName, body);
+      return typeName;
+    }
+    case "union": {
+      // GraphQL unions only work for object types; for primitives, pick the first non-null
+      const nonNull = node.members.filter(
+        (m) => !(m.kind === "primitive" && (m.name === "null" || m.name === "undefined")),
+      );
+      if (nonNull.length === 0) return "String";
+      return typeNodeToGraphQL(nonNull[0], namedTypes, parentName, propName);
+    }
+    case "promise":
+      return typeNodeToGraphQL(node.resolved, namedTypes, parentName, propName);
+    case "map":
+      return "String"; // JSON scalar
+    case "set": {
+      const elementType = typeNodeToGraphQL(node.element, namedTypes, parentName, propName);
+      return `[${elementType}]`;
+    }
+    case "tuple": {
+      if (node.elements.length === 0) return "[String]";
+      const elementType = typeNodeToGraphQL(node.elements[0], namedTypes, parentName, propName);
+      return `[${elementType}]`;
+    }
+    case "function":
+    case "unknown":
+    default:
+      return "String";
+  }
+}
+
+/**
+ * Generate a GraphQL SDL schema from runtime-observed API routes.
+ *
+ * Converts REST routes into Query (GET) and Mutation (POST/PUT/PATCH/DELETE)
+ * fields with properly typed inputs and outputs.
+ */
+export function generateGraphqlSchema(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const namedTypes = new Map<string, string>();
+  const queryFields: string[] = [];
+  const mutationFields: string[] = [];
+  const inputTypes: string[] = [];
+
+  for (const fn of functions) {
+    const route = parseRouteName(fn.name);
+    if (!route) continue;
+
+    const typeName = route.typeName;
+    const fieldName = toCamelCase(fn.name);
+
+    // Generate return type
+    const returnTypeName = typeName + "Response";
+    typeNodeToGraphQL(fn.returnType, namedTypes, returnTypeName);
+
+    // Build field arguments from argsType
+    const args: string[] = [];
+
+    if (fn.argsType.kind === "object") {
+      const props = fn.argsType.properties;
+
+      // Path params
+      for (const param of route.pathParams) {
+        args.push(`${param}: String!`);
+      }
+
+      // Query params
+      if (props.query && props.query.kind === "object") {
+        for (const [key, val] of Object.entries(props.query.properties)) {
+          const gqlType = typeNodeToGraphQL(val, namedTypes, typeName, key);
+          args.push(`${key}: ${gqlType}`);
+        }
+      }
+
+      // Body → input type for mutations
+      if (props.body && props.body.kind === "object") {
+        const inputName = typeName + "Input";
+        const inputFields: string[] = [];
+        for (const [key, val] of Object.entries(props.body.properties)) {
+          const fieldType = typeNodeToGraphQLInput(val, namedTypes, inputName, key);
+          inputFields.push(`  ${key}: ${fieldType}`);
+        }
+        if (inputFields.length > 0) {
+          inputTypes.push(`input ${inputName} {\n${inputFields.join("\n")}\n}`);
+          args.push(`input: ${inputName}!`);
+        }
+      }
+    }
+
+    const argsStr = args.length > 0 ? `(${args.join(", ")})` : "";
+
+    // Determine the return type name — use the named type if it was created
+    const resolvedReturnType = namedTypes.has(returnTypeName) ? returnTypeName : typeNodeToGraphQL(fn.returnType, namedTypes, returnTypeName);
+
+    if (route.method === "GET") {
+      queryFields.push(`  ${fieldName}${argsStr}: ${resolvedReturnType}`);
+    } else {
+      mutationFields.push(`  ${fieldName}${argsStr}: ${resolvedReturnType}`);
+    }
+  }
+
+  if (queryFields.length === 0 && mutationFields.length === 0) {
+    return "# No API routes found.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("# Auto-generated GraphQL schema from runtime-observed types");
+  sections.push("# Generated by trickle — https://github.com/yiheinchai/trickle");
+  sections.push("");
+
+  // Emit named types (skip duplicates, emit in order)
+  const emittedTypes = new Set<string>();
+  for (const [name, body] of namedTypes) {
+    if (!emittedTypes.has(name)) {
+      emittedTypes.add(name);
+      sections.push(body);
+      sections.push("");
+    }
+  }
+
+  // Emit input types
+  for (const input of inputTypes) {
+    sections.push(input);
+    sections.push("");
+  }
+
+  // Emit Query
+  if (queryFields.length > 0) {
+    sections.push(`type Query {`);
+    for (const f of queryFields) {
+      sections.push(f);
+    }
+    sections.push("}");
+    sections.push("");
+  }
+
+  // Emit Mutation
+  if (mutationFields.length > 0) {
+    sections.push(`type Mutation {`);
+    for (const f of mutationFields) {
+      sections.push(f);
+    }
+    sections.push("}");
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
+/**
+ * Convert TypeNode to GraphQL input type string (uses `input` instead of `type` for nested objects).
+ */
+function typeNodeToGraphQLInput(
+  node: TypeNode,
+  namedTypes: Map<string, string>,
+  parentName: string,
+  propName?: string,
+): string {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string": return "String";
+        case "number": return "Float";
+        case "boolean": return "Boolean";
+        default: return "String";
+      }
+    case "array": {
+      const elementType = typeNodeToGraphQLInput(node.element, namedTypes, parentName, propName);
+      return `[${elementType}]`;
+    }
+    case "object": {
+      const typeName = propName
+        ? parentName + toPascalCase(propName)
+        : parentName;
+      // Don't emit as named type — just inline or skip
+      // For nested input objects, the parent handles them
+      return "String"; // Flatten deep nested inputs to JSON string
+    }
+    case "union": {
+      const nonNull = node.members.filter(
+        (m) => !(m.kind === "primitive" && (m.name === "null" || m.name === "undefined")),
+      );
+      if (nonNull.length === 0) return "String";
+      return typeNodeToGraphQLInput(nonNull[0], namedTypes, parentName, propName);
+    }
+    default:
+      return "String";
+  }
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

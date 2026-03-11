@@ -44,6 +44,7 @@ trickle dev
 - [Pydantic Models](#pydantic-models)
 - [NestJS DTOs (class-validator)](#nestjs-dtos-class-validator)
 - [API Capture](#api-capture)
+- [GraphQL Schema Generation](#graphql-schema-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2003,6 +2004,66 @@ node test-capture-e2e.js
 
 ---
 
+## GraphQL Schema Generation
+
+Generate a GraphQL SDL schema from your runtime-observed REST API types. GET routes become Query fields, POST/PUT/PATCH/DELETE routes become Mutation fields, with proper input types and nested object types.
+
+```bash
+# Generate GraphQL schema to stdout
+trickle codegen --graphql
+
+# Write to a file
+trickle codegen --graphql -o schema.graphql
+```
+
+Example output:
+
+```graphql
+# Auto-generated GraphQL schema from runtime-observed types
+
+type GetApiUsersResponseUsers {
+  id: Float
+  name: String
+  active: Boolean
+}
+
+type GetApiUsersResponse {
+  users: [GetApiUsersResponseUsers]
+  total: Float
+}
+
+input PostApiUsersInput {
+  name: String
+  email: String
+  age: Float
+}
+
+type PostApiUsersResponse {
+  id: Float
+  created: Boolean
+}
+
+type Query {
+  getApiUsers: GetApiUsersResponse
+}
+
+type Mutation {
+  postApiUsers(input: PostApiUsersInput!): PostApiUsersResponse
+}
+```
+
+This is useful for:
+- **REST-to-GraphQL migration**: Auto-generate your schema from existing REST endpoints
+- **Schema-first design**: Use observed types as a starting point, then refine
+- **Documentation**: GraphQL's introspection gives you a self-documenting API
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-graphql-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2135,6 +2196,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--swr` | Generate typed SWR data-fetching hooks |
 | `--pydantic` | Generate Pydantic BaseModel classes (Python) |
 | `--class-validator` | Generate class-validator DTOs for NestJS |
+| `--graphql` | Generate GraphQL SDL schema |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2638,6 +2700,7 @@ trickle/
 ├── test-pydantic-e2e.js     # Pydantic model generation test
 ├── test-class-validator-e2e.js # NestJS class-validator DTO test
 ├── test-capture-e2e.js     # API capture (live endpoint) test
+├── test-graphql-e2e.js     # GraphQL schema generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2698,6 +2761,7 @@ node test-audit-e2e.js        # API quality audit
 node test-pydantic-e2e.js     # Pydantic model generation
 node test-class-validator-e2e.js # NestJS class-validator DTOs
 node test-capture-e2e.js     # API capture (live endpoint)
+node test-graphql-e2e.js     # GraphQL schema generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
