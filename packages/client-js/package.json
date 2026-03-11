@@ -9,7 +9,8 @@
     "./register": "./register.js",
     "./observe": "./observe.js",
     "./observe-esm": "./observe-esm.mjs",
-    "./auto": "./auto.js"
+    "./auto": "./auto.js",
+    "./auto-env": "./auto-env.js"
   },
   "scripts": {
     "build": "tsc",

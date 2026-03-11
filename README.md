@@ -62,6 +62,7 @@ trickle dev
 - [Local/Offline Mode](#localoffline-mode) (with type accumulation across runs)
 - [Continuous Type Generation](#continuous-type-generation)
 - [Zero-Config Auto-Typing (`trickle/auto` / `trickle.auto`)](#zero-config-auto-typing-trickleauto--trickleauto)
+  - [Zero-Code Activation (no source changes)](#zero-code-activation-no-source-changes-at-all)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3227,20 +3228,53 @@ Parameter names are preserved from the original source code — no generic `arg0
 ### Notes
 
 - **Python**: Works for ALL functions — both imported modules AND the entry file itself (via `sys.setprofile`). Single-file scripts are fully supported.
-- **JavaScript**: Functions must be in `require()`'d modules (not the entry file itself), since the entry file is already compiled when `require('trickle/auto')` runs. This isn't an issue in practice since real apps load modules via `require()`.
+- **JavaScript**: Functions must be in `require()`'d modules (not the entry file itself), since the entry file is already compiled when `require('trickle/auto')` runs. This isn't an issue in practice since real apps load modules via `require()`. However, using `node -r trickle/auto` (see below) DOES instrument the entry file.
 - Types accumulate across runs — run your app multiple times and optional fields are detected automatically.
 - Works alongside all other trickle features (backend mode, CLI, etc.).
 
+### Zero-Code Activation (no source changes at all)
+
+You don't even need to add an import line. Run **any** existing script with trickle instrumentation from the outside:
+
+**JavaScript** — use Node's `-r` flag:
+```bash
+node -r trickle/auto app.js
+```
+
+This installs all hooks BEFORE your app loads, so even the entry file's functions are instrumented (unlike `require('trickle/auto')` from within the file).
+
+**Conditional activation** — use `trickle/auto-env` to activate only when `TRICKLE_AUTO=1`:
+```bash
+# Always loaded, but only activates when TRICKLE_AUTO=1
+NODE_OPTIONS="--require trickle/auto-env" node app.js
+
+# Activate:
+TRICKLE_AUTO=1 node app.js
+```
+
+**Python** — use the `trickle.auto_run` module:
+```bash
+python -m trickle.auto_run app.py [args...]
+```
+
+This sets up `sys.argv` correctly so your script sees itself as `argv[0]`, then pre-imports `trickle.auto` before executing your script. All functions (entry file + imported modules) are observed.
+
 **E2E tests:**
 ```bash
-# JavaScript
+# JavaScript (with require in source)
 npm run build --workspace=packages/client-js && node test-auto-require-e2e.js
 
-# Python (multi-file)
+# Python (multi-file, with import in source)
 PYTHONPATH=packages/client-python/src:. python test-auto-py-e2e.py
 
 # Python (single-file — entry file observation)
 PYTHONPATH=packages/client-python/src:. python test-auto-py-single-e2e.py
+
+# JavaScript (zero-code — no source changes)
+npm run build --workspace=packages/client-js && node test-zerocode-js-e2e.js
+
+# Python (zero-code — no source changes)
+PYTHONPATH=packages/client-python/src:. python test-zerocode-py-e2e.py
 ```
 
 ---
