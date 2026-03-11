@@ -813,3 +813,114 @@ def inject_python_types() -> int:
                 pass
 
     return total_injected
+
+
+# ── Type coverage report ──
+
+_PY_FUNC_RE = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(")
+
+
+def _extract_py_function_names(source: str) -> List[str]:
+    """Extract all function names from a Python source file."""
+    names: List[str] = []
+    for line in source.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        m = _PY_FUNC_RE.match(stripped)
+        if m:
+            name = m.group(1)
+            # Skip private/dunder functions
+            if not name.startswith("_"):
+                names.append(name)
+    return list(dict.fromkeys(names))  # deduplicate preserving order
+
+
+def generate_coverage_report() -> Optional[str]:
+    """Generate a type coverage report comparing observed types vs all functions in source.
+
+    Only runs when TRICKLE_COVERAGE=1.
+    Returns a formatted report string, or None.
+    """
+    if os.environ.get("TRICKLE_COVERAGE") != "1":
+        return None
+
+    local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+    jsonl_path = os.path.join(local_dir, "observations.jsonl")
+    if not os.path.exists(jsonl_path):
+        return None
+
+    try:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None
+
+    lines_raw = [l for l in content.strip().split("\n") if l.strip()]
+
+    # Collect observed functions per module
+    observed_by_module: Dict[str, set] = {}
+    for line in lines_raw:
+        try:
+            payload = json.loads(line)
+            fn_name = payload.get("functionName")
+            mod = payload.get("module", "")
+            if fn_name and mod:
+                observed_by_module.setdefault(mod, set()).add(fn_name)
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    if not observed_by_module:
+        return None
+
+    entries: List[Dict[str, Any]] = []
+    total_all = 0
+    typed_all = 0
+
+    for mod, observed_names in observed_by_module.items():
+        source_file = _find_source_file(mod)
+        if not source_file or not source_file.endswith(".py"):
+            continue
+
+        try:
+            with open(source_file, "r", encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            continue
+
+        all_functions = _extract_py_function_names(source)
+        if not all_functions:
+            continue
+
+        typed = [n for n in all_functions if n in observed_names]
+        untyped = [n for n in all_functions if n not in observed_names]
+
+        total_all += len(all_functions)
+        typed_all += len(typed)
+
+        rel_path = os.path.relpath(source_file)
+        entries.append({
+            "file": rel_path,
+            "total": len(all_functions),
+            "typed": len(typed),
+            "untyped": untyped,
+        })
+
+    if not entries:
+        return None
+
+    # Sort: incomplete files first
+    entries.sort(key=lambda e: e["typed"] / max(e["total"], 1))
+
+    report_lines: List[str] = ["[trickle.auto] Type coverage:"]
+    for entry in entries:
+        pct = round(entry["typed"] / entry["total"] * 100) if entry["total"] > 0 else 0
+        marker = " \u2713" if pct == 100 else ""
+        report_lines.append(f"  {entry['file']}: {entry['typed']}/{entry['total']} ({pct}%){marker}")
+        if entry["untyped"]:
+            report_lines.append(f"    Untyped: {', '.join(entry['untyped'])}")
+
+    total_pct = round(typed_all / total_all * 100) if total_all > 0 else 0
+    report_lines.append(f"  Total: {typed_all}/{total_all} functions ({total_pct}%)")
+
+    return "\n".join(report_lines)

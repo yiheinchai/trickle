@@ -64,6 +64,7 @@ trickle dev
 - [Zero-Config Auto-Typing (`trickle/auto` / `trickle.auto`)](#zero-config-auto-typing-trickleauto--trickleauto)
   - [Zero-Code Activation (no source changes)](#zero-code-activation-no-source-changes-at-all)
   - [Auto Type Injection (`TRICKLE_INJECT=1`)](#auto-type-injection-trickle_inject1)
+  - [Type Coverage Report (`TRICKLE_COVERAGE=1`)](#type-coverage-report-trickle_coverage1)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3369,6 +3370,36 @@ def calculate_tax(amount: float, rate: float) -> dict:
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-inject-e2e.js
+```
+
+### Type Coverage Report (`TRICKLE_COVERAGE=1`)
+
+See exactly which functions have runtime types and which are still untyped. Set `TRICKLE_COVERAGE=1` and trickle prints a coverage summary on exit showing per-file stats and listing untyped functions by name.
+
+**JavaScript:**
+```bash
+TRICKLE_COVERAGE=1 node -r trickle/auto app.js
+```
+
+**Python:**
+```bash
+TRICKLE_COVERAGE=1 python -c "import trickle.auto" && python app.py
+```
+
+Example output:
+```
+[trickle/auto] Type coverage:
+  utils.js: 5/5 (100%) ✓
+  api.js: 3/9 (33%)
+    Untyped: handleAuth, validateToken, refreshSession, parseHeaders, buildQuery, retryRequest
+  Total: 8/14 functions (57%)
+```
+
+This tells you exactly which code paths to exercise to get complete types. Run more of your app (or your test suite) to increase coverage.
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-auto-coverage-e2e.js
 ```
 
 ---

@@ -21,7 +21,7 @@ process.env.TRICKLE_LOCAL = '1';
 import './observe-register';
 
 // Import the auto codegen
-import { generateTypes, injectTypes } from './auto-codegen';
+import { generateTypes, injectTypes, generateCoverageReport } from './auto-codegen';
 
 const debug = process.env.TRICKLE_DEBUG === '1' || process.env.TRICKLE_DEBUG === 'true';
 let lastFunctionCount = 0;
@@ -55,6 +55,11 @@ function runGeneration(isFinal: boolean): void {
         if (injected > 0) {
           console.log(`[trickle/auto] ${injected} function(s) annotated with JSDoc in source`);
         }
+      } catch { /* don't crash */ }
+      // Print coverage report if TRICKLE_COVERAGE=1
+      try {
+        const report = generateCoverageReport();
+        if (report) console.log(report);
       } catch { /* don't crash */ }
     }
   } catch {

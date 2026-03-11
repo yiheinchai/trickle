@@ -60,7 +60,7 @@ configure({
 });
 
 // Start background codegen
-const { generateTypes, injectTypes } = require(join(__dirname, 'dist', 'auto-codegen.js'));
+const { generateTypes, injectTypes, generateCoverageReport } = require(join(__dirname, 'dist', 'auto-codegen.js'));
 
 let lastFunctionCount = 0;
 let generationCount = 0;
@@ -88,6 +88,10 @@ function runGeneration(isFinal) {
         if (injected > 0) {
           console.log(`[trickle/auto-esm] ${injected} function(s) annotated with JSDoc in source`);
         }
+      } catch { /* don't crash */ }
+      try {
+        const report = generateCoverageReport();
+        if (report) console.log(report);
       } catch { /* don't crash */ }
     }
   } catch {

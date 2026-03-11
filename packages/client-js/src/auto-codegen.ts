@@ -604,6 +604,122 @@ export function generateTypes(): number {
   return totalFunctions;
 }
 
+// ── Type coverage report ──
+
+const jsFuncDeclRe = /^(?:export\s+)?(?:async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/;
+const jsArrowRe = /^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\(/;
+const jsMethodRe = /^\s+(\w+)\s*\([^)]*\)\s*\{/;
+
+function extractFunctionNames(source: string, ext: string): string[] {
+  const names: string[] = [];
+  const lines = source.split('\n');
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    // Skip comments
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+    let m = trimmed.match(jsFuncDeclRe);
+    if (m && m[1] !== 'constructor') { names.push(m[1]); continue; }
+    m = trimmed.match(jsArrowRe);
+    if (m) { names.push(m[1]); continue; }
+    // Methods only for class-based files
+    m = trimmed.match(jsMethodRe);
+    if (m && m[1] !== 'constructor' && m[1] !== 'if' && m[1] !== 'for' && m[1] !== 'while' && m[1] !== 'switch' && m[1] !== 'catch') {
+      names.push(m[1]);
+    }
+  }
+  return [...new Set(names)];
+}
+
+interface CoverageEntry {
+  file: string;
+  total: number;
+  typed: number;
+  untyped: string[];
+}
+
+/**
+ * Generate a type coverage report comparing observed types against
+ * all function declarations found in source files.
+ * Only runs when TRICKLE_COVERAGE=1.
+ */
+export function generateCoverageReport(): string | null {
+  if (process.env.TRICKLE_COVERAGE !== '1') return null;
+
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const jsonlPath = path.join(trickleDir, 'observations.jsonl');
+  if (!fs.existsSync(jsonlPath)) return null;
+
+  const functions = readAndMerge(jsonlPath);
+  if (functions.length === 0) return null;
+
+  // Group observed functions by module
+  const observedByModule = new Map<string, Set<string>>();
+  for (const fn of functions) {
+    const mod = fn.module || '_default';
+    if (!observedByModule.has(mod)) observedByModule.set(mod, new Set());
+    observedByModule.get(mod)!.add(fn.name);
+  }
+
+  const entries: CoverageEntry[] = [];
+  let totalAll = 0;
+  let typedAll = 0;
+
+  for (const [mod, observedNames] of observedByModule) {
+    // Skip HTTP route observations
+    if (mod.includes('.') && !mod.includes('/') && !mod.includes('\\')) continue;
+
+    const sourceFile = findSourceFile(mod);
+    if (!sourceFile) continue;
+
+    let source: string;
+    try {
+      source = fs.readFileSync(sourceFile, 'utf-8');
+    } catch { continue; }
+
+    const ext = path.extname(sourceFile);
+    const allFunctions = extractFunctionNames(source, ext);
+    if (allFunctions.length === 0) continue;
+
+    const typed = allFunctions.filter(n => observedNames.has(n));
+    const untyped = allFunctions.filter(n => !observedNames.has(n));
+
+    totalAll += allFunctions.length;
+    typedAll += typed.length;
+
+    const relPath = path.relative(process.cwd(), sourceFile);
+    entries.push({
+      file: relPath,
+      total: allFunctions.length,
+      typed: typed.length,
+      untyped,
+    });
+  }
+
+  if (entries.length === 0) return null;
+
+  // Sort: incomplete files first, then by coverage
+  entries.sort((a, b) => {
+    const aRatio = a.typed / a.total;
+    const bRatio = b.typed / b.total;
+    return aRatio - bRatio;
+  });
+
+  const lines: string[] = ['[trickle/auto] Type coverage:'];
+  for (const entry of entries) {
+    const pct = Math.round((entry.typed / entry.total) * 100);
+    const marker = pct === 100 ? ' ✓' : '';
+    lines.push(`  ${entry.file}: ${entry.typed}/${entry.total} (${pct}%)${marker}`);
+    if (entry.untyped.length > 0) {
+      lines.push(`    Untyped: ${entry.untyped.join(', ')}`);
+    }
+  }
+  const totalPct = totalAll > 0 ? Math.round((typedAll / totalAll) * 100) : 0;
+  lines.push(`  Total: ${typedAll}/${totalAll} functions (${totalPct}%)`);
+
+  return lines.join('\n');
+}
+
 /**
  * Try to find the source file for a given module name.
  */
