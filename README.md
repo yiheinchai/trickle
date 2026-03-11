@@ -43,6 +43,7 @@ trickle dev
 - [API Audit](#api-audit)
 - [Pydantic Models](#pydantic-models)
 - [NestJS DTOs (class-validator)](#nestjs-dtos-class-validator)
+- [API Capture](#api-capture)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1957,6 +1958,51 @@ node test-class-validator-e2e.js
 
 ---
 
+## API Capture
+
+Capture types from any live API endpoint — no code changes or instrumentation needed. Just point `trickle capture` at a URL and the response types flow into your type system.
+
+```bash
+# Capture a GET endpoint
+trickle capture GET https://api.example.com/users
+
+# Capture a POST with body
+trickle capture POST https://api.example.com/users -d '{"name":"Alice","email":"alice@test.com"}'
+
+# With custom headers (e.g. auth)
+trickle capture GET https://api.example.com/me -H "Authorization: Bearer tok_abc123"
+
+# With environment and module labels
+trickle capture GET https://api.example.com/users --env production --module user-api
+```
+
+The command:
+- Makes the HTTP request to the target URL
+- Infers TypeNode from the JSON response (and request body if provided)
+- Normalizes dynamic path segments (e.g. `/users/42` → `/users/:id`)
+- Captures query parameters as typed args
+- Sends the observation to the trickle backend
+
+After capturing, use `trickle codegen` to generate type definitions from the captured data:
+
+```bash
+trickle capture GET https://api.example.com/users
+trickle capture POST https://api.example.com/users -d '{"name":"Alice"}'
+trickle codegen  # Now includes types for both routes
+```
+
+This is useful for:
+- **Third-party APIs**: Get types for APIs you don't control by capturing real responses
+- **Quick exploration**: Hit a few endpoints and instantly get TypeScript types
+- **Migration**: Capture types from an existing API before rewriting it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-capture-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2242,6 +2288,23 @@ npx trickle audit --fail-on-warning  # Exit 1 on errors or warnings
 | `--json` | Output raw JSON |
 | `--fail-on-error` | Exit 1 if any errors are found |
 | `--fail-on-warning` | Exit 1 if any errors or warnings are found |
+
+### `trickle capture <method> <url>`
+
+Capture types from a live API endpoint.
+
+```bash
+npx trickle capture GET https://api.example.com/users
+npx trickle capture POST https://api.example.com/users -d '{"name":"Alice"}'
+npx trickle capture GET https://api.example.com/me -H "Authorization: Bearer tok"
+```
+
+| Flag | Description |
+|------|-------------|
+| `-H, --header <header...>` | HTTP headers |
+| `-d, --body <body>` | Request body (JSON) |
+| `--env <env>` | Environment label (default: development) |
+| `--module <module>` | Module label (default: capture) |
 
 ### `trickle replay`
 
@@ -2574,6 +2637,7 @@ trickle/
 ├── test-audit-e2e.js        # API quality audit test
 ├── test-pydantic-e2e.js     # Pydantic model generation test
 ├── test-class-validator-e2e.js # NestJS class-validator DTO test
+├── test-capture-e2e.js     # API capture (live endpoint) test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2633,6 +2697,7 @@ node test-swr-e2e.js          # SWR hook generation
 node test-audit-e2e.js        # API quality audit
 node test-pydantic-e2e.js     # Pydantic model generation
 node test-class-validator-e2e.js # NestJS class-validator DTOs
+node test-capture-e2e.js     # API capture (live endpoint)
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

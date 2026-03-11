@@ -22,6 +22,7 @@ import { replayCommand } from "./commands/replay";
 import { docsCommand } from "./commands/docs";
 import { sampleCommand } from "./commands/sample";
 import { auditCommand } from "./commands/audit";
+import { captureCommand } from "./commands/capture";
 
 const program = new Command();
 
@@ -264,6 +265,18 @@ program
   .option("--fail-on-warning", "Exit 1 if any errors or warnings are found")
   .action(async (opts) => {
     await auditCommand(opts);
+  });
+
+// trickle capture <method> <url>
+program
+  .command("capture <method> <url>")
+  .description("Capture types from a live API endpoint — no instrumentation needed")
+  .option("-H, --header <header...>", "HTTP headers (e.g. -H 'Authorization: Bearer token')")
+  .option("-d, --body <body>", "Request body (JSON string)")
+  .option("--env <env>", "Environment label (default: development)")
+  .option("--module <module>", "Module label (default: capture)")
+  .action(async (method: string, url: string, opts) => {
+    await captureCommand(method, url, opts);
   });
 
 // Handle unhandled rejections
