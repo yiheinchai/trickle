@@ -52,6 +52,7 @@ trickle dev
 - [API Validation](#api-validation)
 - [Live Watch Mode](#live-watch-mode)
 - [Type Inference from JSON](#type-inference-from-json)
+- [API Overview](#api-overview)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2449,6 +2450,48 @@ node test-infer-e2e.js
 
 ---
 
+## API Overview
+
+Get a complete, scannable picture of your entire API surface with one command. Shows all routes with inline type signatures — like `git log --oneline` for your API.
+
+```bash
+trickle overview
+
+#   trickle overview
+#   ────────────────────────────────────────────────────────────
+#   5 routes observed
+#   ────────────────────────────────────────────────────────────
+#
+#   GET    /api/users     → { users: {id, name, email}[], total: number }  2h ago
+#   GET    /api/orders    → { orders: {orderId, status}[], page: number }  1h ago
+#   POST   /api/users     → { id: number, created: boolean }              2h ago
+#                          ← { body: {name, email} }
+#   PUT    /api/users/:id → { id: number, updated: boolean }              30m ago
+#                          ← { body: {name} }
+#   DELETE /api/users/:id → { deleted: boolean }                          30m ago
+#
+#   5 routes, 14 fields observed · http://localhost:4888
+```
+
+Routes are color-coded by method (GET=green, POST=yellow, PUT=blue, DELETE=red), sorted logically, and grouped by module when you have multiple services.
+
+```bash
+# JSON output for scripting
+trickle overview --json
+
+# Filter by environment
+trickle overview --env production
+```
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-overview-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2835,6 +2878,21 @@ curl -s https://example.com/api | npx trickle infer --name "GET /api/data"
 | `--module <module>` | Module label (default: infer) |
 | `--request-body <json>` | Example request body JSON |
 
+### `trickle overview`
+
+Compact API overview — all routes with inline type signatures.
+
+```bash
+npx trickle overview              # Show all routes with types
+npx trickle overview --json       # JSON output for scripting
+npx trickle overview --env prod   # Filter by environment
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--json` | Output raw JSON |
+
 ### `trickle replay`
 
 Replay captured API requests as regression tests.
@@ -3175,6 +3233,7 @@ trickle/
 ├── test-validate-e2e.js    # API validation test
 ├── test-watch-e2e.js       # Live watch mode test
 ├── test-infer-e2e.js       # JSON type inference test
+├── test-overview-e2e.js    # API overview test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3243,6 +3302,7 @@ node test-auto-e2e.js        # Auto-detect & generate
 node test-validate-e2e.js    # API validation
 node test-watch-e2e.js       # Live watch mode
 node test-infer-e2e.js       # JSON type inference
+node test-overview-e2e.js    # API overview
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

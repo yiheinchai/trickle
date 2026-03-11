@@ -28,6 +28,7 @@ import { autoCommand } from "./commands/auto";
 import { validateCommand } from "./commands/validate";
 import { watchCommand } from "./commands/watch";
 import { inferCommand } from "./commands/infer";
+import { overviewCommand } from "./commands/overview";
 
 const program = new Command();
 
@@ -340,6 +341,16 @@ program
   .option("--request-body <json>", "Example request body JSON (for documenting input types)")
   .action(async (file: string | undefined, opts) => {
     await inferCommand(file, opts);
+  });
+
+// trickle overview
+program
+  .command("overview")
+  .description("Compact API overview — all routes with inline type signatures")
+  .option("--env <env>", "Filter by environment")
+  .option("--json", "Output raw JSON")
+  .action(async (opts) => {
+    await overviewCommand(opts);
   });
 
 // Handle unhandled rejections
