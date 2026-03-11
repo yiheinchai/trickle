@@ -20,6 +20,7 @@ import { exportCommand } from "./commands/export";
 import { coverageCommand } from "./commands/coverage";
 import { replayCommand } from "./commands/replay";
 import { docsCommand } from "./commands/docs";
+import { sampleCommand } from "./commands/sample";
 
 const program = new Command();
 
@@ -234,6 +235,16 @@ program
   .option("--title <title>", "Documentation title", "API Documentation")
   .action(async (opts) => {
     await docsCommand(opts);
+  });
+
+// trickle sample [route]
+program
+  .command("sample [route]")
+  .description("Generate test fixtures and factory functions from observed runtime data")
+  .option("-f, --format <format>", "Output format: json, ts, or factory (default: json)")
+  .option("-o, --out <path>", "Write fixtures to a file")
+  .action(async (route: string | undefined, opts) => {
+    await sampleCommand(route, opts);
   });
 
 // Handle unhandled rejections

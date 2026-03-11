@@ -35,6 +35,7 @@ trickle dev
 - [Type Coverage Report](#type-coverage-report)
 - [API Replay Testing](#api-replay-testing)
 - [API Documentation Generation](#api-documentation-generation)
+- [Test Fixtures](#test-fixtures)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1399,6 +1400,73 @@ node test-docs-e2e.js
 
 ---
 
+## Test Fixtures
+
+Generate test fixtures, TypeScript constants, and factory functions from actual runtime data captured by trickle. No more manually crafting mock data for tests.
+
+```bash
+# JSON format (default) — pipe to jq or save
+npx trickle sample
+npx trickle sample --out fixtures.json
+
+# TypeScript constants with "as const"
+npx trickle sample --format ts --out .trickle/fixtures.ts
+
+# Factory functions with overrides
+npx trickle sample --format factory --out .trickle/factories.ts
+
+# Filter by route
+npx trickle sample users                     # Only user routes
+npx trickle sample "POST /api"               # Only POST routes
+```
+
+Three output formats:
+
+**JSON** — raw sample data keyed by route:
+```json
+{
+  "GET /api/users": {
+    "response": { "users": [{ "id": 1, "name": "Alice" }], "total": 1 }
+  },
+  "POST /api/users": {
+    "request": { "name": "Bob", "email": "bob@test.com" },
+    "response": { "id": 2, "name": "Bob", "created": true }
+  }
+}
+```
+
+**TypeScript constants** (`--format ts`) — typed constants with `as const`:
+```typescript
+export const getApiUsersResponse = {
+  users: [{ id: 1, name: "Alice", email: "alice@test.com" }],
+  total: 1
+} as const;
+
+export const postApiUsersRequest = {
+  name: "Bob",
+  email: "bob@test.com"
+} as const;
+```
+
+**Factory functions** (`--format factory`) — customizable fixtures:
+```typescript
+export function createGetApiUsersResponse(
+  overrides?: Partial<typeof _getApiUsersResponse>
+): typeof _getApiUsersResponse {
+  return { ..._getApiUsersResponse, ...overrides };
+}
+
+// Usage in tests:
+const data = createGetApiUsersResponse({ total: 5 });
+```
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-sample-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1690,6 +1758,22 @@ npx trickle docs --title "My API" --env production
 | `--env <env>` | Filter by environment |
 | `--title <title>` | Documentation title (default: "API Documentation") |
 
+### `trickle sample [route]`
+
+Generate test fixtures from observed runtime data.
+
+```bash
+npx trickle sample                              # JSON to stdout
+npx trickle sample --format ts --out fixtures.ts # TypeScript constants
+npx trickle sample --format factory              # Factory functions
+npx trickle sample users                         # Filter by route
+```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --format <format>` | Output format: `json`, `ts`, or `factory` (default: `json`) |
+| `-o, --out <path>` | Write fixtures to a file |
+
 ### `trickle dashboard`
 
 Open the web dashboard to explore observed types visually.
@@ -1961,6 +2045,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-sample-e2e.js      # Test fixture generation test
 ├── test-guards-e2e.js      # Type guard generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
@@ -2012,6 +2097,7 @@ node test-dashboard-e2e.js   # Web dashboard
 node test-export-e2e.js      # Export all formats
 node test-coverage-e2e.js    # Type coverage report
 node test-replay-e2e.js      # API replay regression tests
+node test-sample-e2e.js      # Test fixture generation
 node test-guards-e2e.js      # Type guard generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
