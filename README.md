@@ -16,6 +16,7 @@ trickle dev
 
 - [Quick Start](#quick-start)
 - [Dev Mode](#dev-mode)
+- [Proxy Mode (Zero-Change)](#proxy-mode-zero-change)
 - [Zero-Code Instrumentation](#zero-code-instrumentation)
 - [One-Liner Instrumentation](#one-liner-instrumentation)
 - [Manual Instrumentation](#manual-instrumentation)
@@ -91,6 +92,7 @@ npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
+npx trickle proxy -t http://localhost:3000  # Zero-change type capture
 npx trickle dashboard            # Open web dashboard
 npx trickle tail                 # Live stream of events
 ```
@@ -158,6 +160,55 @@ Or run the dedicated E2E test:
 
 ```bash
 node test-dev-e2e.js
+```
+
+---
+
+## Proxy Mode (Zero-Change)
+
+The absolute easiest way to use trickle — **no code changes to your backend at all**. Not even a flag. Just run a proxy:
+
+```bash
+trickle proxy --target http://localhost:3000
+```
+
+This starts a transparent reverse proxy on port 4000 that:
+1. Forwards all requests to your backend
+2. Captures request/response JSON shapes
+3. Sends type observations to the trickle backend
+4. Works with **any** backend language or framework
+
+Point your frontend (or curl) at `http://localhost:4000` instead of `http://localhost:3000`. Types appear automatically.
+
+### Features
+
+- **Any backend**: Works with Node.js, Python, Go, Java, Ruby, Rust — anything that speaks HTTP + JSON
+- **Path normalization**: `/api/users/123` is automatically normalized to `/api/users/:id`
+- **Smart filtering**: Static assets (`.js`, `.css`, `.png`, etc.) are ignored
+- **Request body capture**: POST/PUT/PATCH request bodies are typed
+- **Query params**: URL query parameters are captured
+- **Zero overhead to backend**: The proxy adds no latency to the backend itself
+
+```
+Frontend ──→ trickle proxy (:4000) ──→ Your backend (:3000)
+                    │
+                    └──→ trickle backend (:4888)
+                              ↓
+                         types.d.ts
+```
+
+### Use cases
+
+- **Third-party APIs**: Capture types from APIs you don't control
+- **Microservices**: Type-capture a service without modifying its code
+- **Legacy apps**: Add type observability to apps you can't easily instrument
+- **Any language**: Your backend doesn't need to be Node.js or Python
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-proxy-e2e.js
 ```
 
 ---
@@ -1306,6 +1357,20 @@ npx trickle mock --no-cors
 | `-p, --port <port>` | Port to listen on (default: 3000) |
 | `--no-cors` | Disable CORS headers |
 
+### `trickle proxy`
+
+Transparent reverse proxy that captures API types without any backend code changes.
+
+```bash
+npx trickle proxy --target http://localhost:3000              # Proxy on :4000
+npx trickle proxy --target http://localhost:3000 --port 8080  # Custom proxy port
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t, --target <url>` | Target server URL (required) |
+| `-p, --port <port>` | Proxy server port (default: 4000) |
+
 ### `trickle dashboard`
 
 Open the web dashboard to explore observed types visually.
@@ -1507,6 +1572,7 @@ TypeNode =
 │  codegen         │  TypeScript/Python/client/hooks/zod gen  │
 │  mock            │  mock API server from observed types    │
 │  diff            │  cross-function type drift report       │
+│  proxy           │  zero-change type capture via proxy      │
 │  dashboard       │  live web UI for exploring types         │
 │  test            │  generate API tests from observations   │
 │  check           │  breaking change detection (CI-ready)   │
@@ -1575,6 +1641,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-proxy-e2e.js       # Transparent proxy type capture test
 ├── test-dashboard-e2e.js   # Web dashboard test
 ├── test-test-gen-e2e.js    # API test generation test
 ├── test-react-query-e2e.js # React Query hook generation test
@@ -1616,6 +1683,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-proxy-e2e.js       # Transparent proxy type capture
 node test-dashboard-e2e.js   # Web dashboard
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

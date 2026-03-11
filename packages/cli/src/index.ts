@@ -15,6 +15,7 @@ import { checkCommand } from "./commands/check";
 import { devCommand } from "./commands/dev";
 import { testGenCommand } from "./commands/test-gen";
 import { dashboardCommand } from "./commands/dashboard";
+import { proxyCommand } from "./commands/proxy";
 
 const program = new Command();
 
@@ -172,6 +173,16 @@ program
   .description("Open the trickle web dashboard to explore observed types visually")
   .action(async () => {
     await dashboardCommand();
+  });
+
+// trickle proxy
+program
+  .command("proxy")
+  .description("Transparent reverse proxy that captures API types without any backend code changes")
+  .requiredOption("-t, --target <url>", "Target server URL to proxy to (e.g. http://localhost:3000)")
+  .option("-p, --port <port>", "Port for the proxy server", "4000")
+  .action(async (opts) => {
+    await proxyCommand(opts);
   });
 
 // Handle unhandled rejections
