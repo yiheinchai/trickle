@@ -40,7 +40,16 @@ def main() -> None:
     sys.argv = sys.argv[1:]
 
     if target.endswith(".py"):
-        runpy.run_path(target, run_name="__main__")
+        # Use AST transformation to observe entry file functions
+        try:
+            from trickle._entry_transform import run_entry_with_observation
+            run_entry_with_observation(target)
+        except Exception as exc:
+            if _debug:
+                import traceback
+                print(f"[trickle] Entry transform failed, falling back to runpy: {exc}")
+                traceback.print_exc()
+            runpy.run_path(target, run_name="__main__")
     else:
         runpy.run_module(target, run_name="__main__", alter_sys=True)
 

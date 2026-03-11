@@ -224,6 +224,9 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
 
 **Deep observation** — trickle doesn't just capture exported functions. It observes ALL function declarations in your code, including functions defined in the entry file and non-exported internal helpers. No blind spots.
 
+- **JavaScript**: `Module._compile` hook transforms source to wrap all function declarations
+- **Python**: AST transformation wraps entry file functions; `builtins.__import__` hook wraps imported module functions
+
 **HTTP response types** — trickle automatically captures types from HTTP calls in both JavaScript and Python. When your code calls an external API, trickle infers the response type and captures it alongside function types:
 
 - **JavaScript**: Patches `global.fetch()` to capture JSON response types
@@ -246,6 +249,7 @@ node test-esm-e2e.js      # ESM test
 node test-deep-e2e.js     # Deep observation (entry file + non-exported functions)
 node test-fetch-e2e.js    # JS HTTP fetch response type capture
 node test-py-http-e2e.js  # Python HTTP requests type capture
+node test-py-deep-e2e.js  # Python entry file deep observation
 ```
 
 ---
