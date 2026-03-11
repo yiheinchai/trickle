@@ -17,6 +17,7 @@ import { testGenCommand } from "./commands/test-gen";
 import { dashboardCommand } from "./commands/dashboard";
 import { proxyCommand } from "./commands/proxy";
 import { exportCommand } from "./commands/export";
+import { coverageCommand } from "./commands/coverage";
 
 const program = new Command();
 
@@ -194,6 +195,18 @@ program
   .option("--env <env>", "Filter by environment")
   .action(async (opts) => {
     await exportCommand(opts);
+  });
+
+// trickle coverage
+program
+  .command("coverage")
+  .description("Type observation health report — coverage, staleness, variants, and overall score")
+  .option("--env <env>", "Filter by environment")
+  .option("--json", "Output raw JSON (for CI integration)")
+  .option("--fail-under <score>", "Exit 1 if health score is below this threshold (0-100)")
+  .option("--stale-hours <hours>", "Hours before a function is considered stale (default: 24)")
+  .action(async (opts) => {
+    await coverageCommand(opts);
   });
 
 // Handle unhandled rejections

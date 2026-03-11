@@ -31,6 +31,7 @@ trickle dev
 - [Breaking Change Detection](#breaking-change-detection)
 - [Web Dashboard](#web-dashboard)
 - [Export All](#export-all)
+- [Type Coverage Report](#type-coverage-report)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1192,6 +1193,65 @@ node test-export-e2e.js
 
 ---
 
+## Type Coverage Report
+
+See how well your API is covered by runtime type observations. Shows per-function health, staleness, type variants, and an overall score — useful as a CI gate.
+
+```bash
+# Interactive report
+npx trickle coverage
+
+# JSON output for CI
+npx trickle coverage --json
+
+# Fail CI if health drops below 80%
+npx trickle coverage --fail-under 80
+
+# Filter by environment
+npx trickle coverage --env production
+
+# Custom staleness threshold (default: 24 hours)
+npx trickle coverage --stale-hours 48
+```
+
+Example output:
+```
+  trickle coverage
+  ────────────────────────────────────────────────────────────
+  Stale threshold: 24h
+  ────────────────────────────────────────────────────────────
+
+  Health: ████████████████████ 100%
+
+  Summary
+  4 functions observed
+  4 with types  0 without
+  4 fresh  0 stale
+
+  Functions
+  ────────────────────────────────────────────────────────────
+  ✓ GET /api/users    1 snap  100%
+  ✓ POST /api/users   1 snap  100%
+  ✓ GET /api/products  1 snap  100%
+  ✓ GET /api/health   1 snap  100%
+  ────────────────────────────────────────────────────────────
+```
+
+Health scoring per function:
+- **60 pts** — has type observations
+- **20 pts** — observed recently (not stale)
+- **10 pts** — no errors
+- **10 pts** — consistent types (single variant, no conflicting shapes)
+
+The `--fail-under` flag is perfect for CI pipelines — ensures your API maintains type coverage before deploying.
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-coverage-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1427,6 +1487,24 @@ npx trickle export --env production # Filter by environment
 |------|-------------|
 | `-d, --dir <path>` | Output directory (default: `.trickle`) |
 | `--env <env>` | Filter by environment |
+
+### `trickle coverage`
+
+Type observation health report with per-function stats.
+
+```bash
+npx trickle coverage                 # Interactive report
+npx trickle coverage --json          # JSON for CI
+npx trickle coverage --fail-under 80 # CI gate
+npx trickle coverage --env production --stale-hours 48
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--json` | Output raw JSON |
+| `--fail-under <score>` | Exit 1 if health is below threshold (0-100) |
+| `--stale-hours <hours>` | Hours before a function is considered stale (default: 24) |
 
 ### `trickle dashboard`
 
@@ -1699,6 +1777,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-coverage-e2e.js    # Type coverage report test
 ├── test-export-e2e.js      # Export all formats test
 ├── test-dashboard-e2e.js   # Web dashboard test
 ├── test-test-gen-e2e.js    # API test generation test
@@ -1744,6 +1823,7 @@ node test-check-e2e.js       # Breaking change detection
 node test-proxy-e2e.js       # Transparent proxy type capture
 node test-dashboard-e2e.js   # Web dashboard
 node test-export-e2e.js      # Export all formats
+node test-coverage-e2e.js    # Type coverage report
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation
