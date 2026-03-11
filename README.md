@@ -51,6 +51,7 @@ trickle dev
 - [Auto-Detect & Generate](#auto-detect--generate)
 - [API Validation](#api-validation)
 - [Live Watch Mode](#live-watch-mode)
+- [Type Inference from JSON](#type-inference-from-json)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2398,6 +2399,56 @@ node test-watch-e2e.js
 
 ---
 
+## Type Inference from JSON
+
+Infer and store types from any JSON source — files, stdin, or piped command output. No live API needed. Works with saved Postman responses, test fixtures, API documentation examples, or any JSON data.
+
+```bash
+# From a saved API response file
+trickle infer response.json --name "GET /api/users"
+
+# From stdin — pipe from curl, jq, or any command
+curl -s https://api.example.com/users | trickle infer --name "GET /api/users"
+
+# From a test fixture with request body documentation
+trickle infer order-response.json \
+  --name "POST /api/orders" \
+  --request-body '{"product":"Widget","quantity":3}'
+
+# From jq output
+cat large-response.json | jq '.data' | trickle infer --name "GET /api/data"
+```
+
+The infer command:
+1. Reads JSON from a file or stdin
+2. Infers a full TypeNode type tree from the data
+3. Stores the observation in the trickle backend
+4. Shows a preview of the inferred type shape
+
+Use `-` as the file argument to explicitly read from stdin, or just omit the file when piping.
+
+**Use cases:**
+- **Offline development** — capture types from saved API responses without a running server
+- **API documentation** — infer types from example responses in API docs
+- **Test fixtures** — ensure your test fixtures match expected type shapes
+- **Migration** — capture types from a legacy API's saved responses before rewriting
+
+```bash
+# After inferring, generate type definitions as usual
+trickle infer users.json --name "GET /api/users"
+trickle codegen          # types include GET /api/users
+trickle codegen --zod    # Zod schemas include the route
+```
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-infer-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2767,6 +2818,23 @@ npx trickle watch -d src/generated   # Custom output directory
 | `--env <env>` | Filter by environment |
 | `--interval <interval>` | Poll interval (e.g., 3s, 500ms, 1m) |
 
+### `trickle infer [file]`
+
+Infer types from a JSON file or stdin — no live API needed.
+
+```bash
+npx trickle infer response.json --name "GET /api/users"
+cat data.json | npx trickle infer --name "GET /api/data"
+curl -s https://example.com/api | npx trickle infer --name "GET /api/data"
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --name <name>` | Function/route name (required) |
+| `--env <env>` | Environment label (default: development) |
+| `--module <module>` | Module label (default: infer) |
+| `--request-body <json>` | Example request body JSON |
+
 ### `trickle replay`
 
 Replay captured API requests as regression tests.
@@ -3106,6 +3174,7 @@ trickle/
 ├── test-auto-e2e.js        # Auto-detect & generate test
 ├── test-validate-e2e.js    # API validation test
 ├── test-watch-e2e.js       # Live watch mode test
+├── test-infer-e2e.js       # JSON type inference test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3173,6 +3242,7 @@ node test-axios-e2e.js       # Axios client generation
 node test-auto-e2e.js        # Auto-detect & generate
 node test-validate-e2e.js    # API validation
 node test-watch-e2e.js       # Live watch mode
+node test-infer-e2e.js       # JSON type inference
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

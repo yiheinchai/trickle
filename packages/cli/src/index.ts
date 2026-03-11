@@ -27,6 +27,7 @@ import { searchCommand } from "./commands/search";
 import { autoCommand } from "./commands/auto";
 import { validateCommand } from "./commands/validate";
 import { watchCommand } from "./commands/watch";
+import { inferCommand } from "./commands/infer";
 
 const program = new Command();
 
@@ -327,6 +328,18 @@ program
   .option("--interval <interval>", "Poll interval (e.g., 3s, 500ms, 1m)", "3s")
   .action(async (opts) => {
     await watchCommand(opts);
+  });
+
+// trickle infer [file]
+program
+  .command("infer [file]")
+  .description("Infer types from a JSON file or stdin — no live API needed")
+  .requiredOption("-n, --name <name>", "Function/route name (e.g., 'GET /api/users')")
+  .option("--env <env>", "Environment label (default: development)")
+  .option("--module <module>", "Module label (default: infer)")
+  .option("--request-body <json>", "Example request body JSON (for documenting input types)")
+  .action(async (file: string | undefined, opts) => {
+    await inferCommand(file, opts);
   });
 
 // Handle unhandled rejections
