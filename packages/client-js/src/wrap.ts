@@ -7,6 +7,9 @@ import { enqueue } from './transport';
 
 const typeCache = new TypeCache();
 
+/** Symbol to mark already-wrapped functions, preventing double-wrap. */
+const TRICKLE_WRAPPED = Symbol.for('__trickle_wrapped');
+
 /**
  * Wrap a function to capture runtime type information on each call.
  * The wrapper is completely transparent: same name, same length, same behavior.
@@ -14,6 +17,9 @@ const typeCache = new TypeCache();
  */
 export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: WrapOptions): T {
   if (!opts.enabled) return fn;
+
+  // Prevent double-wrapping (compile hook + load hook may both see the same function)
+  if ((fn as any)[TRICKLE_WRAPPED]) return fn;
 
   const functionKey = `${opts.module}::${opts.functionName}`;
 
@@ -92,6 +98,9 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
   // Preserve function name and length
   Object.defineProperty(wrapper, 'name', { value: fn.name || opts.functionName, configurable: true });
   Object.defineProperty(wrapper, 'length', { value: fn.length, configurable: true });
+
+  // Mark as wrapped to prevent double-wrapping
+  (wrapper as any)[TRICKLE_WRAPPED] = true;
 
   return wrapper as unknown as T;
 }

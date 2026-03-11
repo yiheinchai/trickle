@@ -213,7 +213,7 @@ Config can also live in `package.json` under the `"trickle"` key. CLI flags alwa
 
 Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for your project.
 
-**How it works:** Auto-detects CJS vs ESM. For CJS, injects `-r trickle/observe` (patches `Module._load`). For ESM, injects `--import trickle/observe-esm` (uses Node.js loader hooks to transform exports). For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
+**How it works:** Auto-detects CJS vs ESM. For CJS, injects `-r trickle/observe` which patches both `Module._compile` (transforms source code to wrap ALL function declarations) and `Module._load` (wraps exported functions). This means trickle captures **every function** in your code — entry file functions, non-exported helpers, and exports. For ESM, injects `--import trickle/observe-esm` (uses Node.js loader hooks to transform exports). For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
 
 | Flag | Description |
 |------|-------------|
@@ -222,11 +222,14 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
 | `--stubs <dir>` | Auto-generate `.d.ts` / `.pyi` stub files in `<dir>` after observation |
 | `--annotate <path>` | Auto-annotate source file(s) with JSDoc/TS/Python types after observation |
 
+**Deep observation** — trickle doesn't just capture exported functions. It observes ALL function declarations in your code, including functions defined in the entry file and non-exported internal helpers. No blind spots.
+
 **Test:**
 
 ```bash
 node test-run-e2e.js   # CJS test
 node test-esm-e2e.js   # ESM test
+node test-deep-e2e.js  # Deep observation (entry file + non-exported functions)
 ```
 
 ---
