@@ -2779,25 +2779,40 @@ Write runtime-observed types directly into your source files — no manual type 
 trickle run "node app.js"
 
 # Then annotate source files with observed types
-trickle annotate src/helpers.js
-trickle annotate src/utils.py
+trickle annotate src/helpers.js    # Adds JSDoc comments (valid JS)
+trickle annotate src/utils.ts      # Adds TypeScript annotations
+trickle annotate src/utils.py      # Adds Python type annotations
 ```
 
-**Before:**
+`trickle annotate` automatically picks the right annotation style based on the file extension:
+
+**JavaScript files (.js) → JSDoc comments** (file stays valid JS, IDEs understand it):
 ```javascript
+// Before
+function parseConfig(raw) {
+  return { host: raw.host, port: raw.port, debug: raw.debug };
+}
+
+// After trickle annotate
+/**
+ * @param {{ host: string; port: number; debug: boolean }} raw
+ * @returns {{ host: string; port: number; debug: boolean }}
+ */
 function parseConfig(raw) {
   return { host: raw.host, port: raw.port, debug: raw.debug };
 }
 ```
 
-**After `trickle annotate`:**
-```javascript
-function parseConfig(raw: { host: string; port: number; debug: boolean }): { host: string; port: number; debug: boolean } {
-  return { host: raw.host, port: raw.port, debug: raw.debug };
-}
+**TypeScript files (.ts) → inline type annotations:**
+```typescript
+// Before
+function parseConfig(raw) { ... }
+
+// After trickle annotate
+function parseConfig(raw: { host: string; port: number; debug: boolean }): { host: string; port: number; debug: boolean } { ... }
 ```
 
-Works for Python too:
+**Python files (.py) → type annotations:**
 ```python
 # Before
 def parse_config(raw):
@@ -2811,6 +2826,11 @@ def parse_config(raw: TypedDict("_", {"host": str, "port": float, "debug": bool}
 Use `--dry-run` to preview changes without modifying files:
 ```bash
 trickle annotate src/helpers.js --dry-run
+```
+
+Use `--jsdoc` to force JSDoc mode on any file (even `.ts`):
+```bash
+trickle annotate src/helpers.ts --jsdoc
 ```
 
 **E2E test:**
@@ -2884,11 +2904,12 @@ trickle stubs . --dry-run         # Preview without writing
 
 ### `trickle annotate <file>`
 
-Add runtime-observed type annotations directly into a source file.
+Add runtime-observed type annotations directly into a source file. Automatically picks the right style: JSDoc for `.js`, TypeScript for `.ts`, Python for `.py`.
 
 ```bash
-trickle annotate src/helpers.js       # JavaScript/TypeScript
-trickle annotate src/utils.py         # Python
+trickle annotate src/helpers.js       # JSDoc comments (valid JS)
+trickle annotate src/utils.ts         # TypeScript annotations
+trickle annotate src/utils.py         # Python type annotations
 trickle annotate src/helpers.js --dry-run  # Preview without writing
 ```
 
@@ -2896,6 +2917,7 @@ trickle annotate src/helpers.js --dry-run  # Preview without writing
 |------|-------------|
 | `--env <env>` | Filter by environment |
 | `--dry-run` | Preview changes without modifying the file |
+| `--jsdoc` | Force JSDoc comments (default for `.js` files) |
 
 ### `trickle run <command>`
 

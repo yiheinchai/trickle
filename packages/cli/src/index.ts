@@ -419,6 +419,7 @@ program
   .description("Add runtime-observed type annotations directly into source files")
   .option("--env <env>", "Filter by environment")
   .option("--dry-run", "Preview changes without modifying the file")
+  .option("--jsdoc", "Force JSDoc comments (default for .js files)")
   .action(async (file: string, opts) => {
     await annotateCommand(file, opts);
   });
