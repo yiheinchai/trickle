@@ -60,6 +60,7 @@ trickle dev
 - [Backend](#backend)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
+- [Hands-On Testing Guide](#hands-on-testing-guide)
 
 ---
 
@@ -3475,6 +3476,251 @@ node test-register-e2e.js    # Zero-code register hook
 
 # Python test:
 PYTHONPATH=packages/client-python/src python3 test-e2e.py
+```
+
+---
+
+## Hands-On Testing Guide
+
+A step-by-step walkthrough to try the core features yourself with a real Express app.
+
+### Prerequisites — Build and start the backend
+
+```bash
+cd /path/to/trickle
+npm run build
+cd packages/backend && npm start
+# [trickle] Backend listening on http://localhost:4888
+```
+
+Keep this terminal open. All commands below assume the backend is running.
+
+### Set up a demo app
+
+In a **new terminal**, create a small Express app:
+
+```bash
+mkdir -p /tmp/trickle-demo && cd /tmp/trickle-demo
+npm init -y
+npm install express
+```
+
+Create `/tmp/trickle-demo/app.js`:
+
+```js
+const express = require('express');
+const app = express();
+app.use(express.json());
+
+app.get('/api/users', (req, res) => {
+  res.json({
+    users: [
+      { id: 1, name: 'Alice', email: 'alice@test.com' },
+      { id: 2, name: 'Bob', email: 'bob@test.com' },
+    ],
+    total: 2,
+    page: 1,
+  });
+});
+
+app.get('/api/orders', (req, res) => {
+  res.json({
+    orders: [{ orderId: 42, status: 'shipped', amount: 99.99 }],
+    total: 1,
+  });
+});
+
+app.post('/api/users', (req, res) => {
+  res.json({ id: 3, name: req.body.name, created: true });
+});
+
+app.listen(3456, () => console.log('Demo API on http://localhost:3456'));
+```
+
+### 1. `trickle dev` — All-in-one instrumented development
+
+```bash
+cd /tmp/trickle-demo
+npx trickle-cli dev "node app.js"
+```
+
+In a **third terminal**, hit the endpoints to generate type data:
+
+```bash
+curl http://localhost:3456/api/users
+curl http://localhost:3456/api/orders
+curl -X POST http://localhost:3456/api/users \
+  -H 'Content-Type: application/json' -d '{"name":"Charlie"}'
+```
+
+Wait ~3 seconds, then check the generated types:
+
+```bash
+cat /tmp/trickle-demo/.trickle/types.d.ts
+```
+
+You should see TypeScript interfaces generated from the live responses. Press `Ctrl+C` to stop dev mode.
+
+### 2. `trickle overview` — See all routes at a glance
+
+```bash
+npx trickle-cli overview
+```
+
+Shows all 3 routes with return type signatures, color-coded by HTTP method (GET=green, POST=yellow).
+
+### 3. `trickle trace` — Type-annotated curl
+
+Start the demo app in the background:
+
+```bash
+cd /tmp/trickle-demo && node app.js &
+```
+
+```bash
+# See the response with type annotations on every field
+npx trickle-cli trace GET http://localhost:3456/api/users
+
+# Trace and save types in one step
+npx trickle-cli trace POST http://localhost:3456/api/users \
+  -d '{"name":"Diana"}' --save
+```
+
+Every JSON field gets a `// string`, `// number`, etc. annotation.
+
+```bash
+kill %1  # stop the background app
+```
+
+### 4. `trickle infer` — Types from JSON files or stdin
+
+```bash
+# From a file
+echo '{"products":[{"sku":"A1","price":29.99,"inStock":true}],"currency":"USD"}' \
+  > /tmp/products.json
+npx trickle-cli infer /tmp/products.json --name "GET /api/products"
+
+# From stdin (piped)
+echo '{"health":"ok","uptime":86400}' | npx trickle-cli infer --name "GET /api/status"
+
+# Verify both were stored
+npx trickle-cli overview
+```
+
+### 5. `trickle watch` — Auto-regenerate types on changes
+
+```bash
+cd /tmp/trickle-demo
+
+# Start watching (terminal A)
+npx trickle-cli watch --interval 2s
+```
+
+In **another terminal**, ingest new types:
+
+```bash
+echo '{"cpu":85.2,"memory":64.1}' | npx trickle-cli infer --name "GET /api/metrics"
+```
+
+Within 2 seconds, the watch terminal detects the new route and regenerates `.trickle/types.d.ts`. Press `Ctrl+C` to stop.
+
+### 6. `trickle validate` — Check API responses against baselines
+
+```bash
+cd /tmp/trickle-demo && node app.js &
+
+# Capture a baseline
+npx trickle-cli capture GET http://localhost:3456/api/users
+
+# Validate — should pass (matches baseline)
+npx trickle-cli validate GET http://localhost:3456/api/users
+
+kill %1
+```
+
+Now test with a **modified app** that returns a wrong type:
+
+```bash
+cat > /tmp/trickle-demo/app-broken.js << 'BROKENEOF'
+const express = require('express');
+const app = express();
+app.get('/api/users', (req, res) => {
+  res.json({
+    users: [{ id: "NOT_A_NUMBER", name: "Alice" }],
+    total: 1,
+    page: 1,
+  });
+});
+app.listen(3456, () => console.log('Broken API on :3456'));
+BROKENEOF
+
+node /tmp/trickle-demo/app-broken.js &
+npx trickle-cli validate GET http://localhost:3456/api/users
+kill %1
+```
+
+You'll see type mismatch errors (`id` changed from `number` to `string`).
+
+### 7. `trickle pack / unpack` — Portable type bundles
+
+```bash
+# Export all types to a file
+npx trickle-cli pack -o /tmp/my-types.trickle.json
+
+# Preview what's inside without importing
+npx trickle-cli unpack /tmp/my-types.trickle.json --dry-run
+
+# To fully test the round-trip:
+# 1. Stop the backend
+# 2. Delete ~/.trickle/trickle.db
+# 3. Restart the backend
+# 4. Import:
+npx trickle-cli unpack /tmp/my-types.trickle.json
+npx trickle-cli overview  # all routes restored
+```
+
+### 8. `trickle codegen` — Generate various output formats
+
+```bash
+npx trickle-cli codegen              # TypeScript interfaces
+npx trickle-cli codegen --zod        # Zod validation schemas
+npx trickle-cli codegen --guards     # Runtime type guard functions
+npx trickle-cli codegen --client     # Typed fetch API client
+npx trickle-cli codegen --axios      # Typed Axios client
+npx trickle-cli codegen --graphql    # GraphQL SDL schema
+npx trickle-cli codegen --trpc       # tRPC router
+npx trickle-cli codegen --react-query # React Query hooks
+npx trickle-cli codegen --swr        # SWR hooks
+npx trickle-cli codegen --msw        # MSW mock handlers
+npx trickle-cli codegen --json-schema # JSON Schema definitions
+```
+
+### 9. `trickle search` — Find fields across all routes
+
+```bash
+npx trickle-cli search email    # Which routes have an "email" field?
+npx trickle-cli search total    # Which routes return a "total"?
+npx trickle-cli search number   # Which routes use number types?
+```
+
+### 10. `trickle auto` — Smart codegen based on project deps
+
+```bash
+cd /tmp/trickle-demo
+npm install zod  # add zod to deps
+
+npx trickle-cli auto
+# Detects zod → generates schemas.ts
+# Always generates types.d.ts and guards.ts
+# Generates api-client.ts (no axios) or axios-client.ts (if axios installed)
+
+ls .trickle/
+```
+
+### Cleanup
+
+```bash
+rm -rf /tmp/trickle-demo /tmp/products.json /tmp/my-types.trickle.json
 ```
 
 ---
