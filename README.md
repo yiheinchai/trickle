@@ -3178,14 +3178,27 @@ python app.py
 
 A `.pyi` stub file appears next to each source file with TypedDict types for every function that was called.
 
+**Single-file scripts work too** — Python's `import trickle.auto` uses `sys.setprofile()` to observe functions defined directly in the entry file, not just imported modules:
+
+```python
+import trickle.auto
+
+def process_data(items):
+    return {"count": len(items), "total": sum(items)}
+
+result = process_data([1, 2, 3])
+# [trickle.auto] 1 function type(s) written to .pyi
+```
+
 ### What it does
 
 When you `require('trickle/auto')` (JS) or `import trickle.auto` (Python), trickle:
 
 1. **Forces local mode** — no backend needed, observations go to `.trickle/observations.jsonl`
 2. **Instruments all functions** — patches module loading to wrap every function in files loaded after the import
-3. **Generates types in the background** — a timer regenerates `.d.ts`/`.pyi` files every 3 seconds as new types are captured
-4. **Final generation on exit** — writes all remaining types when the process finishes
+3. **Observes entry file functions** (Python) — uses `sys.setprofile()` to capture function calls in the script you run directly
+4. **Generates types in the background** — a timer regenerates `.d.ts`/`.pyi` files every 3 seconds as new types are captured
+5. **Final generation on exit** — writes all remaining types when the process finishes
 
 ### Generated types
 
@@ -3211,7 +3224,8 @@ def calculate_discount(arg0: float, arg1: float) -> CalculateDiscountOutput: ...
 
 ### Notes
 
-- Functions must be in **imported modules** (not the entry file itself) for auto-instrumentation to work. This is because the entry file is already being executed when the hook installs. In practice, this isn't an issue since real apps import from other modules.
+- **Python**: Works for ALL functions — both imported modules AND the entry file itself (via `sys.setprofile`). Single-file scripts are fully supported.
+- **JavaScript**: Functions must be in `require()`'d modules (not the entry file itself), since the entry file is already compiled when `require('trickle/auto')` runs. This isn't an issue in practice since real apps load modules via `require()`.
 - Types accumulate across runs — run your app multiple times and optional fields are detected automatically.
 - Works alongside all other trickle features (backend mode, CLI, etc.).
 
@@ -3220,8 +3234,11 @@ def calculate_discount(arg0: float, arg1: float) -> CalculateDiscountOutput: ...
 # JavaScript
 npm run build --workspace=packages/client-js && node test-auto-require-e2e.js
 
-# Python
+# Python (multi-file)
 PYTHONPATH=packages/client-python/src:. python test-auto-py-e2e.py
+
+# Python (single-file — entry file observation)
+PYTHONPATH=packages/client-python/src:. python test-auto-py-single-e2e.py
 ```
 
 ---

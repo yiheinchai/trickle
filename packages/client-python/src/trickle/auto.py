@@ -6,11 +6,13 @@ Add ONE LINE to your app and .pyi type stubs appear automatically::
 
 This module:
 1. Forces local mode (no backend needed)
-2. Installs the import hook to wrap all user functions
-3. Runs a background thread that generates .pyi files from observations
-4. On process exit, does a final type generation
+2. Installs the import hook to wrap all user functions in imported modules
+3. Installs a sys.setprofile hook to observe functions in the entry file
+4. Runs a background thread that generates .pyi files from observations
+5. On process exit, does a final type generation
 
 No CLI. No backend. No configuration. Just types.
+Works for ALL functions — including those defined in the entry file itself.
 """
 
 from __future__ import annotations
@@ -75,8 +77,127 @@ _initial_timer.daemon = True
 _initial_timer.start()
 
 
+# ── Entry file observation via sys.setprofile ──
+#
+# The import hook (above) wraps functions in IMPORTED modules. But functions
+# defined directly in the entry file (the script you run) can't be caught
+# by the import hook because the entry file is already executing when the
+# hook is installed.
+#
+# Solution: use sys.setprofile() to intercept function calls in the entry
+# file. The profile hook fires on 'call' and 'return' events with minimal
+# overhead (no per-line tracing like sys.settrace). We filter to only
+# observe functions whose code object lives in the entry file.
+
+_entry_file: str | None = None
+
+# Determine the entry file path
+if hasattr(sys, "argv") and sys.argv:
+    _candidate = os.path.abspath(sys.argv[0])
+    if os.path.isfile(_candidate):
+        _entry_file = _candidate
+
+if _entry_file:
+    from trickle.type_inference import infer_type  # noqa: E402
+    from trickle.type_hash import hash_type  # noqa: E402
+    from trickle.transport import enqueue  # noqa: E402
+    from trickle.env_detect import detect_environment  # noqa: E402
+
+    _env = detect_environment()
+    _entry_module = os.path.basename(_entry_file).rsplit(".", 1)[0]
+    _pending_calls: dict = {}  # id(frame) -> (name, args_type, sample_input)
+    _old_profile = sys.getprofile()
+
+    def _entry_profile(frame: object, event: str, arg: object) -> None:
+        """Profile hook that observes function calls in the entry file."""
+        # Chain to previous profiler if any
+        if _old_profile is not None:
+            _old_profile(frame, event, arg)
+
+        try:
+            # Fast path: skip non-entry-file frames
+            if frame.f_code.co_filename != _entry_file:  # type: ignore[union-attr]
+                return
+
+            if event == "call":
+                name = frame.f_code.co_name  # type: ignore[union-attr]
+                # Skip private, module-level, lambda, and special functions
+                if name.startswith("_") or name in ("<module>", "<lambda>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>"):
+                    return
+
+                # Capture args from frame locals
+                code = frame.f_code  # type: ignore[union-attr]
+                nargs = code.co_argcount
+                arg_names = code.co_varnames[:nargs]
+                locals_dict = frame.f_locals  # type: ignore[union-attr]
+                args = tuple(locals_dict.get(n) for n in arg_names)
+
+                # Infer arg types
+                if len(args) == 0:
+                    args_type = {"kind": "tuple", "elements": []}
+                elif len(args) == 1:
+                    args_type = {"kind": "tuple", "elements": [infer_type(args[0])]}
+                else:
+                    args_type = {
+                        "kind": "tuple",
+                        "elements": [infer_type(a) for a in args],
+                    }
+
+                # Store pending call (keyed by frame id for correct matching)
+                _pending_calls[id(frame)] = (name, args_type, list(args[:3]))
+
+            elif event == "return":
+                key = id(frame)  # type: ignore[arg-type]
+                if key not in _pending_calls:
+                    return
+
+                func_name, args_type, sample_input = _pending_calls.pop(key)
+
+                # Infer return type
+                return_type = infer_type(arg)
+
+                # Compute type hash
+                type_hash = hash_type(args_type, return_type)
+
+                # Build and enqueue payload
+                payload = {
+                    "functionName": func_name,
+                    "module": _entry_module,
+                    "language": "python",
+                    "environment": _env,
+                    "typeHash": type_hash,
+                    "argsType": args_type,
+                    "returnType": return_type,
+                }
+
+                enqueue(payload)
+
+                if _debug:
+                    print(f"[trickle.auto] Observed entry file function: {func_name}")
+
+            elif event == "exception":
+                # Clean up pending call on exception
+                _pending_calls.pop(id(frame), None)  # type: ignore[arg-type]
+
+        except Exception:
+            # Never crash user's app
+            pass
+
+    sys.setprofile(_entry_profile)
+
+    if _debug:
+        print(f"[trickle.auto] Entry file profiler installed for: {_entry_file}")
+
+
 # Final generation on exit
 def _exit_handler() -> None:
+    # Remove profile hook first (no more observations needed)
+    try:
+        if _entry_file:
+            sys.setprofile(None)
+    except Exception:
+        pass
+
     _stop_event.set()
     _run_generation(True)
 

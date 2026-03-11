@@ -465,6 +465,14 @@ def _find_source_file(module_name: str) -> Optional[str]:
     if mod and hasattr(mod, "__file__") and mod.__file__:
         return mod.__file__
 
+    # Check __main__ module (entry file) — its module name in observations
+    # is the filename stem, not "__main__"
+    main_mod = _sys.modules.get("__main__")
+    if main_mod and hasattr(main_mod, "__file__") and main_mod.__file__:
+        main_stem = os.path.basename(main_mod.__file__).rsplit(".", 1)[0]
+        if main_stem == module_name:
+            return main_mod.__file__
+
     # Try common patterns in cwd
     cwd = os.getcwd()
     candidates = [
