@@ -2647,5 +2647,217 @@ export function generateSwrHooks(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── Pydantic Model Generation ──
+
+/**
+ * Convert a TypeNode to a Pydantic-compatible Python type string.
+ */
+function typeNodeToPydantic(
+  node: TypeNode,
+  extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }>,
+  parentName: string,
+  propName: string | undefined,
+): string {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string":    return "str";
+        case "number":    return "float";
+        case "boolean":   return "bool";
+        case "null":      return "None";
+        case "undefined": return "None";
+        case "bigint":    return "int";
+        case "symbol":    return "str";
+        default:          return "Any";
+      }
+
+    case "unknown":
+      return "Any";
+
+    case "array": {
+      const inner = typeNodeToPydantic(node.element, extracted, parentName, propName);
+      return `List[${inner}]`;
+    }
+
+    case "tuple": {
+      const elements = node.elements.map((el, i) =>
+        typeNodeToPydantic(el, extracted, parentName, `el${i}`)
+      );
+      return `Tuple[${elements.join(", ")}]`;
+    }
+
+    case "union": {
+      const members = node.members.map((m) =>
+        typeNodeToPydantic(m, extracted, parentName, propName)
+      );
+      if (members.length === 2 && members.includes("None")) {
+        const nonNone = members.find((m) => m !== "None");
+        return `Optional[${nonNone}]`;
+      }
+      return `Union[${members.join(", ")}]`;
+    }
+
+    case "map": {
+      const v = typeNodeToPydantic(node.value, extracted, parentName, "value");
+      return `Dict[str, ${v}]`;
+    }
+
+    case "set": {
+      const inner = typeNodeToPydantic(node.element, extracted, parentName, propName);
+      return `Set[${inner}]`;
+    }
+
+    case "promise":
+      return typeNodeToPydantic(node.resolved, extracted, parentName, propName);
+
+    case "function":
+      return "Any";
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return "Dict[str, Any]";
+
+      if (propName) {
+        const className = toPascalCase(parentName) + toPascalCase(propName);
+        if (!extracted.some((e) => e.name === className)) {
+          extracted.push({ name: className, node });
+        }
+        return className;
+      }
+      return "Dict[str, Any]";
+    }
+  }
+}
+
+/**
+ * Render a Pydantic BaseModel class from an object TypeNode.
+ */
+function renderPydanticModel(
+  name: string,
+  node: Extract<TypeNode, { kind: "object" }>,
+  extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }>,
+): string {
+  const keys = Object.keys(node.properties);
+  const innerExtracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+  const lines: string[] = [];
+
+  const entries = keys.map((key) => {
+    const pyType = typeNodeToPydantic(node.properties[key], innerExtracted, name, key);
+    return `    ${toSnakeCase(key)}: ${pyType}`;
+  });
+
+  // Emit nested models first (they must be defined before use)
+  for (const iface of innerExtracted) {
+    lines.push(renderPydanticModel(iface.name, iface.node, innerExtracted));
+    lines.push("");
+    lines.push("");
+  }
+
+  lines.push(`class ${name}(BaseModel):`);
+  if (entries.length === 0) {
+    lines.push("    pass");
+  } else {
+    lines.push(...entries);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Generate Pydantic BaseModel classes from observed runtime types.
+ *
+ * Unlike --python (TypedDict), Pydantic models provide:
+ * - Runtime validation (model_validate)
+ * - JSON serialization (model_dump_json)
+ * - JSON Schema generation (model_json_schema)
+ * - Direct use as FastAPI request/response models
+ */
+export function generatePydanticModels(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const sections: string[] = [];
+
+  sections.push("# Auto-generated Pydantic models by trickle");
+  sections.push(`# Generated at ${new Date().toISOString()}`);
+  sections.push("# Do not edit manually — re-run `trickle codegen --pydantic` to update");
+  sections.push("");
+  sections.push("from __future__ import annotations");
+  sections.push("");
+  sections.push("from typing import Any, Dict, List, Optional, Set, Tuple, Union");
+  sections.push("");
+  sections.push("from pydantic import BaseModel");
+  sections.push("");
+  sections.push("");
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    const baseName = parsed ? parsed.typeName : toPascalCase(fn.name);
+
+    const metaParts: string[] = [];
+    if (fn.module) metaParts.push(`${fn.module} module`);
+    if (fn.env) metaParts.push(`observed in ${fn.env}`);
+    if (fn.observedAt) metaParts.push(formatTimeAgo(fn.observedAt));
+    if (metaParts.length > 0) {
+      sections.push(`# ${baseName} — ${metaParts.join(", ")}`);
+    }
+
+    if (parsed) {
+      // Route-style: generate Request (body) and Response models
+
+      // Request body (only for methods with body)
+      if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+          bodyNode = fn.argsType.properties["body"];
+        }
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+          sections.push(renderPydanticModel(`${baseName}Request`, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+          sections.push("");
+          sections.push("");
+        }
+      }
+
+      // Response model
+      if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+        const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+        sections.push(renderPydanticModel(`${baseName}Response`, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      } else if (fn.returnType.kind !== "unknown") {
+        const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+        const pyType = typeNodeToPydantic(fn.returnType, extracted, baseName, undefined);
+        sections.push(`${baseName}Response = ${pyType}`);
+      }
+    } else {
+      // Non-route: generate Input/Output models
+      if (fn.argsType.kind === "object" && Object.keys(fn.argsType.properties).length > 0) {
+        const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+        sections.push(renderPydanticModel(`${baseName}Input`, fn.argsType as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+        sections.push("");
+      }
+
+      if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+        const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+        sections.push(renderPydanticModel(`${baseName}Output`, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      } else if (fn.returnType.kind !== "unknown") {
+        const extracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+        const pyType = typeNodeToPydantic(fn.returnType, extracted, baseName, undefined);
+        sections.push(`${baseName}Output = ${pyType}`);
+      }
+    }
+
+    sections.push("");
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

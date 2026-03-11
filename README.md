@@ -41,6 +41,7 @@ trickle dev
 - [JSON Schema Generation](#json-schema-generation)
 - [SWR Hooks](#swr-hooks)
 - [API Audit](#api-audit)
+- [Pydantic Models](#pydantic-models)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1814,6 +1815,69 @@ node test-audit-e2e.js
 
 ---
 
+## Pydantic Models
+
+Generate [Pydantic](https://docs.pydantic.dev/) `BaseModel` classes from observed runtime types — the standard for Python data validation, used by FastAPI, Django Ninja, and LangChain.
+
+```bash
+npx trickle codegen --pydantic
+npx trickle codegen --pydantic --out models.py
+```
+
+Unlike `--python` (which generates read-only TypedDict stubs), Pydantic models provide runtime validation, JSON serialization, and work directly as FastAPI request/response models:
+
+```python
+from pydantic import BaseModel
+from typing import List
+
+class GetApiUsersResponseUsers(BaseModel):
+    id: float
+    name: str
+    is_active: bool
+
+class GetApiUsersResponse(BaseModel):
+    users: List[GetApiUsersResponseUsers]
+    total: float
+
+class PostApiUsersRequest(BaseModel):
+    name: str
+    email: str
+    age: float
+
+class PostApiUsersResponse(BaseModel):
+    id: float
+    created: bool
+```
+
+Use directly in FastAPI:
+
+```python
+from fastapi import FastAPI
+from models import PostApiUsersRequest, PostApiUsersResponse
+
+app = FastAPI()
+
+@app.post("/api/users", response_model=PostApiUsersResponse)
+async def create_user(body: PostApiUsersRequest):
+    # body is validated automatically — name, email, age guaranteed
+    return {"id": 1, "created": True}
+```
+
+Key behaviors:
+- Generates `BaseModel` classes (not TypedDict) with runtime validation
+- Request models for POST/PUT/PATCH routes, response models for all routes
+- Nested objects become separate named models
+- camelCase fields converted to snake_case (Python convention)
+- All Python types: `str`, `float`, `bool`, `int`, `List`, `Dict`, `Optional`, `Union`
+- `from __future__ import annotations` for forward references
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-pydantic-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1925,6 +1989,7 @@ npx trickle codegen --middleware --out .trickle/middleware.ts # Express validati
 npx trickle codegen --msw --out .trickle/handlers.ts         # MSW mock handlers
 npx trickle codegen --json-schema --out .trickle/schemas.json # JSON Schema definitions
 npx trickle codegen --swr --out .trickle/hooks.ts             # SWR data-fetching hooks
+npx trickle codegen --pydantic --out models.py                # Pydantic BaseModel classes
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1942,6 +2007,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--msw` | Generate Mock Service Worker (MSW) request handlers |
 | `--json-schema` | Generate JSON Schema definitions from observed types |
 | `--swr` | Generate typed SWR data-fetching hooks |
+| `--pydantic` | Generate Pydantic BaseModel classes (Python) |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2425,6 +2491,7 @@ trickle/
 ├── test-json-schema-e2e.js  # JSON Schema generation test
 ├── test-swr-e2e.js          # SWR hook generation test
 ├── test-audit-e2e.js        # API quality audit test
+├── test-pydantic-e2e.js     # Pydantic model generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2482,6 +2549,7 @@ node test-msw-e2e.js          # MSW mock handler generation
 node test-json-schema-e2e.js  # JSON Schema generation
 node test-swr-e2e.js          # SWR hook generation
 node test-audit-e2e.js        # API quality audit
+node test-pydantic-e2e.js     # Pydantic model generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

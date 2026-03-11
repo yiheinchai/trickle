@@ -111,6 +111,7 @@ program
   .option("--msw", "Generate Mock Service Worker (MSW) request handlers")
   .option("--json-schema", "Generate JSON Schema definitions from observed types")
   .option("--swr", "Generate typed SWR data-fetching hooks")
+  .option("--pydantic", "Generate Pydantic BaseModel classes (Python)")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
