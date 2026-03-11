@@ -3250,6 +3250,13 @@ node --import trickle/auto-esm app.mjs
 
 Works with `.mjs` files and any ESM modules. Exported functions (`export function`, `export const`, `export default`, `export { }`) are all instrumented automatically. Async exports are handled too.
 
+**TypeScript** — works natively on Node.js 22.6+ (built-in type stripping):
+```bash
+node --import trickle/auto-esm app.ts
+```
+
+No `tsx`, no `ts-node`, no compilation step needed. TypeScript generics (`function paginate<T>(...)`), multiline signatures, `export interface`/`export type` (correctly skipped), and all TS syntax are handled. Generated types go to `.trickle.d.ts` (not `.d.ts`) to avoid conflicts with TypeScript's own type resolution.
+
 **Conditional activation** — use `trickle/auto-env` to activate only when `TRICKLE_AUTO=1`:
 ```bash
 # Always loaded, but only activates when TRICKLE_AUTO=1
@@ -3282,6 +3289,9 @@ npm run build --workspace=packages/client-js && node test-zerocode-js-e2e.js
 
 # JavaScript (ESM — import/export syntax)
 npm run build --workspace=packages/client-js && node test-esm-auto-e2e.js
+
+# TypeScript (native .ts files — Node.js 22.6+)
+npm run build --workspace=packages/client-js && node test-ts-auto-e2e.js
 
 # Python (zero-code — no source changes)
 PYTHONPATH=packages/client-python/src:. python test-zerocode-py-e2e.py

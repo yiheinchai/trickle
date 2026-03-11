@@ -358,7 +358,9 @@ export function generateTypes(): number {
     const ext = path.extname(sourceFile);
     const dir = path.dirname(sourceFile);
     const baseName = path.basename(sourceFile, ext);
-    const dtsPath = path.join(dir, `${baseName}.d.ts`);
+    // For .ts/.tsx files, use .trickle.d.ts to avoid conflicts (TS ignores .d.ts next to .ts)
+    const isTs = ext === '.ts' || ext === '.tsx';
+    const dtsPath = path.join(dir, `${baseName}${isTs ? '.trickle' : ''}.d.ts`);
 
     try {
       fs.writeFileSync(dtsPath, dts, 'utf-8');

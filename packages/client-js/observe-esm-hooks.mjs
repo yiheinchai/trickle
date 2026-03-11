@@ -117,15 +117,58 @@ function extractParamNamesFromSource(source, startIdx) {
   // Find the opening paren
   const openParen = source.indexOf('(', startIdx);
   if (openParen === -1) return [];
-  const closeParen = source.indexOf(')', openParen);
-  if (closeParen === -1) return [];
+  // Find matching close paren (handles nested parens in TS type annotations)
+  let depth = 1;
+  let i = openParen + 1;
+  while (i < source.length && depth > 0) {
+    if (source[i] === '(') depth++;
+    else if (source[i] === ')') depth--;
+    i++;
+  }
+  if (depth !== 0) return [];
+  const closeParen = i - 1;
   const paramStr = source.slice(openParen + 1, closeParen).trim();
   if (!paramStr) return [];
-  return paramStr.split(',').map(p => {
-    const trimmed = p.trim().split('=')[0].trim().split(':')[0].trim();
+  // Split on top-level commas only (skip commas inside nested parens/generics)
+  const params = [];
+  let current = '';
+  let parenDepth = 0;
+  let angleDepth = 0;
+  for (let j = 0; j < paramStr.length; j++) {
+    const ch = paramStr[j];
+    if (ch === '(' || ch === '{' || ch === '[') parenDepth++;
+    else if (ch === ')' || ch === '}' || ch === ']') parenDepth--;
+    else if (ch === '<') angleDepth++;
+    else if (ch === '>' && paramStr[j - 1] !== '=') {
+      // Don't count '>' in '=>' (arrow functions) as closing a generic
+      if (angleDepth > 0) angleDepth--;
+    }
+    else if (ch === ',' && parenDepth === 0 && angleDepth === 0) {
+      params.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) params.push(current);
+  return params.map(p => {
+    // Strip TS type annotation and default value: "name: Type = default" → "name"
+    const trimmed = p.trim().split(':')[0].trim().split('=')[0].trim();
     if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('...')) return '';
     return trimmed;
   }).filter(Boolean);
+}
+
+/**
+ * Compute the byte offset of a given line index within the full source.
+ */
+function lineOffset(source, lineIdx) {
+  let off = 0;
+  const lines = source.split('\n');
+  for (let i = 0; i < lineIdx && i < lines.length; i++) {
+    off += lines[i].length + 1; // +1 for \n
+  }
+  return off;
 }
 
 function transformSource(source, url) {
@@ -140,17 +183,26 @@ function transformSource(source, url) {
     const line = lines[i];
     const trimmed = line.trimStart();
 
+    // Skip TS-only exports: export interface, export type, export enum
+    if (/^export\s+(interface|type|enum|abstract|declare)\s/.test(trimmed)) {
+      result.push(line);
+      continue;
+    }
+
     // Skip re-exports: export { ... } from '...' or export * from '...'
     if (/^export\s+\{[^}]*\}\s+from\s/.test(trimmed) || /^export\s+\*\s+from\s/.test(trimmed)) {
       result.push(line);
       continue;
     }
 
-    // export function name(...)
-    const funcMatch = trimmed.match(/^export\s+(async\s+)?function\s+(\w+)\s*\(/);
+    // export function name(...) or export function name<T>(...)
+    const funcMatch = trimmed.match(/^export\s+(async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/);
     if (funcMatch) {
       const name = funcMatch[2];
-      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf(name));
+      // Use full source from this line's offset for multiline param extraction
+      const srcOffset = lineOffset(source, i) + (line.length - trimmed.length);
+      const parenPos = source.indexOf('(', srcOffset + funcMatch[0].indexOf('('));
+      const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
       // Remove 'export ' prefix, keep the function
       result.push(line.replace(/^(\s*)export\s+/, '$1'));
       exportedFunctions.push({ name, paramNames });
@@ -161,7 +213,10 @@ function transformSource(source, url) {
     const constFuncMatch = trimmed.match(/^export\s+(const|let)\s+(\w+)\s*=\s*(async\s+)?(\(|function\b)/);
     if (constFuncMatch) {
       const name = constFuncMatch[2];
-      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf('='));
+      const srcOffset = lineOffset(source, i) + (line.length - trimmed.length);
+      const eqPos = source.indexOf('=', srcOffset);
+      const parenPos = eqPos >= 0 ? source.indexOf('(', eqPos) : -1;
+      const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
       result.push(line.replace(/^(\s*)export\s+/, '$1'));
       exportedFunctions.push({ name, paramNames });
       continue;
@@ -175,11 +230,13 @@ function transformSource(source, url) {
       continue;
     }
 
-    // export default function name(...)
-    const defaultNamedMatch = trimmed.match(/^export\s+default\s+(async\s+)?function\s+(\w+)\s*\(/);
+    // export default function name(...) or export default function name<T>(...)
+    const defaultNamedMatch = trimmed.match(/^export\s+default\s+(async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/);
     if (defaultNamedMatch) {
       const name = defaultNamedMatch[2];
-      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf(name));
+      const srcOffset = lineOffset(source, i) + (line.length - trimmed.length);
+      const parenPos = source.indexOf('(', srcOffset + defaultNamedMatch[0].indexOf('('));
+      const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
       // Remove 'export default'
       result.push(line.replace(/^(\s*)export\s+default\s+/, '$1'));
       exportedDefaults.push({ name, paramNames });
@@ -189,7 +246,9 @@ function transformSource(source, url) {
     // export default function(...)  (anonymous)
     const defaultAnonMatch = trimmed.match(/^export\s+default\s+(async\s+)?function\s*\(/);
     if (defaultAnonMatch) {
-      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf('function'));
+      const srcOffset = lineOffset(source, i) + (line.length - trimmed.length);
+      const parenPos = source.indexOf('(', srcOffset);
+      const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
       // Convert to named: const __trickle_default = function(...)
       result.push(line.replace(
         /^(\s*)export\s+default\s+(async\s+)?function\s*\(/,
@@ -278,7 +337,9 @@ export async function load(url, context, nextLoad) {
 
   // Only transform ESM modules we should observe
   if (!shouldObserve(url)) return result;
-  if (result.format !== 'module') return result;
+  const isModule = result.format === 'module';
+  const isTypeScript = result.format === 'module-typescript';
+  if (!isModule && !isTypeScript) return result;
 
   const source = result.source;
   if (!source) return result;
