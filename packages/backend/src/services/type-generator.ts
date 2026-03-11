@@ -3497,5 +3497,194 @@ export function generateTrpcRouter(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── Axios Client Generation ──
+
+/**
+ * Generate a typed Axios client from runtime-observed API routes.
+ *
+ * For each route:
+ * - Request/response interfaces
+ * - Typed function using axios.get/post/put/patch/delete
+ * - Path parameter interpolation
+ * - Query parameter support
+ * - Configurable base URL and axios instance
+ */
+export function generateAxiosClient(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your app to generate a typed Axios client.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated typed Axios client by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --axios` to update");
+  sections.push("");
+  sections.push('import axios, { AxiosInstance, AxiosRequestConfig } from "axios";');
+  sections.push("");
+
+  // Generate interfaces
+  const extracted: ExtractedInterface[] = [];
+  const interfaceSections: string[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+
+    // Body input type (POST/PUT/PATCH)
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      if (fn.argsType.kind === "object") {
+        const bodyNode = fn.argsType.properties["body"];
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          interfaceSections.push(renderInterface(`${baseName}Body`, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+          interfaceSections.push("");
+        }
+      }
+    }
+
+    // Query params type
+    if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+      const queryNode = fn.argsType.properties["query"];
+      if (queryNode.kind === "object" && Object.keys(queryNode.properties).length > 0) {
+        interfaceSections.push(renderInterface(`${baseName}Query`, queryNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        interfaceSections.push("");
+      }
+    }
+
+    // Response type
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      interfaceSections.push(renderInterface(`${baseName}Response`, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      interfaceSections.push("");
+    } else {
+      const retStr = typeNodeToTS(fn.returnType, extracted, baseName, undefined, 0);
+      interfaceSections.push(`export type ${baseName}Response = ${retStr};`);
+      interfaceSections.push("");
+    }
+  }
+
+  // Emit extracted sub-interfaces first
+  const emitted = new Set<string>();
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    sections.push(renderInterface(iface.name, iface.node, extracted));
+    sections.push("");
+  }
+
+  // Emit main interfaces
+  sections.push(...interfaceSections);
+
+  // Client setup
+  sections.push("// ── Axios Client ──");
+  sections.push("");
+  sections.push("let _instance: AxiosInstance = axios.create();");
+  sections.push("");
+  sections.push("/**");
+  sections.push(" * Configure the Axios client instance.");
+  sections.push(" * Call this once at app startup with your base URL.");
+  sections.push(" */");
+  sections.push('export function configureAxiosClient(baseURL: string, instance?: AxiosInstance): void {');
+  sections.push("  if (instance) {");
+  sections.push("    _instance = instance;");
+  sections.push("  } else {");
+  sections.push("    _instance = axios.create({ baseURL });");
+  sections.push("  }");
+  sections.push("}");
+  sections.push("");
+
+  // Generate typed functions
+  sections.push("// ── Typed API Functions ──");
+  sections.push("");
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+    const funcName = toCamelCase(baseName);
+    const responseName = `${baseName}Response`;
+
+    // Determine if we have body, query, path params
+    const hasBody = ["POST", "PUT", "PATCH"].includes(parsed.method)
+      && fn.argsType.kind === "object"
+      && fn.argsType.properties["body"]
+      && fn.argsType.properties["body"].kind === "object"
+      && Object.keys(fn.argsType.properties["body"].properties).length > 0;
+
+    const hasQuery = fn.argsType.kind === "object"
+      && fn.argsType.properties["query"]
+      && fn.argsType.properties["query"].kind === "object"
+      && Object.keys(fn.argsType.properties["query"].properties).length > 0;
+
+    const hasPathParams = parsed.pathParams.length > 0;
+
+    // Build function parameters
+    const params: string[] = [];
+    if (hasPathParams) {
+      for (const p of parsed.pathParams) {
+        params.push(`${p}: string`);
+      }
+    }
+    if (hasBody) {
+      params.push(`body: ${baseName}Body`);
+    }
+    if (hasQuery) {
+      params.push(`query?: ${baseName}Query`);
+    }
+    params.push("config?: AxiosRequestConfig");
+
+    // Build URL path with interpolation
+    let urlPath = parsed.path;
+    for (const p of parsed.pathParams) {
+      urlPath = urlPath.replace(`:${p}`, `\${${p}}`);
+    }
+    const urlExpr = hasPathParams ? `\`${urlPath}\`` : `"${parsed.path}"`;
+
+    // Build function body
+    const method = parsed.method.toLowerCase();
+    sections.push(`/** ${parsed.method} ${parsed.path} */`);
+    sections.push(`export async function ${funcName}(${params.join(", ")}): Promise<${responseName}> {`);
+
+    if (hasQuery) {
+      sections.push("  const requestConfig: AxiosRequestConfig = { ...config, params: query };");
+    }
+
+    const configArg = hasQuery ? "requestConfig" : "config";
+
+    if (hasBody) {
+      sections.push(`  const { data } = await _instance.${method}<${responseName}>(${urlExpr}, body, ${configArg});`);
+    } else if (method === "delete") {
+      sections.push(`  const { data } = await _instance.${method}<${responseName}>(${urlExpr}, ${configArg});`);
+    } else {
+      sections.push(`  const { data } = await _instance.${method}<${responseName}>(${urlExpr}, ${configArg});`);
+    }
+
+    sections.push("  return data;");
+    sections.push("}");
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

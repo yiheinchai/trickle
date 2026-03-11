@@ -117,6 +117,7 @@ program
   .option("--class-validator", "Generate class-validator DTOs for NestJS")
   .option("--graphql", "Generate GraphQL SDL schema from observed routes")
   .option("--trpc", "Generate typed tRPC router from observed routes")
+  .option("--axios", "Generate typed Axios client from observed routes")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

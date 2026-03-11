@@ -47,6 +47,7 @@ trickle dev
 - [GraphQL Schema Generation](#graphql-schema-generation)
 - [tRPC Router Generation](#trpc-router-generation)
 - [Type Search](#type-search)
+- [Axios Client](#axios-client)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2177,6 +2178,70 @@ node test-search-e2e.js
 
 ---
 
+## Axios Client
+
+Generate a typed Axios client from runtime-observed API routes. Each route becomes a typed async function with proper request body, path parameter, and response types.
+
+```bash
+# Generate Axios client to stdout
+trickle codegen --axios
+
+# Write to a file
+trickle codegen --axios -o src/api/client.ts
+```
+
+Example output:
+
+```typescript
+import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
+
+export interface GetApiUsersResponse {
+  users: { id: number; name: string; email: string }[];
+  total: number;
+}
+
+export interface PostApiUsersBody {
+  name: string;
+  email: string;
+  age: number;
+}
+
+export interface PostApiUsersResponse {
+  id: number;
+  created: boolean;
+}
+
+let _instance: AxiosInstance = axios.create();
+
+export function configureAxiosClient(baseURL: string, instance?: AxiosInstance): void {
+  _instance = instance || axios.create({ baseURL });
+}
+
+export async function getApiUsers(config?: AxiosRequestConfig): Promise<GetApiUsersResponse> {
+  const { data } = await _instance.get<GetApiUsersResponse>("/api/users", config);
+  return data;
+}
+
+export async function postApiUsers(body: PostApiUsersBody, config?: AxiosRequestConfig): Promise<PostApiUsersResponse> {
+  const { data } = await _instance.post<PostApiUsersResponse>("/api/users", body, config);
+  return data;
+}
+```
+
+Features:
+- **Typed functions**: Each route becomes an async function with full type safety
+- **Path parameters**: Dynamic segments like `/users/:id` become function parameters with `${id}` interpolation
+- **Body types**: POST/PUT/PATCH routes get typed body parameters
+- **Configurable instance**: Use `configureAxiosClient()` to set base URL or pass a custom Axios instance with interceptors
+- **AxiosRequestConfig passthrough**: Every function accepts optional config for headers, timeouts, etc.
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-axios-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2311,6 +2376,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--class-validator` | Generate class-validator DTOs for NestJS |
 | `--graphql` | Generate GraphQL SDL schema |
 | `--trpc` | Generate typed tRPC router |
+| `--axios` | Generate typed Axios client |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2833,6 +2899,7 @@ trickle/
 ├── test-graphql-e2e.js     # GraphQL schema generation test
 ├── test-trpc-e2e.js        # tRPC router generation test
 ├── test-search-e2e.js      # Type search test
+├── test-axios-e2e.js       # Axios client generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2896,6 +2963,7 @@ node test-capture-e2e.js     # API capture (live endpoint)
 node test-graphql-e2e.js     # GraphQL schema generation
 node test-trpc-e2e.js        # tRPC router generation
 node test-search-e2e.js      # Type search
+node test-axios-e2e.js       # Axios client generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
