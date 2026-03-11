@@ -42,6 +42,7 @@ trickle dev
 - [SWR Hooks](#swr-hooks)
 - [API Audit](#api-audit)
 - [Pydantic Models](#pydantic-models)
+- [NestJS DTOs (class-validator)](#nestjs-dtos-class-validator)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1878,6 +1879,84 @@ node test-pydantic-e2e.js
 
 ---
 
+## NestJS DTOs (class-validator)
+
+Generate [class-validator](https://github.com/typestack/class-validator) DTO classes for NestJS from observed runtime types — the standard validation approach for NestJS applications.
+
+```bash
+npx trickle codegen --class-validator
+npx trickle codegen --class-validator --out src/dto/generated.ts
+```
+
+trickle observes your API request/response shapes and generates fully decorated DTO classes:
+
+```typescript
+import { IsArray, IsBoolean, IsNumber, IsString, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+
+export class PostApiUsersBody {
+  @IsString()
+  name: string;
+
+  @IsString()
+  email: string;
+
+  @IsNumber()
+  age: number;
+}
+
+export class GetApiUsersResponseUsersItem {
+  @IsNumber()
+  id: number;
+
+  @IsString()
+  name: string;
+
+  @IsBoolean()
+  active: boolean;
+}
+
+export class GetApiUsersResponse {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => GetApiUsersResponseUsersItem)
+  users: GetApiUsersResponseUsersItem[];
+
+  @IsNumber()
+  total: number;
+}
+```
+
+Use directly in NestJS controllers:
+
+```typescript
+import { Controller, Post, Body, Get } from "@nestjs/common";
+import { PostApiUsersBody, PostApiUsersResponse } from "./dto/generated";
+
+@Controller("api/users")
+export class UsersController {
+  @Post()
+  create(@Body() body: PostApiUsersBody): PostApiUsersResponse {
+    // body is automatically validated by NestJS ValidationPipe
+    return { id: 1, created: true };
+  }
+}
+```
+
+Key behaviors:
+- Body DTOs for POST/PUT/PATCH routes, response DTOs for all routes
+- Decorators: `@IsString`, `@IsNumber`, `@IsBoolean`, `@IsArray`, `@IsOptional`
+- Nested objects get `@ValidateNested()` + `@Type()` from class-transformer
+- Arrays of objects get `@ValidateNested({ each: true })`
+- Only imports decorators that are actually used
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-class-validator-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1990,6 +2069,7 @@ npx trickle codegen --msw --out .trickle/handlers.ts         # MSW mock handlers
 npx trickle codegen --json-schema --out .trickle/schemas.json # JSON Schema definitions
 npx trickle codegen --swr --out .trickle/hooks.ts             # SWR data-fetching hooks
 npx trickle codegen --pydantic --out models.py                # Pydantic BaseModel classes
+npx trickle codegen --class-validator --out src/dto/gen.ts    # NestJS class-validator DTOs
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -2008,6 +2088,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--json-schema` | Generate JSON Schema definitions from observed types |
 | `--swr` | Generate typed SWR data-fetching hooks |
 | `--pydantic` | Generate Pydantic BaseModel classes (Python) |
+| `--class-validator` | Generate class-validator DTOs for NestJS |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2492,6 +2573,7 @@ trickle/
 ├── test-swr-e2e.js          # SWR hook generation test
 ├── test-audit-e2e.js        # API quality audit test
 ├── test-pydantic-e2e.js     # Pydantic model generation test
+├── test-class-validator-e2e.js # NestJS class-validator DTO test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2550,6 +2632,7 @@ node test-json-schema-e2e.js  # JSON Schema generation
 node test-swr-e2e.js          # SWR hook generation
 node test-audit-e2e.js        # API quality audit
 node test-pydantic-e2e.js     # Pydantic model generation
+node test-class-validator-e2e.js # NestJS class-validator DTOs
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

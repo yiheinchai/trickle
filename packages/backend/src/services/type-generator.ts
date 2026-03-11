@@ -2859,5 +2859,240 @@ export function generatePydanticModels(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── class-validator DTO Generation (NestJS) ──
+
+/**
+ * Get the class-validator decorator for a TypeNode.
+ * Returns the decorator string(s) and the TypeScript type.
+ */
+function classValidatorField(
+  node: TypeNode,
+  propName: string,
+  parentName: string,
+  nestedClasses: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }>,
+): { decorators: string[]; tsType: string } {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string":
+          return { decorators: ["@IsString()"], tsType: "string" };
+        case "number":
+          return { decorators: ["@IsNumber()"], tsType: "number" };
+        case "boolean":
+          return { decorators: ["@IsBoolean()"], tsType: "boolean" };
+        default:
+          return { decorators: [], tsType: "any" };
+      }
+
+    case "array": {
+      const innerDecorators: string[] = ["@IsArray()"];
+      if (node.element.kind === "object" && Object.keys(node.element.properties).length > 0) {
+        const nestedName = parentName + toPascalCase(propName) + "Item";
+        if (!nestedClasses.some((c) => c.name === nestedName)) {
+          nestedClasses.push({ name: nestedName, node: node.element as Extract<TypeNode, { kind: "object" }> });
+        }
+        innerDecorators.push("@ValidateNested({ each: true })");
+        innerDecorators.push(`@Type(() => ${nestedName})`);
+        return { decorators: innerDecorators, tsType: `${nestedName}[]` };
+      }
+      const inner = classValidatorField(node.element, propName, parentName, nestedClasses);
+      return { decorators: innerDecorators, tsType: `${inner.tsType}[]` };
+    }
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) {
+        return { decorators: ["@IsObject()"], tsType: "Record<string, any>" };
+      }
+      const nestedName = parentName + toPascalCase(propName);
+      if (!nestedClasses.some((c) => c.name === nestedName)) {
+        nestedClasses.push({ name: nestedName, node });
+      }
+      return {
+        decorators: ["@ValidateNested()", `@Type(() => ${nestedName})`],
+        tsType: nestedName,
+      };
+    }
+
+    case "union": {
+      // Check for nullable (T | null)
+      const nonNull = node.members.filter(
+        (m) => !(m.kind === "primitive" && (m.name === "null" || m.name === "undefined")),
+      );
+      const isNullable = nonNull.length < node.members.length;
+
+      if (nonNull.length === 1) {
+        const inner = classValidatorField(nonNull[0], propName, parentName, nestedClasses);
+        if (isNullable) {
+          return {
+            decorators: ["@IsOptional()", ...inner.decorators],
+            tsType: `${inner.tsType} | null`,
+          };
+        }
+        return inner;
+      }
+      // Complex union — use basic validation
+      return { decorators: [], tsType: "any" };
+    }
+
+    case "unknown":
+      return { decorators: [], tsType: "any" };
+
+    default:
+      return { decorators: [], tsType: "any" };
+  }
+}
+
+/**
+ * Render a class-validator DTO class.
+ */
+function renderValidatorClass(
+  name: string,
+  node: Extract<TypeNode, { kind: "object" }>,
+  nestedClasses: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }>,
+): string {
+  const lines: string[] = [];
+  const keys = Object.keys(node.properties);
+
+  lines.push(`export class ${name} {`);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const propNode = node.properties[key];
+    const { decorators, tsType } = classValidatorField(propNode, key, name, nestedClasses);
+
+    for (const dec of decorators) {
+      lines.push(`  ${dec}`);
+    }
+    lines.push(`  ${key}: ${tsType};`);
+    if (i < keys.length - 1) lines.push("");
+  }
+  lines.push("}");
+  return lines.join("\n");
+}
+
+/**
+ * Generate class-validator DTO classes from observed runtime types.
+ *
+ * Output: NestJS-ready DTOs with class-validator decorators for
+ * request validation and class-transformer for nested object support.
+ */
+export function generateClassValidatorDtos(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express/NestJS app to generate DTOs.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated class-validator DTOs by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --class-validator` to update");
+  sections.push("");
+
+  // Collect which decorators are needed
+  const usedDecorators = new Set<string>();
+  const needsType = { value: false };
+
+  // Pre-scan to collect all classes and nested classes
+  const allClasses: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }>; comment: string }> = [];
+  const nestedClasses: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+
+  for (const { parsed, fn } of routes) {
+    // Request body DTO (POST/PUT/PATCH only)
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      let bodyNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      }
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        allClasses.push({
+          name: `${parsed.typeName}Body`,
+          node: bodyNode as Extract<TypeNode, { kind: "object" }>,
+          comment: `/** Request body for ${parsed.method} ${parsed.path} */`,
+        });
+      }
+    }
+
+    // Response DTO
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      allClasses.push({
+        name: `${parsed.typeName}Response`,
+        node: fn.returnType as Extract<TypeNode, { kind: "object" }>,
+        comment: `/** Response for ${parsed.method} ${parsed.path} */`,
+      });
+    }
+  }
+
+  // Render all classes, collecting nested ones as we go
+  const renderedClasses: Array<{ name: string; code: string; comment: string }> = [];
+  const rendered = new Set<string>();
+
+  for (const cls of allClasses) {
+    if (rendered.has(cls.name)) continue;
+    rendered.add(cls.name);
+    const code = renderValidatorClass(cls.name, cls.node, nestedClasses);
+    renderedClasses.push({ name: cls.name, code, comment: cls.comment });
+  }
+
+  // Render nested classes (may add more to nestedClasses as we process)
+  let cursor = 0;
+  while (cursor < nestedClasses.length) {
+    const nested = nestedClasses[cursor];
+    cursor++;
+    if (rendered.has(nested.name)) continue;
+    rendered.add(nested.name);
+    const code = renderValidatorClass(nested.name, nested.node, nestedClasses);
+    renderedClasses.unshift({ name: nested.name, code, comment: "" });
+  }
+
+  // Scan for used decorators
+  const allCode = renderedClasses.map((c) => c.code).join("\n");
+  const decoratorNames = ["IsString", "IsNumber", "IsBoolean", "IsArray", "IsObject", "IsOptional", "ValidateNested", "IsNotEmpty"];
+  for (const name of decoratorNames) {
+    if (allCode.includes(`@${name}`)) usedDecorators.add(name);
+  }
+  if (allCode.includes("@Type(")) needsType.value = true;
+
+  // Emit imports
+  if (usedDecorators.size > 0) {
+    const sorted = Array.from(usedDecorators).sort();
+    sections.push(`import { ${sorted.join(", ")} } from "class-validator";`);
+  }
+  if (needsType.value) {
+    sections.push('import { Type } from "class-transformer";');
+  }
+  sections.push("");
+
+  // Emit classes
+  for (const cls of renderedClasses) {
+    if (cls.comment) {
+      sections.push(cls.comment);
+    }
+    sections.push(cls.code);
+    sections.push("");
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };
