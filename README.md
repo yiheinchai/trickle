@@ -3204,6 +3204,8 @@ When you `require('trickle/auto')` (JS) or `import trickle.auto` (Python), trick
 
 ### Generated types
 
+Generated type files include **`@example` documentation** with real sample data from runtime observations — hover over any function in your IDE to see actual input/output examples.
+
 **JavaScript** — for `calculateDiscount(99.99, 15)`:
 ```ts
 export interface CalculateDiscountOutput {
@@ -3211,6 +3213,11 @@ export interface CalculateDiscountOutput {
   discount: number;
   final: number;
 }
+/**
+ * @example
+ * calculateDiscount(99.99, 15)
+ * // => { original: 99.99, discount: 14.9985, final: 84.9915 }
+ */
 export declare function calculateDiscount(price: number, percentage: number): CalculateDiscountOutput;
 ```
 
@@ -3221,10 +3228,17 @@ class CalculateDiscountOutput(TypedDict):
     discount: float
     final: float
 
-def calculate_discount(price: float, percentage: float) -> CalculateDiscountOutput: ...
+def calculate_discount(price: float, percentage: float) -> CalculateDiscountOutput:
+    """
+    Example::
+
+        >>> calculate_discount(99.99, 15)
+        {'original': 99.99, 'discount': 14.9985, 'final': 84.9915}
+    """
+    ...
 ```
 
-Parameter names are preserved from the original source code — no generic `arg0`, `arg1` names.
+Parameter names are preserved from the original source code — no generic `arg0`, `arg1` names. Runtime examples use real observed values from your actual function calls.
 
 ### Notes
 
@@ -3296,6 +3310,9 @@ npm run build --workspace=packages/client-js && node test-ts-auto-e2e.js
 
 # Python (zero-code — no source changes)
 PYTHONPATH=packages/client-python/src:. python test-zerocode-py-e2e.py
+
+# Runtime examples in generated types (JS + Python)
+npm run build --workspace=packages/client-js && node test-examples-e2e.js
 ```
 
 ### Auto Type Injection (`TRICKLE_INJECT=1`)

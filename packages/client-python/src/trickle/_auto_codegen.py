@@ -270,6 +270,68 @@ def _render_typed_dict(
     return "\n".join(lines)
 
 
+def _format_sample_value(val: Any, depth: int = 0) -> str:
+    """Format a sample value as a readable Python-ish string."""
+    if val is None:
+        return "None"
+    if isinstance(val, bool):
+        return str(val)
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, str):
+        if depth == 0 and len(val) > 60:
+            return repr(val[:57] + "...")
+        return repr(val)
+    if isinstance(val, list):
+        if len(val) == 0:
+            return "[]"
+        if depth > 1:
+            return "[...]"
+        items = [_format_sample_value(v, depth + 1) for v in val[:5]]
+        if len(val) > 5:
+            items.append("...")
+        return f"[{', '.join(items)}]"
+    if isinstance(val, dict):
+        entries = list(val.items())
+        if len(entries) == 0:
+            return "{}"
+        if depth > 1:
+            return "{...}"
+        items = [f"{repr(k)}: {_format_sample_value(v, depth + 1)}" for k, v in entries[:6]]
+        if len(entries) > 6:
+            items.append("...")
+        return "{" + ", ".join(items) + "}"
+    return repr(val)
+
+
+def _build_example_docstring(fn: Dict[str, Any]) -> Optional[str]:
+    """Build a docstring with @example for a function."""
+    sample_input = fn.get("sampleInput")
+    sample_output = fn.get("sampleOutput")
+    if sample_input is None and sample_output is None:
+        return None
+
+    func_name = _to_snake_case(fn["name"])
+
+    # Format args
+    if isinstance(sample_input, list):
+        args_str = ", ".join(_format_sample_value(v) for v in sample_input)
+    elif sample_input is not None:
+        args_str = _format_sample_value(sample_input)
+    else:
+        args_str = ""
+
+    lines: List[str] = ['    """']
+    lines.append("    Example::")
+    lines.append("")
+    lines.append(f"        >>> {func_name}({args_str})")
+    if sample_output is not None:
+        ret_str = _format_sample_value(sample_output)
+        lines.append(f"        {ret_str}")
+    lines.append('    """')
+    return "\n".join(lines)
+
+
 def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     """Generate Python stub for a single function."""
     name = fn["name"]
@@ -342,7 +404,15 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
         result.extend(extracted_lines)
     result.extend(sections)
     result.append("")
-    result.append(sig)
+
+    # Add docstring with example if sample data is available
+    example_docstring = _build_example_docstring(fn)
+    if example_docstring:
+        result.append(sig.replace(": ...", ":"))
+        result.append(example_docstring)
+        result.append("    ...")
+    else:
+        result.append(sig)
 
     return "\n".join(result)
 
@@ -416,6 +486,15 @@ def generate_types() -> int:
             if p.get("paramNames"):
                 param_names = p["paramNames"]
 
+        # Use sample data from the first payload that has it
+        sample_input = None
+        sample_output = None
+        for p in payloads:
+            if p.get("sampleInput") is not None or p.get("sampleOutput") is not None:
+                sample_input = p.get("sampleInput")
+                sample_output = p.get("sampleOutput")
+                break
+
         entry: Dict[str, Any] = {
             "name": fn_name,
             "argsType": merged_args,
@@ -424,6 +503,10 @@ def generate_types() -> int:
         }
         if param_names:
             entry["paramNames"] = param_names
+        if sample_input is not None:
+            entry["sampleInput"] = sample_input
+        if sample_output is not None:
+            entry["sampleOutput"] = sample_output
         functions.append(entry)
 
     # Group by module

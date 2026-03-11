@@ -18,6 +18,7 @@ Works for ALL functions — including those defined in the entry file itself.
 from __future__ import annotations
 
 import atexit
+import json
 import os
 import sys
 import threading
@@ -179,6 +180,18 @@ if _entry_file:
 
                 if param_names:
                     payload["paramNames"] = param_names
+
+                if sample_input:
+                    try:
+                        json_test = json.dumps(sample_input)  # noqa: F841
+                        payload["sampleInput"] = sample_input
+                    except (TypeError, ValueError):
+                        pass
+                try:
+                    json_test = json.dumps(arg)  # noqa: F841
+                    payload["sampleOutput"] = arg
+                except (TypeError, ValueError):
+                    pass
 
                 enqueue(payload)
 
