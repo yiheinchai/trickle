@@ -21,6 +21,7 @@ import { coverageCommand } from "./commands/coverage";
 import { replayCommand } from "./commands/replay";
 import { docsCommand } from "./commands/docs";
 import { sampleCommand } from "./commands/sample";
+import { auditCommand } from "./commands/audit";
 
 const program = new Command();
 
@@ -249,6 +250,18 @@ program
   .option("-o, --out <path>", "Write fixtures to a file")
   .action(async (route: string | undefined, opts) => {
     await sampleCommand(route, opts);
+  });
+
+// trickle audit
+program
+  .command("audit")
+  .description("Analyze observed API types for quality issues — sensitive data, naming, complexity")
+  .option("--env <env>", "Filter by environment")
+  .option("--json", "Output raw JSON (for CI integration)")
+  .option("--fail-on-error", "Exit 1 if any errors are found")
+  .option("--fail-on-warning", "Exit 1 if any errors or warnings are found")
+  .action(async (opts) => {
+    await auditCommand(opts);
   });
 
 // Handle unhandled rejections

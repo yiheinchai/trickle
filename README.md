@@ -40,6 +40,7 @@ trickle dev
 - [MSW Mock Handlers](#msw-mock-handlers)
 - [JSON Schema Generation](#json-schema-generation)
 - [SWR Hooks](#swr-hooks)
+- [API Audit](#api-audit)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1757,6 +1758,62 @@ node test-swr-e2e.js
 
 ---
 
+## API Audit
+
+Analyze your observed API types for quality issues — sensitive data exposure, inconsistent naming, oversized responses, and more. Like a linter, but powered by actual runtime data.
+
+```bash
+trickle audit
+trickle audit --json                # Machine-readable output (for CI)
+trickle audit --fail-on-error       # Exit 1 if errors found (CI gate)
+trickle audit --fail-on-warning     # Exit 1 if errors or warnings found
+```
+
+trickle analyzes every observed route's request and response types and reports issues at three severity levels:
+
+```
+  API Audit Report
+  12 routes analyzed
+
+  ✗ 2 errors
+    • Response exposes potentially sensitive field "password" [GET /api/users]
+    • Response exposes potentially sensitive field "apiKey" [GET /api/users]
+
+  ⚠ 3 warnings
+    • Response has 20 top-level fields — consider pagination [GET /api/reports]
+    • Mixed naming: camelCase (orderId) and snake_case (order_status) [GET /api/orders]
+    • Field "status" has different types across routes: string, number
+
+  ℹ 1 info
+    • Response type is empty or unknown — may need more observations [POST /api/webhooks]
+
+  Total: 2 errors, 3 warnings, 1 info
+```
+
+Audit rules:
+| Rule | Severity | Detects |
+|------|----------|---------|
+| `sensitive-data` | error | Fields like `password`, `token`, `apiKey`, `secret`, `ssn` in responses |
+| `oversized-response` | warning | Response objects with >15 top-level fields |
+| `deep-nesting` | warning | Response types nested >4 levels deep |
+| `inconsistent-naming` | warning | Mixed camelCase and snake_case in the same object |
+| `type-inconsistency` | warning | Same field name with different types across routes |
+| `no-types` | warning | Functions with no type observations recorded |
+| `empty-response` | info | Routes with empty or unknown response types |
+
+Use in CI:
+
+```bash
+trickle audit --json --fail-on-error  # Block deploys that expose sensitive data
+```
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-audit-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2020,6 +2077,24 @@ npx trickle coverage --env production --stale-hours 48
 | `--json` | Output raw JSON |
 | `--fail-under <score>` | Exit 1 if health is below threshold (0-100) |
 | `--stale-hours <hours>` | Hours before a function is considered stale (default: 24) |
+
+### `trickle audit`
+
+Analyze observed API types for quality issues.
+
+```bash
+npx trickle audit                    # Interactive report
+npx trickle audit --json             # JSON for CI
+npx trickle audit --fail-on-error    # Exit 1 on errors
+npx trickle audit --fail-on-warning  # Exit 1 on errors or warnings
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--json` | Output raw JSON |
+| `--fail-on-error` | Exit 1 if any errors are found |
+| `--fail-on-warning` | Exit 1 if any errors or warnings are found |
 
 ### `trickle replay`
 
@@ -2349,6 +2424,7 @@ trickle/
 ├── test-msw-e2e.js          # MSW mock handler generation test
 ├── test-json-schema-e2e.js  # JSON Schema generation test
 ├── test-swr-e2e.js          # SWR hook generation test
+├── test-audit-e2e.js        # API quality audit test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2405,6 +2481,7 @@ node test-middleware-e2e.js   # Express validation middleware
 node test-msw-e2e.js          # MSW mock handler generation
 node test-json-schema-e2e.js  # JSON Schema generation
 node test-swr-e2e.js          # SWR hook generation
+node test-audit-e2e.js        # API quality audit
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
