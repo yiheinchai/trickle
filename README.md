@@ -59,7 +59,7 @@ trickle dev
 - [Universal Function Observation](#universal-function-observation)
 - [Source Code Annotation](#source-code-annotation)
 - [Sidecar Type Stubs](#sidecar-type-stubs)
-- [Local/Offline Mode](#localoffline-mode)
+- [Local/Offline Mode](#localoffline-mode) (with type accumulation across runs)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3027,6 +3027,45 @@ Output:
 3. After your code exits, the CLI reads the JSONL file and generates `.d.ts` / `.pyi` type stubs
 4. Your IDE picks up the sidecar type files immediately
 
+### Type accumulation across runs
+
+The JSONL file is **append-only** — each run adds new observations. When generating types, trickle **merges** all observations for each function using smart type merging:
+
+- Properties seen in **every** run stay **required**
+- Properties seen in **some** runs become **optional** (`?` in TypeScript, `total=False` in Python)
+- Different value types for the same property become **union types**
+- Array element types are merged across observations
+
+This means **your types get more accurate with each run**:
+
+```bash
+# Run 1: basic call
+trickle run app.js    # processOrder({id: 1, items: [...]})
+
+# Run 2: call with extra fields
+trickle run app.js    # processOrder({id: 2, items: [...], coupon: "SAVE10", priority: "express"})
+```
+
+After both runs, the generated `.d.ts` captures the full picture:
+```ts
+export interface ProcessOrderInput {
+  id: number;                         // required — seen in both runs
+  items: ProcessOrderInputItems[];    // required — seen in both runs
+  coupon?: string;                    // optional — only in run 2
+  priority?: string;                  // optional — only in run 2
+}
+
+export interface ProcessOrderOutput {
+  orderId: number;       // required
+  total: number;         // required
+  itemCount: number;     // required
+  currency: string;      // required
+  discounted?: boolean;  // optional — only in run 2
+}
+```
+
+This is especially powerful when running your **test suite** through trickle — tests exercise many code paths, so you get comprehensive types that cover all the shapes your functions actually handle.
+
 ### Environment variables
 
 | Variable | Description |
@@ -3041,9 +3080,10 @@ Each line in `observations.jsonl` is a JSON object:
 {"functionName":"parseConfig","module":"app","language":"js","typeHash":"abc123","argsType":{"kind":"tuple","elements":[...]},"returnType":{"kind":"object","properties":{...}}}
 ```
 
-**E2E test:**
+**E2E tests:**
 ```bash
-npm run build && node test-local-mode-e2e.js
+npm run build && node test-local-mode-e2e.js     # basic local mode
+npm run build && node test-accumulate-e2e.js      # type accumulation across runs
 ```
 
 ---

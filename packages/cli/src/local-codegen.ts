@@ -41,7 +41,163 @@ interface FunctionTypeData {
   module?: string;
 }
 
-// ── Read and deduplicate observations ──
+// ── Type merging ──
+
+/**
+ * Merge two TypeNodes into a single type that represents both.
+ *
+ * - Same primitive → keep as-is
+ * - Different primitives → union
+ * - Two objects → merge properties (missing props become optional via union with undefined)
+ * - Two arrays → merge element types
+ * - Two tuples with same length → merge positionally
+ * - Anything else → union
+ */
+function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
+  // Identical nodes
+  if (typeNodeKey(a) === typeNodeKey(b)) return a;
+
+  // Both objects: merge properties
+  if (a.kind === "object" && b.kind === "object") {
+    const aProps = a.properties || {};
+    const bProps = b.properties || {};
+    const allKeys = new Set([...Object.keys(aProps), ...Object.keys(bProps)]);
+    const merged: Record<string, TypeNode> = {};
+
+    for (const key of allKeys) {
+      const inA = key in aProps;
+      const inB = key in bProps;
+
+      if (inA && inB) {
+        // Property exists in both — merge their types
+        merged[key] = mergeTypeNodes(aProps[key], bProps[key]);
+      } else if (inA) {
+        // Only in A — mark as optional (union with undefined)
+        merged[key] = makeOptional(aProps[key]);
+      } else {
+        // Only in B — mark as optional
+        merged[key] = makeOptional(bProps[key]);
+      }
+    }
+
+    return { kind: "object", properties: merged };
+  }
+
+  // Both arrays: merge element types
+  if (a.kind === "array" && b.kind === "array" && a.element && b.element) {
+    return { kind: "array", element: mergeTypeNodes(a.element, b.element) };
+  }
+
+  // Both tuples with same length: merge positionally
+  if (a.kind === "tuple" && b.kind === "tuple") {
+    const aEls = a.elements || [];
+    const bEls = b.elements || [];
+    if (aEls.length === bEls.length) {
+      return {
+        kind: "tuple",
+        elements: aEls.map((el, i) => mergeTypeNodes(el, bEls[i])),
+      };
+    }
+  }
+
+  // Both unions: flatten and deduplicate
+  if (a.kind === "union" && b.kind === "union") {
+    return deduplicateUnion([...(a.members || []), ...(b.members || [])]);
+  }
+
+  // One is a union: add the other as a member
+  if (a.kind === "union") {
+    return deduplicateUnion([...(a.members || []), b]);
+  }
+  if (b.kind === "union") {
+    return deduplicateUnion([a, ...(b.members || [])]);
+  }
+
+  // Different kinds: create union
+  return deduplicateUnion([a, b]);
+}
+
+/**
+ * Make a type optional by adding undefined to it (for properties that
+ * don't appear in every observation).
+ */
+function makeOptional(node: TypeNode): TypeNode {
+  // Already has undefined
+  if (node.kind === "primitive" && node.name === "undefined") return node;
+  if (node.kind === "union") {
+    const members = node.members || [];
+    if (members.some((m) => m.kind === "primitive" && m.name === "undefined")) {
+      return node;
+    }
+    return {
+      kind: "union",
+      members: [...members, { kind: "primitive", name: "undefined" }],
+    };
+  }
+  return {
+    kind: "union",
+    members: [node, { kind: "primitive", name: "undefined" }],
+  };
+}
+
+/**
+ * Create a union type with deduplicated members.
+ */
+function deduplicateUnion(members: TypeNode[]): TypeNode {
+  const seen = new Set<string>();
+  const unique: TypeNode[] = [];
+  for (const m of members) {
+    // Flatten nested unions
+    if (m.kind === "union") {
+      for (const inner of m.members || []) {
+        const key = typeNodeKey(inner);
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(inner);
+        }
+      }
+    } else {
+      const key = typeNodeKey(m);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(m);
+      }
+    }
+  }
+  if (unique.length === 1) return unique[0];
+  return { kind: "union", members: unique };
+}
+
+/**
+ * Generate a string key for a TypeNode (for deduplication).
+ */
+function typeNodeKey(node: TypeNode): string {
+  switch (node.kind) {
+    case "primitive":
+      return `p:${node.name}`;
+    case "unknown":
+      return "unknown";
+    case "array":
+      return `a:${typeNodeKey(node.element!)}`;
+    case "tuple":
+      return `t:[${(node.elements || []).map(typeNodeKey).join(",")}]`;
+    case "object": {
+      const props = node.properties || {};
+      const entries = Object.keys(props)
+        .sort()
+        .map((k) => `${k}:${typeNodeKey(props[k])}`);
+      return `o:{${entries.join(",")}}`;
+    }
+    case "union": {
+      const members = (node.members || []).map(typeNodeKey).sort();
+      return `u:(${members.join("|")})`;
+    }
+    default:
+      return JSON.stringify(node);
+  }
+}
+
+// ── Read and merge observations ──
 
 function readObservations(jsonlPath: string): FunctionTypeData[] {
   if (!fs.existsSync(jsonlPath)) return [];
@@ -49,25 +205,45 @@ function readObservations(jsonlPath: string): FunctionTypeData[] {
   const content = fs.readFileSync(jsonlPath, "utf-8");
   const lines = content.trim().split("\n").filter(Boolean);
 
-  // Deduplicate: keep the latest observation per function name
-  const byFunction = new Map<string, IngestPayload>();
+  // Collect all observations per function, then merge types
+  const byFunction = new Map<string, { payloads: IngestPayload[] }>();
   for (const line of lines) {
     try {
       const payload = JSON.parse(line) as IngestPayload;
       if (payload.functionName && payload.argsType && payload.returnType) {
-        byFunction.set(payload.functionName, payload);
+        if (!byFunction.has(payload.functionName)) {
+          byFunction.set(payload.functionName, { payloads: [] });
+        }
+        byFunction.get(payload.functionName)!.payloads.push(payload);
       }
     } catch {
       // Skip malformed lines
     }
   }
 
-  return Array.from(byFunction.values()).map((p) => ({
-    name: p.functionName,
-    argsType: p.argsType,
-    returnType: p.returnType,
-    module: p.module,
-  }));
+  const results: FunctionTypeData[] = [];
+  for (const [name, { payloads }] of byFunction) {
+    // Start with the first observation, merge subsequent ones
+    let mergedArgs = payloads[0].argsType;
+    let mergedReturn = payloads[0].returnType;
+
+    for (let i = 1; i < payloads.length; i++) {
+      // Only merge if the type hash differs (different shape)
+      if (payloads[i].typeHash !== payloads[0].typeHash) {
+        mergedArgs = mergeTypeNodes(mergedArgs, payloads[i].argsType);
+        mergedReturn = mergeTypeNodes(mergedReturn, payloads[i].returnType);
+      }
+    }
+
+    results.push({
+      name,
+      argsType: mergedArgs,
+      returnType: mergedReturn,
+      module: payloads[payloads.length - 1].module, // use latest module
+    });
+  }
+
+  return results;
 }
 
 // ── Naming helpers ──
@@ -166,6 +342,30 @@ function typeNodeToTS(
   }
 }
 
+/**
+ * Check if a TypeNode is optional (union containing undefined).
+ * Returns { isOptional, innerType } where innerType has undefined stripped.
+ */
+function extractOptional(node: TypeNode): { isOptional: boolean; innerType: TypeNode } {
+  if (node.kind !== "union") return { isOptional: false, innerType: node };
+  const members = node.members || [];
+  const hasUndefined = members.some(
+    (m) => m.kind === "primitive" && m.name === "undefined",
+  );
+  if (!hasUndefined) return { isOptional: false, innerType: node };
+
+  const withoutUndefined = members.filter(
+    (m) => !(m.kind === "primitive" && m.name === "undefined"),
+  );
+  if (withoutUndefined.length === 0) {
+    return { isOptional: true, innerType: { kind: "primitive", name: "undefined" } };
+  }
+  if (withoutUndefined.length === 1) {
+    return { isOptional: true, innerType: withoutUndefined[0] };
+  }
+  return { isOptional: true, innerType: { kind: "union", members: withoutUndefined } };
+}
+
 function renderInterface(
   name: string,
   node: TypeNode,
@@ -174,8 +374,14 @@ function renderInterface(
   const keys = Object.keys(node.properties || {});
   const lines: string[] = [`export interface ${name} {`];
   for (const key of keys) {
-    const val = typeNodeToTS(node.properties![key], allExtracted, name, key, 1);
-    lines.push(`  ${key}: ${val};`);
+    const propType = node.properties![key];
+    const { isOptional, innerType } = extractOptional(propType);
+    const val = typeNodeToTS(innerType, allExtracted, name, key, 1);
+    if (isOptional) {
+      lines.push(`  ${key}?: ${val};`);
+    } else {
+      lines.push(`  ${key}: ${val};`);
+    }
   }
   lines.push(`}`);
   return lines.join("\n");
@@ -349,16 +555,60 @@ function renderPythonTypedDict(
   const keys = Object.keys(node.properties || {});
   const lines: string[] = [];
 
-  const entries = keys.map((key) => {
-    const pyType = typeNodeToPython(node.properties![key], extracted, name, key);
-    return `    ${toSnakeCase(key)}: ${pyType}`;
+  // Check if we have any optional fields — if so, use total=False pattern
+  const hasOptional = keys.some((key) => {
+    const { isOptional } = extractOptional(node.properties![key]);
+    return isOptional;
   });
 
-  lines.push(`class ${name}(TypedDict):`);
-  if (entries.length === 0) {
-    lines.push("    pass");
+  if (hasOptional) {
+    // Separate required and optional fields
+    const required: string[] = [];
+    const optional: string[] = [];
+
+    for (const key of keys) {
+      const propType = node.properties![key];
+      const { isOptional, innerType } = extractOptional(propType);
+      const pyType = isOptional
+        ? typeNodeToPython(innerType, extracted, name, key)
+        : typeNodeToPython(propType, extracted, name, key);
+
+      if (isOptional) {
+        optional.push(`    ${toSnakeCase(key)}: ${pyType}`);
+      } else {
+        required.push(`    ${toSnakeCase(key)}: ${pyType}`);
+      }
+    }
+
+    // Use TypedDict with total=False for optional fields
+    if (required.length > 0 && optional.length > 0) {
+      // Need two TypedDicts: one for required, inherit for optional
+      const baseName = `_${name}Required`;
+      lines.push(`class ${baseName}(TypedDict):`);
+      lines.push(...required);
+      lines.push("");
+      lines.push("");
+      lines.push(`class ${name}(${baseName}, total=False):`);
+      lines.push(...optional);
+    } else if (optional.length > 0) {
+      lines.push(`class ${name}(TypedDict, total=False):`);
+      lines.push(...optional);
+    } else {
+      lines.push(`class ${name}(TypedDict):`);
+      lines.push(...required);
+    }
   } else {
-    lines.push(...entries);
+    const entries = keys.map((key) => {
+      const pyType = typeNodeToPython(node.properties![key], extracted, name, key);
+      return `    ${toSnakeCase(key)}: ${pyType}`;
+    });
+
+    lines.push(`class ${name}(TypedDict):`);
+    if (entries.length === 0) {
+      lines.push("    pass");
+    } else {
+      lines.push(...entries);
+    }
   }
   return lines.join("\n");
 }
