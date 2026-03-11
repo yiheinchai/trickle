@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks, generateTypeGuards, generateMiddleware, generateMswHandlers, generateJsonSchemas, generateSwrHooks, generatePydanticModels, generateClassValidatorDtos, generateGraphqlSchema, generateTrpcRouter, generateAxiosClient } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks, generateTypeGuards, generateMiddleware, generateMswHandlers, generateJsonSchemas, generateSwrHooks, generatePydanticModels, generateClassValidatorDtos, generateGraphqlSchema, generateTrpcRouter, generateAxiosClient, generateInlineAnnotations } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -167,6 +167,11 @@ router.get("/", (req: Request, res: Response) => {
     } else if (format === "axios") {
       types = generateAxiosClient(functions);
       res.json({ types });
+      return;
+    } else if (format === "annotate") {
+      const lang = (language as string)?.toLowerCase() === "python" ? "python" : "typescript";
+      const annotations = generateInlineAnnotations(functions, lang as "typescript" | "python");
+      res.json({ annotations });
       return;
     } else if (format === "client") {
       types = generateApiClient(functions);

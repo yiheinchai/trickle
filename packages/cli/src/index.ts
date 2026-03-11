@@ -33,6 +33,7 @@ import { traceCommand } from "./commands/trace";
 import { packCommand } from "./commands/pack";
 import { unpackCommand } from "./commands/unpack";
 import { runCommand } from "./commands/run";
+import { annotateCommand } from "./commands/annotate";
 
 const program = new Command();
 
@@ -399,6 +400,16 @@ program
   .option("--dry-run", "List contents without importing")
   .action(async (file: string, opts) => {
     await unpackCommand(file, opts);
+  });
+
+// trickle annotate <file>
+program
+  .command("annotate <file>")
+  .description("Add runtime-observed type annotations directly into source files")
+  .option("--env <env>", "Filter by environment")
+  .option("--dry-run", "Preview changes without modifying the file")
+  .action(async (file: string, opts) => {
+    await annotateCommand(file, opts);
   });
 
 // Handle unhandled rejections

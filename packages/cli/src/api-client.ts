@@ -210,6 +210,27 @@ export async function fetchCodegen(opts?: CodegenOpts): Promise<{ types: string 
   });
 }
 
+export interface AnnotationParam {
+  name: string;
+  type: string;
+}
+
+export interface AnnotationEntry {
+  params: AnnotationParam[];
+  returnType: string;
+}
+
+export async function fetchAnnotations(opts?: {
+  env?: string;
+  language?: string;
+}): Promise<{ annotations: Record<string, AnnotationEntry> }> {
+  return fetchJson("/api/codegen", {
+    env: opts?.env,
+    language: opts?.language,
+    format: "annotate",
+  });
+}
+
 export interface MockRoute {
   method: string;
   path: string;

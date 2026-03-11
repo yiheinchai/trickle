@@ -57,6 +57,7 @@ trickle dev
 - [Type-Annotated API Tracing](#type-annotated-api-tracing)
 - [Portable Type Bundles](#portable-type-bundles)
 - [Universal Function Observation](#universal-function-observation)
+- [Source Code Annotation](#source-code-annotation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2768,7 +2769,73 @@ node test-observe-py-e2e.js   # Python
 
 ---
 
+## Source Code Annotation
+
+Write runtime-observed types directly into your source files — no manual type writing needed.
+
+```bash
+# First observe your code
+trickle run "node app.js"
+
+# Then annotate source files with observed types
+trickle annotate src/helpers.js
+trickle annotate src/utils.py
+```
+
+**Before:**
+```javascript
+function parseConfig(raw) {
+  return { host: raw.host, port: raw.port, debug: raw.debug };
+}
+```
+
+**After `trickle annotate`:**
+```javascript
+function parseConfig(raw: { host: string; port: number; debug: boolean }): { host: string; port: number; debug: boolean } {
+  return { host: raw.host, port: raw.port, debug: raw.debug };
+}
+```
+
+Works for Python too:
+```python
+# Before
+def parse_config(raw):
+    ...
+
+# After trickle annotate
+def parse_config(raw: TypedDict("_", {"host": str, "port": float, "debug": bool})) -> TypedDict("_", {"host": str, "port": float, "debug": bool}):
+    ...
+```
+
+Use `--dry-run` to preview changes without modifying files:
+```bash
+trickle annotate src/helpers.js --dry-run
+```
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/backend && npm run build --workspace=packages/cli
+node test-annotate-e2e.js
+```
+
+---
+
 ## CLI Reference
+
+### `trickle annotate <file>`
+
+Add runtime-observed type annotations directly into a source file.
+
+```bash
+trickle annotate src/helpers.js       # JavaScript/TypeScript
+trickle annotate src/utils.py         # Python
+trickle annotate src/helpers.js --dry-run  # Preview without writing
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--dry-run` | Preview changes without modifying the file |
 
 ### `trickle run <command>`
 
