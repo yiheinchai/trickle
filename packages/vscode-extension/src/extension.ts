@@ -368,13 +368,41 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     const showSamples = config.get('showSampleValues', true);
     const parts: string[] = [];
 
+    // For tensor variables with funcName, collect all observations of the same
+    // variable in the same function to show "shape flow" (how shape transforms)
+    const shapeFlowShown = new Set<string>();
+
     for (const obs of candidates) {
       const typeStr = typeNodeToString(obs.type);
       const className = obs.type?.class_name;
       const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
 
-      // For tensors, show a richer display
-      if (className === 'Tensor' || className === 'ndarray') {
+      // For tensors, show shape flow if available
+      if ((className === 'Tensor' || className === 'ndarray') && obs.funcName) {
+        const flowKey = `${obs.varName}:${obs.funcName}`;
+        if (shapeFlowShown.has(flowKey)) continue;
+        shapeFlowShown.add(flowKey);
+
+        // Find all observations of this variable in the same function
+        const flowObs = collectShapeFlow(lineMap, obs.varName, obs.funcName);
+
+        if (flowObs.length > 1) {
+          // Show shape flow chain
+          parts.push(`**\`${obs.varName}\`**${funcCtx} — shape flow:`);
+          const flowLines: string[] = [];
+          for (const fo of flowObs) {
+            const shape = extractShapeStr(fo.type);
+            const marker = fo.line === obs.line ? ' **←**' : '';
+            flowLines.push(`  L${fo.line}: \`${shape}\`${marker}`);
+          }
+          parts.push(flowLines.join('\n\n'));
+        } else {
+          parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
+          if (showSamples && obs.sample !== undefined) {
+            parts.push(`\n*Value:* \`${obs.sample}\``);
+          }
+        }
+      } else if (className === 'Tensor' || className === 'ndarray') {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         if (showSamples && obs.sample !== undefined) {
           parts.push(`\n*Value:* \`${obs.sample}\``);
@@ -527,6 +555,48 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
 
     return hints;
   }
+}
+
+/** Collect all observations of a variable within the same function, sorted by line. */
+function collectShapeFlow(
+  lineMap: Map<number, VariableObservation[]>,
+  varName: string,
+  funcName: string,
+): VariableObservation[] {
+  const results: VariableObservation[] = [];
+  for (const [, obsArr] of lineMap) {
+    for (const obs of obsArr) {
+      if (obs.varName === varName && obs.funcName === funcName) {
+        results.push(obs);
+      }
+    }
+  }
+  results.sort((a, b) => a.line - b.line);
+  return results;
+}
+
+/** Extract a concise shape string from a tensor TypeNode. */
+function extractShapeStr(type: TypeNode): string {
+  if (!type.properties) return type.class_name || 'unknown';
+  const shape = type.properties['shape'];
+  const dtype = type.properties['dtype'];
+  const device = type.properties['device'];
+  const gradFn = type.properties['grad_fn'];
+
+  let result = type.class_name || 'Tensor';
+  if (shape?.kind === 'primitive' && shape.name) {
+    result += shape.name;
+  }
+  if (dtype?.kind === 'primitive' && dtype.name) {
+    result += ' ' + dtype.name.replace('torch.', '').replace('numpy.', '');
+  }
+  if (device?.kind === 'primitive' && device.name && device.name !== 'cpu') {
+    result += ` @${device.name}`;
+  }
+  if (gradFn?.kind === 'primitive' && gradFn.name) {
+    result += ` (${gradFn.name})`;
+  }
+  return result;
 }
 
 function registerInlineHints(context: vscode.ExtensionContext, selector: vscode.DocumentSelector) {
