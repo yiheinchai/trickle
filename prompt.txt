@@ -37,3 +37,24 @@
 
   vitest/vite plugin integration, TypeScript annotate with sample data, and
   npm publishing setup. Fix these before adding anything new.
+
+
+  /loop 10min Think of 1 item to work on that will allow trickle to be used effectively and
+  working in the repos in the /dev directory (/Users/yihein.chai/Documents/dev/*), for example for repayment-service/scripts/cpaE2eHappyPath.test.ts.
+  my key goal is not just to capture API types but rather to capture the type of any variable 
+  within any piece of code that i am running in that repo so that i can effectively debug.
+ currently, i have to either add a bunch of log statements, or use a debugger to step through each line of the code and
+ inspect what each variable value is to know where it is failing and which code logic / or which data is not what i expect.
+ with trickle, i want to be able to run the code, either with test file or for real, and be able to see
+ the cached types and example data by simply hovering over any variable in vs code.
+ please test on real code in the repos in the dev directory. most important ones to test on are repayment-service, transaction-service, account-service, etc.
+ please commit and push once that piece of work is completed and fully working.
+
+
+   /loop 10min Think of 1 item to work on python pytorch machine learning repos within any piece of code that i am running in that repo so that i can effectively debug.
+ currently, i have to either add a bunch of print statements, or use a debugger to step through each line of the code and
+ inspect what the shape is at everyline is to know where it is failing and which code logic / or which data is not what i expect.
+ with trickle, i want to be able to run the code, and be able to see
+ the cached types/shapes at each part of the code, simply hovering over each, and also has the shapes inline
+ please test on real code in the ML repos you can find online. for example test on karpathy's gpt-2 implementation.
+ please commit and push once that piece of work is completed and fully working.
