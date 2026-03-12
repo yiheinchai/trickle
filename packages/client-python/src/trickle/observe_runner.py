@@ -11,6 +11,7 @@ This is invoked by ``trickle run`` for Python commands.
 
 from __future__ import annotations
 
+import os
 import runpy
 import sys
 
@@ -48,19 +49,65 @@ def main() -> None:
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 
+    _user_code_error = None
+
     if target.endswith(".py"):
         # Use AST transformation to observe entry file functions
+        _transform_failed = False
         try:
             from trickle._entry_transform import run_entry_with_observation
             run_entry_with_observation(target)
+        except SystemExit:
+            raise
         except Exception as exc:
-            if _debug:
-                import traceback
-                print(f"[trickle] Entry transform failed, falling back to runpy: {exc}")
-                traceback.print_exc()
-            runpy.run_path(target, run_name="__main__")
+            # Check if this is a transform/setup error vs user code error
+            # Transform errors happen before user code runs (SyntaxError in transform, etc.)
+            # User code errors propagate through runpy
+            # Heuristic: if the exception isn't an import/syntax error from
+            # trickle internals, treat it as a user code error.
+            # Transform-only failures are typically ImportError, SyntaxError,
+            # or NameError from the preamble code.
+            _is_trickle_internal = (
+                isinstance(exc, (SyntaxError, ImportError))
+                or (isinstance(exc, NameError) and "trickle" in str(exc))
+            )
+            _has_user_frames = not _is_trickle_internal
+
+            if _has_user_frames:
+                # User code crashed — show error context and re-raise
+                _user_code_error = exc
+            else:
+                # Transform/setup error — fall back to plain runpy
+                if _debug:
+                    import traceback
+                    print(f"[trickle] Entry transform failed, falling back to runpy: {exc}")
+                    traceback.print_exc()
+                _transform_failed = True
+
+        if _transform_failed:
+            try:
+                runpy.run_path(target, run_name="__main__")
+            except SystemExit:
+                raise
+            except BaseException as exc:
+                _user_code_error = exc
     else:
-        runpy.run_module(target, run_name="__main__", alter_sys=True)
+        try:
+            runpy.run_module(target, run_name="__main__", alter_sys=True)
+        except SystemExit:
+            raise
+        except BaseException as exc:
+            _user_code_error = exc
+
+    if _user_code_error is not None:
+        # Print tensor shape context for the error before re-raising
+        if _trace_vars:
+            try:
+                from trickle._error_context import print_error_context
+                print_error_context(_user_code_error)
+            except Exception:
+                pass
+        raise _user_code_error
 
 
 if __name__ == "__main__":
