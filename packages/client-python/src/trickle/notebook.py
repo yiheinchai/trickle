@@ -346,6 +346,17 @@ def _make_cell_id(cell_idx: int) -> str:
     return os.path.join(os.getcwd(), f"__notebook__cell_{cell_idx}.py")
 
 
+def _clear_cell_data(cell_id: str) -> None:
+    """Flush the dedup cache before a cell execution.
+
+    Clears the entire dedup cache so all variables are re-traced with fresh
+    line numbers when a cell is re-run after editing. The JSONL file is NOT
+    modified — the VSCode extension handles deduplication by preferring the
+    most recent records.
+    """
+    _tv_cache.clear()
+
+
 class _TrickleASTTransformer:
     """IPython-compatible AST transformer.
 
@@ -357,6 +368,8 @@ class _TrickleASTTransformer:
         global _cell_counter
         _cell_counter += 1
         cell_id = _make_cell_id(_cell_counter)
+        # Clear stale data for this cell before re-tracing
+        _clear_cell_data(cell_id)
         return _transformer.transform(node, _cell_counter, cell_id)
 
 
