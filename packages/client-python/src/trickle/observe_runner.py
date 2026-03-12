@@ -24,6 +24,16 @@ def main() -> None:
         print("All exported functions in user modules are auto-wrapped.")
         sys.exit(1)
 
+    # Clear previous trace data so only the latest run's results show
+    _local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+    _vars_file = os.path.join(_local_dir, "variables.jsonl")
+    try:
+        if os.path.exists(_vars_file):
+            with open(_vars_file, "w") as _f:
+                _f.truncate(0)
+    except OSError:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")

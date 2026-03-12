@@ -37,6 +37,8 @@ let notebookCellIndex: NotebookCellIndex = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let inlineHintsProvider: vscode.Disposable | undefined;
+/** Fires to tell VSCode to re-query inlay hints after data changes. */
+const inlayHintsChangeEmitter = new vscode.EventEmitter<void>();
 
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
@@ -64,15 +66,24 @@ export function activate(context: vscode.ExtensionContext) {
   // Register inline hints provider
   registerInlineHints(context, selector);
 
-  // Watch for changes to variables.jsonl
+  // Watch for changes to variables.jsonl with debouncing for rapid writes
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders) {
     const pattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/variables.jsonl');
     fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-    fileWatcher.onDidChange(() => loadAllVariables());
-    fileWatcher.onDidCreate(() => loadAllVariables());
+
+    let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+    const debouncedReload = () => {
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => loadAllVariables(), 300);
+    };
+
+    fileWatcher.onDidChange(debouncedReload);
+    fileWatcher.onDidCreate(debouncedReload);
     fileWatcher.onDidDelete(() => {
+      if (reloadTimer) clearTimeout(reloadTimer);
       varIndex.clear();
+      notebookCellIndex.clear();
       updateStatusBar();
       refreshInlineHints();
     });
@@ -119,6 +130,7 @@ export function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
   fileWatcher?.dispose();
   inlineHintsProvider?.dispose();
+  inlayHintsChangeEmitter.dispose();
 }
 
 function countVars(): number {
@@ -425,6 +437,8 @@ class TrickleHoverProvider implements vscode.HoverProvider {
 
 /** Inline hints (inlay hints) — show type after variable declarations */
 class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
+  onDidChangeInlayHints = inlayHintsChangeEmitter.event;
+
   provideInlayHints(
     document: vscode.TextDocument,
     range: vscode.Range,
@@ -621,9 +635,8 @@ function registerInlineHints(context: vscode.ExtensionContext, selector: vscode.
 }
 
 function refreshInlineHints() {
-  // Trigger inlay hints refresh by firing a dummy config change
-  // VS Code automatically re-queries inlay hints when the document changes
-  // For now, we rely on the file watcher triggering a refresh
+  // Fire the event emitter so VSCode re-queries all inlay hints providers
+  inlayHintsChangeEmitter.fire();
 }
 
 function escapeRegex(str: string): string {
