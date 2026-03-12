@@ -632,6 +632,11 @@ def _find_source_file(module_name: str) -> Optional[str]:
     """Try to find the source file for a module name."""
     import sys as _sys
 
+    # IPython/Jupyter interactive module — write to cwd
+    if module_name == "__interactive__":
+        cwd = os.getcwd()
+        return os.path.join(cwd, "__interactive__.py")
+
     # Check sys.modules for the actual file
     mod = _sys.modules.get(module_name)
     if mod and hasattr(mod, "__file__") and mod.__file__:

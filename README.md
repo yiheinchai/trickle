@@ -67,6 +67,7 @@ trickle dev
   - [Type Coverage Report (`TRICKLE_COVERAGE=1`)](#type-coverage-report-trickle_coverage1)
   - [Type Summary (`TRICKLE_SUMMARY=1`)](#type-summary-trickle_summary1)
   - [Class Method Observation](#class-method-observation)
+  - [IPython & Jupyter Notebook Support](#ipython--jupyter-notebook-support)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3507,6 +3508,61 @@ class Calculator:
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-class-e2e.js
+```
+
+### IPython & Jupyter Notebook Support
+
+`import trickle.auto` works inside IPython sessions and Jupyter notebooks with zero extra configuration. Types are generated and displayed **after each cell execution** — no need to wait for process exit.
+
+**In a Jupyter notebook:**
+```python
+# Cell 1:
+import trickle.auto
+# [trickle.auto] Active in Jupyter notebook — types update after each cell
+
+# Cell 2:
+from my_data_lib import process_records, summarize
+
+results = process_records(raw_data)
+summary = summarize(results)
+# [trickle.auto] Discovered types (2 new, 0 changed):
+#   + process_records(data: list[dict]) → { records: list[dict], count: float }  NEW
+#   + summarize(data: dict) → { mean: float, std: float, total: float }          NEW
+
+# Cell 3: define functions directly in the notebook
+def transform(values, factor=2.0):
+    return {"scaled": [v * factor for v in values], "factor": factor}
+
+transform([1, 2, 3])
+# [trickle.auto] Discovered types (1 new, 0 changed):
+#   + transform(values: list[float], factor: float) → { scaled: list[float], factor: float }  NEW
+```
+
+**In IPython:**
+```bash
+$ ipython
+In [1]: import trickle.auto
+[trickle.auto] Active in IPython — types update after each cell
+
+In [2]: from my_lib import calculate
+   ...: calculate(42, 3.14)
+[trickle.auto] Discovered types (1 new, 0 changed):
+  + calculate(x: float, y: float) → { result: float }  NEW
+```
+
+**How it works:**
+- Detects IPython/Jupyter via `get_ipython()` — no manual configuration needed
+- Registers a `post_run_cell` event hook that triggers type generation after each cell
+- Functions from imported modules are observed via the import hook (same as scripts)
+- Functions defined in cells are observed via `sys.setprofile` (same as entry file functions)
+- Type summary is always shown in interactive mode (no need for `TRICKLE_SUMMARY=1`)
+- `.pyi` stubs are generated for imported modules (next to their source files)
+- Cell-defined functions generate an `__interactive__.pyi` in the working directory
+- Automatically detects Jupyter notebook vs IPython terminal
+
+**E2E test:**
+```bash
+node test-jupyter-e2e.js
 ```
 
 ---

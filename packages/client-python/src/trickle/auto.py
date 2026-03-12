@@ -10,9 +10,11 @@ This module:
 3. Installs a sys.setprofile hook to observe functions in the entry file
 4. Runs a background thread that generates .pyi files from observations
 5. On process exit, does a final type generation
+6. In IPython/Jupyter, generates types after each cell execution
 
 No CLI. No backend. No configuration. Just types.
 Works for ALL functions — including those defined in the entry file itself.
+Works in Jupyter notebooks — types update after each cell.
 """
 
 from __future__ import annotations
@@ -112,33 +114,59 @@ _initial_timer.start()
 # observe functions whose code object lives in the entry file.
 
 _entry_file: str | None = None
+_ipython_mode = False
 
-# Determine the entry file path
-if hasattr(sys, "argv") and sys.argv:
+# Check if we're in IPython FIRST — this affects entry file handling
+try:
+    _ip_check = get_ipython()  # type: ignore[name-defined]  # noqa: F821
+    if _ip_check is not None:
+        _ipython_mode = True
+except NameError:
+    pass
+
+# Determine the entry file path (skip in IPython — argv[0] points to ipython binary)
+if not _ipython_mode and hasattr(sys, "argv") and sys.argv:
     _candidate = os.path.abspath(sys.argv[0])
     if os.path.isfile(_candidate):
         _entry_file = _candidate
 
-if _entry_file:
+if _entry_file or _ipython_mode:
     from trickle.type_inference import infer_type  # noqa: E402
     from trickle.type_hash import hash_type  # noqa: E402
     from trickle.transport import enqueue  # noqa: E402
     from trickle.env_detect import detect_environment  # noqa: E402
 
     _env = detect_environment()
-    _entry_module = os.path.basename(_entry_file).rsplit(".", 1)[0]
+    if _ipython_mode:
+        _entry_module = "__interactive__"
+    elif _entry_file:
+        _entry_module = os.path.basename(_entry_file).rsplit(".", 1)[0]
+    else:
+        _entry_module = "__interactive__"
     _pending_calls: dict = {}  # id(frame) -> (name, args_type, sample_input)
     _old_profile = sys.getprofile()
 
     def _entry_profile(frame: object, event: str, arg: object) -> None:
-        """Profile hook that observes function calls in the entry file."""
+        """Profile hook that observes function calls in the entry file (or IPython cells)."""
         # Chain to previous profiler if any
         if _old_profile is not None:
             _old_profile(frame, event, arg)
 
         try:
-            # Fast path: skip non-entry-file frames
-            if frame.f_code.co_filename != _entry_file:  # type: ignore[union-attr]
+            # Fast path: skip non-relevant frames
+            co_filename = frame.f_code.co_filename  # type: ignore[union-attr]
+            if _ipython_mode:
+                # In IPython, observe functions from cells (filename contains
+                # 'ipykernel' or starts with '<ipython-input-')
+                is_cell = (
+                    "<ipython-input-" in co_filename
+                    or "ipykernel_" in co_filename
+                    or co_filename.startswith("/tmp/ipykernel")
+                    or co_filename == "<stdin>"
+                )
+                if not is_cell:
+                    return
+            elif co_filename != _entry_file:
                 return
 
             if event == "call":
@@ -230,13 +258,120 @@ if _entry_file:
 def _exit_handler() -> None:
     # Remove profile hook first (no more observations needed)
     try:
-        if _entry_file:
+        if _entry_file or _ipython_mode:
             sys.setprofile(None)
     except Exception:
         pass
 
     _stop_event.set()
-    _run_generation(True)
+    # In IPython mode, don't print "written to .pyi" on kernel shutdown
+    # since types were already shown after each cell
+    if not _ipython_mode:
+        _run_generation(True)
+    else:
+        # Just do a quiet final generation
+        try:
+            generate_types()
+        except Exception:
+            pass
 
 
 atexit.register(_exit_handler)
+
+
+# ── IPython / Jupyter integration ──
+#
+# When running inside IPython or a Jupyter notebook, atexit may not fire
+# for hours (until the kernel dies). Instead, register a post_run_cell
+# event that triggers type generation after each cell execution. This
+# gives developers immediate type feedback as they work interactively.
+#
+# Functions defined in cells live in __main__ and are observed by
+# sys.setprofile. Functions in imported modules are observed by the
+# import hook. Both work normally — the only difference is *when*
+# types are generated and displayed.
+
+_ipython_hooked = False
+
+
+def _is_ipython() -> bool:
+    """Check if we're running inside IPython/Jupyter."""
+    try:
+        ip = get_ipython()  # type: ignore[name-defined]  # noqa: F821
+        return ip is not None
+    except NameError:
+        return False
+
+
+def _post_run_cell(result: object = None) -> None:
+    """IPython post_run_cell event handler — generate types after each cell."""
+    global _last_function_count
+
+    try:
+        count = generate_types()
+        if count == -1:
+            return  # no change since last generation
+
+        if count > 0 and count != _last_function_count:
+            # Build a compact summary of what's new
+            new_count = count - _last_function_count if _last_function_count > 0 else count
+            _last_function_count = count
+
+            # Always show summary in interactive mode (most useful feedback)
+            from trickle._auto_codegen import generate_type_summary as _gen_summary
+            try:
+                # Temporarily enable summary for the call
+                old_val = os.environ.get("TRICKLE_SUMMARY")
+                os.environ["TRICKLE_SUMMARY"] = "1"
+                summary = _gen_summary()
+                if old_val is None:
+                    del os.environ["TRICKLE_SUMMARY"]
+                else:
+                    os.environ["TRICKLE_SUMMARY"] = old_val
+
+                if summary:
+                    print(summary)
+                else:
+                    print(f"[trickle.auto] {count} function type(s) observed")
+            except Exception:
+                print(f"[trickle.auto] {count} function type(s) observed (+{new_count} new)")
+
+    except Exception:
+        pass
+
+
+def _setup_ipython() -> None:
+    """Register IPython cell execution hooks if running interactively."""
+    global _ipython_hooked
+    if _ipython_hooked:
+        return
+    _ipython_hooked = True
+
+    try:
+        ip = get_ipython()  # type: ignore[name-defined]  # noqa: F821
+        if ip is None:
+            return
+
+        # Register the post-cell hook
+        ip.events.register("post_run_cell", _post_run_cell)
+
+        # Detect notebook vs terminal
+        cls_name = type(ip).__name__
+        if cls_name == "ZMQInteractiveShell":
+            env_label = "Jupyter notebook"
+        elif cls_name == "TerminalInteractiveShell":
+            env_label = "IPython"
+        else:
+            env_label = "IPython"
+
+        print(f"[trickle.auto] Active in {env_label} — types update after each cell")
+
+        if _debug:
+            print(f"[trickle.auto] IPython shell class: {cls_name}")
+
+    except Exception:
+        pass
+
+
+if _is_ipython():
+    _setup_ipython()
