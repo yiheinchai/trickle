@@ -1,6 +1,6 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Runtime type observability for JavaScript applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,6 +23,12 @@
   "devDependencies": {
     "typescript": "^5.4.0"
   },
-  "keywords": ["observability", "types", "runtime", "lambda", "express"],
+  "keywords": [
+    "observability",
+    "types",
+    "runtime",
+    "lambda",
+    "express"
+  ],
   "license": "MIT"
 }
