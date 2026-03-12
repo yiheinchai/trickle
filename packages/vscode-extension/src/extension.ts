@@ -13,6 +13,7 @@ interface VariableObservation {
   type: TypeNode;
   typeHash: string;
   sample: unknown;
+  funcName?: string;
 }
 
 interface TypeNode {
@@ -370,15 +371,16 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     for (const obs of candidates) {
       const typeStr = typeNodeToString(obs.type);
       const className = obs.type?.class_name;
+      const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
 
       // For tensors, show a richer display
       if (className === 'Tensor' || className === 'ndarray') {
-        parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+        parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         if (showSamples && obs.sample !== undefined) {
           parts.push(`\n*Value:* \`${obs.sample}\``);
         }
       } else {
-        parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+        parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         if (showSamples && obs.sample !== undefined) {
           const sampleStr = formatSample(obs.sample);
           parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
@@ -428,9 +430,13 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
           hint.paddingLeft = true;
           hint.paddingRight = false;
+          const tooltipParts: string[] = [];
+          if (obs.funcName) tooltipParts.push(`**Function:** \`${obs.funcName}\``);
           if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-            const sampleStr = formatSample(obs.sample);
-            hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+            tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+          }
+          if (tooltipParts.length > 0) {
+            hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
           }
           hints.push(hint);
           continue;
@@ -505,10 +511,14 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         hint.paddingLeft = false;
         hint.paddingRight = true;
 
-        // Add sample value as tooltip
+        // Add funcName and sample value as tooltip
+        const tooltipParts: string[] = [];
+        if (obs.funcName) tooltipParts.push(`**Function:** \`${obs.funcName}\``);
         if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-          const sampleStr = formatSample(obs.sample);
-          hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+          tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+        }
+        if (tooltipParts.length > 0) {
+          hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
         }
 
         hints.push(hint);
