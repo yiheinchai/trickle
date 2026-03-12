@@ -408,11 +408,17 @@ function findOriginalLine(origLines: string[], varName: string, transformedLine:
  * Searches for const/let/var { or [ patterns containing at least one of the variable names.
  */
 function findOriginalLineDestructured(origLines: string[], varNames: string[], transformedLine: number): number {
+  // Match names as actual bindings (not renamed property keys).
+  // In `{ data: customer }`, 'data' is a key (followed by ':'), 'customer' is the binding.
+  // In `{ data, error }`, 'data' is a binding (followed by ',' or '}').
+  // We check: name followed by comma, }, ], =, whitespace, or end — NOT followed by ':' (rename).
+  const namePatterns = varNames.map(n => new RegExp(`\\b${escapeRegexStr(n)}\\b(?!\\s*:)`));
+
   for (let delta = 0; delta <= 80; delta++) {
     const fwd = transformedLine - 1 + delta;
     if (fwd >= 0 && fwd < origLines.length) {
       const line = origLines[fwd];
-      if (/\b(const|let|var)\s+[\[{]/.test(line) && varNames.some(n => line.includes(n))) {
+      if (/\b(const|let|var)\s+[\[{]/.test(line) && namePatterns.some(p => p.test(line))) {
         return fwd + 1;
       }
     }
@@ -420,7 +426,7 @@ function findOriginalLineDestructured(origLines: string[], varNames: string[], t
       const bwd = transformedLine - 1 - delta;
       if (bwd >= 0 && bwd < origLines.length) {
         const line = origLines[bwd];
-        if (/\b(const|let|var)\s+[\[{]/.test(line) && varNames.some(n => line.includes(n))) {
+        if (/\b(const|let|var)\s+[\[{]/.test(line) && namePatterns.some(p => p.test(line))) {
           return bwd + 1;
         }
       }
