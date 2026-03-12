@@ -3280,6 +3280,25 @@ npx tsx -r trickle-observe/auto src/server.ts
 
 Fully compatible with tsx/esbuild compilation, path aliases (`@config/env`, `@routes/users.route`), DI containers (tsyringe, inversify), and Express 5. All exported functions are instrumented automatically, including class prototype methods. Classes themselves are preserved (not wrapped) to avoid breaking decorators and dependency injection.
 
+**Express route auto-detection** — When your app requires `express`, trickle automatically wraps both `express()` and `Router()` to capture route types. Every `router.get()`, `router.post()`, etc. records `{ body, params, query }` input and `res.json()` output as typed data. Route types are written to `.trickle/routes.d.ts`:
+
+```typescript
+// .trickle/routes.d.ts (auto-generated)
+export interface PostAuthSignupInput {
+  body: { email: string; password: string };
+}
+export interface PostAuthSignupOutput {
+  data: { id: string; email: string; createdAt: Date; updatedAt: Date };
+  message: string;
+}
+export interface TrickleRoutes {
+  'GET /users': { input: Record<string, never>; output: GetUsersOutput };
+  'POST /auth/signup': { input: PostAuthSignupInput; output: PostAuthSignupOutput };
+}
+```
+
+This works with Express 4 and 5, Router-based route definitions, and middleware chains. No code changes needed — just run with `trickle/auto`.
+
 **TypeScript (native)** — works natively on Node.js 22.6+ (built-in type stripping):
 ```bash
 node --import trickle/auto-esm app.ts
