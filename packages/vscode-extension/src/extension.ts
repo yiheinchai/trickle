@@ -473,6 +473,8 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           hint.paddingRight = false;
           const tooltipParts: string[] = [];
           if (obs.funcName) tooltipParts.push(`**Function:** \`${obs.funcName}\``);
+          const retStats = formatTensorStats(obs.type);
+          if (retStats) tooltipParts.push(`**Stats:**${retStats}`);
           if (config.get('showSampleValues', true) && obs.sample !== undefined) {
             tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
           }
@@ -552,9 +554,11 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         hint.paddingLeft = false;
         hint.paddingRight = true;
 
-        // Add funcName and sample value as tooltip
+        // Add funcName, tensor stats, and sample value as tooltip
         const tooltipParts: string[] = [];
         if (obs.funcName) tooltipParts.push(`**Function:** \`${obs.funcName}\``);
+        const stats = formatTensorStats(obs.type);
+        if (stats) tooltipParts.push(`**Stats:**${stats}`);
         if (config.get('showSampleValues', true) && obs.sample !== undefined) {
           tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
         }
