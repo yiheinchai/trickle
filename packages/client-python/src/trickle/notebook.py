@@ -52,7 +52,8 @@ def _get_vars_file() -> str:
     return _tv_file
 
 
-def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx: int) -> None:
+def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx: int,
+                func_name: Optional[str] = None) -> None:
     """Trace a variable assignment in a notebook cell.
 
     This is injected into each cell's namespace and called after every
@@ -84,7 +85,7 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         else:
             sample = str(value)[:100]
 
-        record = {
+        record: dict = {
             "kind": "variable",
             "varName": var_name,
             "line": line_no,
@@ -95,6 +96,8 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
             "typeHash": type_hash,
             "sample": sample,
         }
+        if func_name:
+            record["funcName"] = func_name
 
         vars_file = _get_vars_file()
         with open(vars_file, "a") as f:
@@ -131,16 +134,19 @@ class _TrickleCellTransformer(ast.NodeTransformer):
 
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 # Recurse into function bodies with parameter traces
-                param_traces = self._make_param_traces(node)
-                node.body = param_traces + self._transform_func_body(node.body)
+                func_name = node.name
+                param_traces = self._make_param_traces(node, func_name=func_name)
+                node.body = param_traces + self._transform_func_body(node.body, func_name=func_name)
                 continue
 
             if isinstance(node, ast.ClassDef):
                 # Recurse into class bodies (methods)
+                class_name = node.name
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        param_traces = self._make_param_traces(item)
-                        item.body = param_traces + self._transform_func_body(item.body)
+                        func_name = f"{class_name}.{item.name}"
+                        param_traces = self._make_param_traces(item, func_name=func_name)
+                        item.body = param_traces + self._transform_func_body(item.body, func_name=func_name)
                 continue
 
             if isinstance(node, (ast.For, ast.AsyncFor)):
@@ -175,61 +181,61 @@ class _TrickleCellTransformer(ast.NodeTransformer):
 
         return new_body
 
-    def _transform_func_body(self, body: list) -> list:
+    def _transform_func_body(self, body: list, func_name: str | None = None) -> list:
         """Insert trace calls inside function bodies."""
         new_body: list = []
         for node in body:
             new_body.append(node)
 
             if isinstance(node, (ast.For, ast.AsyncFor)):
-                traces = self._make_for_traces(node)
-                node.body = traces + self._transform_func_body(node.body)
+                traces = self._make_for_traces(node, func_name=func_name)
+                node.body = traces + self._transform_func_body(node.body, func_name=func_name)
                 if node.orelse:
-                    node.orelse = self._transform_func_body(node.orelse)
+                    node.orelse = self._transform_func_body(node.orelse, func_name=func_name)
                 continue
 
             if isinstance(node, (ast.If, ast.While)):
-                node.body = self._transform_func_body(node.body)
+                node.body = self._transform_func_body(node.body, func_name=func_name)
                 if node.orelse:
-                    node.orelse = self._transform_func_body(node.orelse)
+                    node.orelse = self._transform_func_body(node.orelse, func_name=func_name)
                 continue
 
             if isinstance(node, (ast.With, ast.AsyncWith)):
-                node.body = self._transform_func_body(node.body)
+                node.body = self._transform_func_body(node.body, func_name=func_name)
                 continue
 
             if isinstance(node, ast.Try):
-                node.body = self._transform_func_body(node.body)
+                node.body = self._transform_func_body(node.body, func_name=func_name)
                 for handler in node.handlers:
-                    handler.body = self._transform_func_body(handler.body)
+                    handler.body = self._transform_func_body(handler.body, func_name=func_name)
                 if node.orelse:
-                    node.orelse = self._transform_func_body(node.orelse)
+                    node.orelse = self._transform_func_body(node.orelse, func_name=func_name)
                 if node.finalbody:
-                    node.finalbody = self._transform_func_body(node.finalbody)
+                    node.finalbody = self._transform_func_body(node.finalbody, func_name=func_name)
                 continue
 
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
 
-            traces = self._make_traces(node)
+            traces = self._make_traces(node, func_name=func_name)
             new_body.extend(traces)
 
         return new_body
 
-    def _make_traces(self, node: ast.AST) -> list:
+    def _make_traces(self, node: ast.AST, func_name: str | None = None) -> list:
         """Generate _trickle_tv() calls for assigned variable names."""
         names = _extract_names(node)
-        return [self._make_call(name, getattr(node, "lineno", 0)) for name in names]
+        return [self._make_call(name, getattr(node, "lineno", 0), func_name=func_name) for name in names]
 
-    def _make_for_traces(self, node: ast.AST) -> list:
+    def _make_for_traces(self, node: ast.AST, func_name: str | None = None) -> list:
         """Generate trace calls for for-loop iteration variables."""
         if not isinstance(node, (ast.For, ast.AsyncFor)):
             return []
         names = _names_from_target(node.target)
         names = [n for n in names if not n.startswith("_")]
-        return [self._make_call(name, getattr(node, "lineno", 0)) for name in names]
+        return [self._make_call(name, getattr(node, "lineno", 0), func_name=func_name) for name in names]
 
-    def _make_param_traces(self, node: ast.AST) -> list:
+    def _make_param_traces(self, node: ast.AST, func_name: str | None = None) -> list:
         """Generate trace calls for function parameters."""
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             return []
@@ -244,23 +250,37 @@ class _TrickleCellTransformer(ast.NodeTransformer):
             names.append(node.args.vararg.arg)
         if node.args.kwarg and not node.args.kwarg.arg.startswith("_"):
             names.append(node.args.kwarg.arg)
-        return [self._make_call(name, getattr(node, "lineno", 0)) for name in names]
+        return [self._make_call(name, getattr(node, "lineno", 0), func_name=func_name) for name in names]
 
-    def _make_call(self, name: str, lineno: int) -> ast.Expr:
-        """Build an AST node for: _trickle_tv(var, 'name', line, cell_id, cell_idx)"""
+    def _make_call(self, name: str, lineno: int, func_name: str | None = None) -> ast.Expr:
+        """Build an AST node for: _trickle_tv(var, 'name', line, cell_id, cell_idx, func_name)"""
+        args = [
+            # For attribute names like "self.fc", we need to evaluate the attribute access
+            self._name_to_ast(name),
+            ast.Constant(value=name),
+            ast.Constant(value=lineno),
+            ast.Constant(value=self._cell_id),
+            ast.Constant(value=self._cell_idx),
+        ]
+        keywords = []
+        if func_name:
+            keywords.append(ast.keyword(arg="func_name", value=ast.Constant(value=func_name)))
         return ast.Expr(
             value=ast.Call(
                 func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                args=[
-                    ast.Name(id=name, ctx=ast.Load()),
-                    ast.Constant(value=name),
-                    ast.Constant(value=lineno),
-                    ast.Constant(value=self._cell_id),
-                    ast.Constant(value=self._cell_idx),
-                ],
-                keywords=[],
+                args=args,
+                keywords=keywords,
             )
         )
+
+    @staticmethod
+    def _name_to_ast(name: str) -> ast.expr:
+        """Convert a dotted name like 'self.fc' to an AST expression."""
+        parts = name.split(".")
+        result: ast.expr = ast.Name(id=parts[0], ctx=ast.Load())
+        for part in parts[1:]:
+            result = ast.Attribute(value=result, attr=part, ctx=ast.Load())
+        return result
 
 
 def _extract_names(node: ast.AST) -> list:
@@ -281,6 +301,17 @@ def _names_from_target(target: ast.AST) -> list:
     """Recursively extract variable names from an assignment target."""
     if isinstance(target, ast.Name):
         return [target.id]
+    if isinstance(target, ast.Attribute):
+        # Handle self.x, self.fc, etc. — build dotted name like "self.fc"
+        parts = []
+        node = target
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        parts.reverse()
+        return [".".join(parts)]
     if isinstance(target, (ast.Tuple, ast.List)):
         names = []
         for elt in target.elts:
