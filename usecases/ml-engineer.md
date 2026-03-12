@@ -100,6 +100,7 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - DataLoaders: `DataLoader(batch_size=32, dataset_size=8000, batches=250, ...)`
 - Datasets: `TensorDataset(size=10000, tensors=2)`, `Subset(size=8000, from=TensorDataset)`
 - Memory footprint: hover shows `mem=4.0 MB` per tensor (helps debug OOM)
+- Model memory: `GPT(110280192 params 420.7 MB)` shows total model size inline
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**
