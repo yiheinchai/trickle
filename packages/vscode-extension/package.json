@@ -1,0 +1,57 @@
+{
+  "name": "trickle-vscode",
+  "displayName": "Trickle - Runtime Variable Inspector",
+  "description": "Hover over any variable to see its runtime type and sample value captured by trickle",
+  "version": "0.1.0",
+  "publisher": "trickle",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Debuggers", "Other"],
+  "activationEvents": [
+    "workspaceContains:.trickle/variables.jsonl"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "trickle.refreshVariables",
+        "title": "Trickle: Refresh Variable Data"
+      },
+      {
+        "command": "trickle.clearVariables",
+        "title": "Trickle: Clear Variable Data"
+      }
+    ],
+    "configuration": {
+      "title": "Trickle",
+      "properties": {
+        "trickle.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable trickle variable hover"
+        },
+        "trickle.showSampleValues": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show sample values in hover (not just types)"
+        },
+        "trickle.inlineHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline type hints after variable declarations"
+        }
+      }
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.4.0"
+  }
+}

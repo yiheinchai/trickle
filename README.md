@@ -61,6 +61,7 @@ trickle dev
   - [With Vitest / Vite](#with-vitest--vite)
   - [With Node.js (CJS)](#with-nodejs-cjs)
   - [Viewing Captured Variables](#viewing-captured-variables)
+  - [VS Code Extension](#vs-code-extension)
 - [Source Code Annotation](#source-code-annotation)
 - [Sidecar Type Stubs](#sidecar-type-stubs)
 - [Local/Offline Mode](#localoffline-mode) (with type accumulation across runs)
@@ -2944,6 +2945,36 @@ Output shows variables grouped by file with their types and sample values:
   15    response       { status: number, ... }  { status: 200, ... }
   23    amount         number                   4999
 ```
+
+### VS Code Extension
+
+Install the trickle VS Code extension for **hover-to-inspect** and **inline type hints**:
+
+```bash
+# From the trickle repo
+cd packages/vscode-extension
+npm install && npm run build
+# Package and install
+cp package.json dist/ && cd dist && vsce package --allow-missing-repository && code --install-extension *.vsix
+```
+
+Or install the pre-built `.vsix`:
+
+```bash
+code --install-extension packages/vscode-extension/trickle-vscode-0.1.0.vsix
+```
+
+Once installed, the extension automatically activates when `.trickle/variables.jsonl` exists in your workspace. Features:
+
+- **Hover**: Hover over any variable to see its runtime type and sample value
+- **Inline type hints**: Inlay hints appear after variable declarations showing the observed type
+- **Auto-refresh**: Watches `variables.jsonl` and updates as you run more tests
+- **Commands**: `Trickle: Refresh Variable Data` and `Trickle: Clear Variable Data`
+
+Settings (in VS Code settings):
+- `trickle.enabled` — enable/disable (default: true)
+- `trickle.showSampleValues` — show sample values in hover (default: true)
+- `trickle.inlineHints` — show inline type hints (default: true)
 
 ### What Gets Captured
 
