@@ -303,6 +303,10 @@ class TrickleHoverProvider {
             for (const obs of obsAtLine) {
                 if (obs.varName === word)
                     candidates.push(obs);
+                // Show return value info when hovering over "return" keyword
+                if (word === 'return' && (obs.varName === '<return>' || obs.varName.startsWith('<return:'))) {
+                    candidates.push(obs);
+                }
             }
         }
         // If no exact match, search all lines in this file for this variable name
@@ -360,6 +364,26 @@ class TrickleInlayHintsProvider {
                 const line = document.lineAt(lineNo - 1);
                 const lineText = line.text;
                 const isPython = document.languageId === 'python';
+                // Handle return value traces — show at end of return line
+                if (obs.varName === '<return>' || obs.varName.startsWith('<return:')) {
+                    if (!/\breturn\b/.test(lineText))
+                        continue;
+                    const typeStr = typeNodeToString(obs.type);
+                    // For <return:varname>, show the individual element type
+                    const label = obs.varName === '<return>'
+                        ? ` -> ${typeStr}`
+                        : ` ${obs.varName.slice(8, -1)}: ${typeStr}`;
+                    const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                    const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
+                    hint.paddingLeft = true;
+                    hint.paddingRight = false;
+                    if (config.get('showSampleValues', true) && obs.sample !== undefined) {
+                        const sampleStr = formatSample(obs.sample);
+                        hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+                    }
+                    hints.push(hint);
+                    continue;
+                }
                 // Find the variable name in the line
                 const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
                 const match = varPattern.exec(lineText);
@@ -370,17 +394,35 @@ class TrickleInlayHintsProvider {
                 const varEnd = match.index + obs.varName.length;
                 const afterVar = lineText.substring(varEnd).trimStart();
                 if (isPython) {
-                    // Python: match `varName = ...` or `varName: type = ...` or tuple unpacking `a, b = ...`
-                    // Also match inside for loops: `for x in ...`, with statements: `with ... as x:`
+                    // Python patterns where we show inlay hints:
+                    // 1. Assignment: `x = ...`, `a, b = ...`
+                    // 2. For-loop: `for x in ...`, `for i, (a, b) in ...`
+                    // 3. With-as: `with ... as x:`
+                    // 4. Function param: `def fn(x, y=None):` or `def fn(self, x):`
+                    // 5. Annotated: `x: int = ...` (skip — already has annotation)
                     const isAssignment = afterVar.startsWith('=') && !afterVar.startsWith('==');
                     const isAnnotated = afterVar.startsWith(':');
                     const isForVar = /\bfor\s+$/.test(beforeVar) || /\bfor\s+.*,\s*$/.test(beforeVar);
                     const isWithAs = /\bas\s+$/.test(beforeVar);
                     const isBareAssignment = /^\s*$/.test(beforeVar) || /,\s*$/.test(beforeVar);
-                    if (!((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated)))
+                    // Function parameter: `def fn(x` or `def fn(self, x` or `def fn(x,`
+                    // Also handles `async def fn(x`
+                    const isFuncParam = /\b(?:async\s+)?def\s+\w+\s*\(/.test(beforeVar) &&
+                        (afterVar.startsWith(',') || afterVar.startsWith(')') ||
+                            afterVar.startsWith('=') || afterVar.startsWith(':'));
+                    // Tuple unpacking middle elements: `, x, ` or `, x =`
+                    const isTupleElement = /,\s*$/.test(beforeVar) &&
+                        (afterVar.startsWith(',') || afterVar.startsWith('=') || afterVar.startsWith(')'));
+                    const isValidPattern = ((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated)) ||
+                        isFuncParam ||
+                        (isTupleElement && !isFuncParam); // Tuple elements in assignments
+                    if (!isValidPattern)
                         continue;
                     // Skip if already has a type annotation (x: int = ...)
-                    if (isAnnotated)
+                    if (isAnnotated && !isFuncParam)
+                        continue;
+                    // For function params with annotation (x: Tensor), skip
+                    if (isFuncParam && afterVar.startsWith(':'))
                         continue;
                 }
                 else {
@@ -520,6 +562,16 @@ function formatTensorType(className, properties) {
     const deviceProp = properties['device'];
     if (deviceProp?.kind === 'primitive' && deviceProp.name && deviceProp.name !== 'cpu') {
         parts.push(`@${deviceProp.name}`);
+    }
+    // requires_grad: show when True
+    const gradProp = properties['requires_grad'];
+    if (gradProp?.kind === 'primitive' && gradProp.name === 'True') {
+        parts.push('grad');
+    }
+    // grad_fn: show the backward function name
+    const gradFnProp = properties['grad_fn'];
+    if (gradFnProp?.kind === 'primitive' && gradFnProp.name) {
+        parts.push(`(${gradFnProp.name})`);
     }
     return parts.join(' ');
 }

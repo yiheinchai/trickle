@@ -335,6 +335,10 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     if (obsAtLine) {
       for (const obs of obsAtLine) {
         if (obs.varName === word) candidates.push(obs);
+        // Show return value info when hovering over "return" keyword
+        if (word === 'return' && (obs.varName === '<return>' || obs.varName.startsWith('<return:'))) {
+          candidates.push(obs);
+        }
       }
     }
 
@@ -401,6 +405,26 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         const line = document.lineAt(lineNo - 1);
         const lineText = line.text;
         const isPython = document.languageId === 'python';
+
+        // Handle return value traces — show at end of return line
+        if (obs.varName === '<return>' || obs.varName.startsWith('<return:')) {
+          if (!/\breturn\b/.test(lineText)) continue;
+          const typeStr = typeNodeToString(obs.type);
+          // For <return:varname>, show the individual element type
+          const label = obs.varName === '<return>'
+            ? ` -> ${typeStr}`
+            : ` ${obs.varName.slice(8, -1)}: ${typeStr}`;
+          const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+          const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
+          hint.paddingLeft = true;
+          hint.paddingRight = false;
+          if (config.get('showSampleValues', true) && obs.sample !== undefined) {
+            const sampleStr = formatSample(obs.sample);
+            hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+          }
+          hints.push(hint);
+          continue;
+        }
 
         // Find the variable name in the line
         const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
@@ -603,6 +627,18 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   const deviceProp = properties['device'];
   if (deviceProp?.kind === 'primitive' && deviceProp.name && deviceProp.name !== 'cpu') {
     parts.push(`@${deviceProp.name}`);
+  }
+
+  // requires_grad: show when True
+  const gradProp = properties['requires_grad'];
+  if (gradProp?.kind === 'primitive' && gradProp.name === 'True') {
+    parts.push('grad');
+  }
+
+  // grad_fn: show the backward function name
+  const gradFnProp = properties['grad_fn'];
+  if (gradFnProp?.kind === 'primitive' && gradFnProp.name) {
+    parts.push(`(${gradFnProp.name})`);
   }
 
   return parts.join(' ');

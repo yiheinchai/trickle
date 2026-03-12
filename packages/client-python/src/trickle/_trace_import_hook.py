@@ -270,26 +270,29 @@ def _transform_toplevel_block(body: list) -> list:
 
 
 def _transform_func_body(body: list) -> list:
-    """Insert trace calls after variable assignments inside function bodies."""
+    """Insert trace calls after variable assignments inside function bodies.
+
+    Also transforms ``return`` statements to trace return values before returning.
+    """
     new_body: list = []
     for node in body:
-        new_body.append(node)
-
         # Recurse into compound statements
         if isinstance(node, (ast.If, ast.While)):
             node.body = _transform_func_body(node.body)
             if hasattr(node, "orelse") and node.orelse:
                 node.orelse = _transform_func_body(node.orelse)
+            new_body.append(node)
             continue
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            # Trace the loop iteration variable(s) at the start of the body
             loop_var_traces = _make_for_target_traces(node)
             node.body = loop_var_traces + _transform_func_body(node.body)
             if hasattr(node, "orelse") and node.orelse:
                 node.orelse = _transform_func_body(node.orelse)
+            new_body.append(node)
             continue
         if isinstance(node, (ast.With, ast.AsyncWith)):
             node.body = _transform_func_body(node.body)
+            new_body.append(node)
             continue
         if isinstance(node, ast.Try):
             node.body = _transform_func_body(node.body)
@@ -299,15 +302,76 @@ def _transform_func_body(body: list) -> list:
                 node.orelse = _transform_func_body(node.orelse)
             if node.finalbody:
                 node.finalbody = _transform_func_body(node.finalbody)
+            new_body.append(node)
             continue
         # Don't recurse into nested functions
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            new_body.append(node)
             continue
 
+        # Trace return values
+        if isinstance(node, ast.Return) and node.value is not None:
+            ret_stmts = _make_return_trace(node)
+            new_body.extend(ret_stmts)
+            continue
+
+        new_body.append(node)
         trace_stmts = _make_trace_stmts(node)
         new_body.extend(trace_stmts)
 
     return new_body
+
+
+def _make_return_trace(node: ast.Return) -> list:
+    """Transform a return statement to trace the return value before returning.
+
+    ``return logits, loss`` becomes::
+
+        _trickle_ret = (logits, loss)
+        _trickle_tv(logits, '<return:logits>', lineno)
+        _trickle_tv(loss, '<return:loss>', lineno)
+        _trickle_tv(_trickle_ret, '<return>', lineno)
+        return _trickle_ret
+    """
+    lineno = getattr(node, "lineno", 0)
+    stmts: list = []
+
+    assign = ast.Assign(
+        targets=[ast.Name(id="_trickle_ret", ctx=ast.Store())],
+        value=node.value,
+    )
+    stmts.append(assign)
+
+    # If returning a tuple literal (return a, b, c), trace each element
+    if isinstance(node.value, ast.Tuple):
+        for elt in node.value.elts:
+            if isinstance(elt, ast.Name) and not elt.id.startswith("_"):
+                trace = ast.Expr(value=ast.Call(
+                    func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+                    args=[
+                        ast.Name(id=elt.id, ctx=ast.Load()),
+                        ast.Constant(value=f"<return:{elt.id}>"),
+                        ast.Constant(value=lineno),
+                    ],
+                    keywords=[],
+                ))
+                stmts.append(trace)
+
+    trace_ret = ast.Expr(value=ast.Call(
+        func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+        args=[
+            ast.Name(id="_trickle_ret", ctx=ast.Load()),
+            ast.Constant(value="<return>"),
+            ast.Constant(value=lineno),
+        ],
+        keywords=[],
+    ))
+    stmts.append(trace_ret)
+
+    new_return = ast.Return(value=ast.Name(id="_trickle_ret", ctx=ast.Load()))
+    stmts.append(new_return)
+
+    return stmts
 
 
 def _make_trace_stmts(node: ast.AST) -> list:

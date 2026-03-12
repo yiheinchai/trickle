@@ -80,7 +80,9 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         if hasattr(value, "device"):
             props["device"] = {"kind": "primitive", "name": str(value.device)}
         if hasattr(value, "requires_grad"):
-            props["requires_grad"] = {"kind": "primitive", "name": "boolean"}
+            props["requires_grad"] = {"kind": "primitive", "name": str(value.requires_grad)}
+        if hasattr(value, "grad_fn") and value.grad_fn is not None:
+            props["grad_fn"] = {"kind": "primitive", "name": type(value.grad_fn).__name__}
         return {"kind": "object", "properties": props, "class_name": "Tensor"}
 
     # --- NumPy ndarray ---
