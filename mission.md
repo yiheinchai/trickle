@@ -2,7 +2,7 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-the ML engineer jupyter notebook experience. Think about how the ML engineer will write code to build modes, iterate on their code etc, trickle needs to support all those use cases. For example, the engineer will likely change many lines of code and adjust the shapes, swap out layers eg. conv layers with linear or attention blocks, tricklek needs to handle all this.
+the ML engineer jupyter notebook experience. Think about how the ML engineer will write code to build modes, iterate on their code etc, trickle needs to support all those use cases. For example, the code will likely error and it seems like when there is an error, the inline type hints will not update
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
