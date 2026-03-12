@@ -179,6 +179,16 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _sched_type is not None and isinstance(value, _sched_type):
         return _infer_scheduler(value)
 
+    # --- PyTorch DataLoader ---
+    _dl_type = _get_torch_dataloader_type()
+    if _dl_type is not None and isinstance(value, _dl_type):
+        return _infer_dataloader(value)
+
+    # --- PyTorch Dataset ---
+    _ds_type = _get_torch_dataset_type()
+    if _ds_type is not None and isinstance(value, _ds_type):
+        return _infer_dataset(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -489,6 +499,124 @@ def _infer_scheduler(value: Any) -> Dict[str, Any]:
                     props[attr] = {"kind": "primitive", "name": str(val)}
         except Exception:
             continue
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+# --- PyTorch DataLoader support ---
+
+_torch_dataloader_type: Any = None
+_torch_dataloader_checked = False
+
+
+def _get_torch_dataloader_type() -> Any:
+    """Lazily resolve torch.utils.data.DataLoader."""
+    global _torch_dataloader_type, _torch_dataloader_checked
+    if _torch_dataloader_checked:
+        return _torch_dataloader_type
+    _torch_dataloader_checked = True
+    try:
+        import torch.utils.data
+        _torch_dataloader_type = torch.utils.data.DataLoader
+    except ImportError:
+        pass
+    return _torch_dataloader_type
+
+
+def _infer_dataloader(value: Any) -> Dict[str, Any]:
+    """Infer type for a torch.utils.data.DataLoader instance."""
+    props: Dict[str, Any] = {}
+
+    try:
+        if value.batch_size is not None:
+            props["batch_size"] = {"kind": "primitive", "name": str(value.batch_size)}
+    except Exception:
+        pass
+
+    try:
+        ds = value.dataset
+        if hasattr(ds, "__len__"):
+            props["dataset_size"] = {"kind": "primitive", "name": str(len(ds))}
+        props["dataset"] = {"kind": "primitive", "name": type(ds).__name__}
+    except Exception:
+        pass
+
+    try:
+        if value.num_workers > 0:
+            props["num_workers"] = {"kind": "primitive", "name": str(value.num_workers)}
+    except Exception:
+        pass
+
+    for attr in ["shuffle", "drop_last", "pin_memory"]:
+        try:
+            val = getattr(value, attr, None)
+            if val:  # Only show when True (non-default)
+                props[attr] = {"kind": "primitive", "name": str(val)}
+        except Exception:
+            continue
+
+    try:
+        if hasattr(value.dataset, "__len__") and value.batch_size:
+            import math
+            n_batches = math.ceil(len(value.dataset) / value.batch_size)
+            if getattr(value, "drop_last", False):
+                n_batches = len(value.dataset) // value.batch_size
+            props["batches"] = {"kind": "primitive", "name": str(n_batches)}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": "DataLoader"}
+
+
+# --- PyTorch Dataset support ---
+
+_torch_dataset_type: Any = None
+_torch_dataset_checked = False
+
+
+def _get_torch_dataset_type() -> Any:
+    """Lazily resolve torch.utils.data.Dataset."""
+    global _torch_dataset_type, _torch_dataset_checked
+    if _torch_dataset_checked:
+        return _torch_dataset_type
+    _torch_dataset_checked = True
+    try:
+        import torch.utils.data
+        _torch_dataset_type = torch.utils.data.Dataset
+    except ImportError:
+        pass
+    return _torch_dataset_type
+
+
+def _infer_dataset(value: Any) -> Dict[str, Any]:
+    """Infer type for a torch.utils.data.Dataset instance."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    try:
+        if hasattr(value, "__len__"):
+            props["size"] = {"kind": "primitive", "name": str(len(value))}
+    except Exception:
+        pass
+
+    # TensorDataset: show number of tensors and their shapes
+    if class_name == "TensorDataset":
+        try:
+            tensors = value.tensors
+            props["tensors"] = {"kind": "primitive", "name": str(len(tensors))}
+            shapes = [str(list(t.shape)) for t in tensors[:3]]
+            if len(tensors) > 3:
+                shapes.append("...")
+            props["shapes"] = {"kind": "primitive", "name": ", ".join(shapes)}
+        except Exception:
+            pass
+
+    # Subset: show indices range
+    if class_name == "Subset":
+        try:
+            props["from"] = {"kind": "primitive", "name": type(value.dataset).__name__}
+        except Exception:
+            pass
 
     return {"kind": "object", "properties": props, "class_name": class_name}
 
