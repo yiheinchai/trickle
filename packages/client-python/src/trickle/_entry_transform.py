@@ -318,7 +318,12 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
 
 
 def _transform_body(body: list, trace_vars: bool = True) -> list:
-    """Insert wrapper calls after function defs and trace calls after assignments."""
+    """Insert wrapper calls after function defs and trace calls after assignments.
+
+    Also recurses into compound statements (for, if, while, with, try) at
+    module/class level so that variable assignments and for-loop iteration
+    variables inside those blocks are traced.
+    """
     new_body: list = []
 
     for node in body:
@@ -344,10 +349,78 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
             new_body.append(wrap_stmt)
             continue
 
-        # Trace variable assignments at module/class level
+        if isinstance(node, ast.ClassDef):
+            continue
+
+        # Recurse into compound statements at module level
         if trace_vars:
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                loop_var_traces = _make_for_target_traces(node)
+                node.body = loop_var_traces + _transform_toplevel_block(node.body)
+                if node.orelse:
+                    node.orelse = _transform_toplevel_block(node.orelse)
+                continue
+            if isinstance(node, (ast.If, ast.While)):
+                node.body = _transform_toplevel_block(node.body)
+                if node.orelse:
+                    node.orelse = _transform_toplevel_block(node.orelse)
+                continue
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                node.body = _transform_toplevel_block(node.body)
+                continue
+            if isinstance(node, ast.Try):
+                node.body = _transform_toplevel_block(node.body)
+                for handler in node.handlers:
+                    handler.body = _transform_toplevel_block(handler.body)
+                if node.orelse:
+                    node.orelse = _transform_toplevel_block(node.orelse)
+                if node.finalbody:
+                    node.finalbody = _transform_toplevel_block(node.finalbody)
+                continue
+
             trace_stmts = _make_trace_stmts(node)
             new_body.extend(trace_stmts)
+
+    return new_body
+
+
+def _transform_toplevel_block(body: list) -> list:
+    """Transform a block inside a module-level compound statement.
+
+    Similar to _transform_func_body but used for module-level for/if/while etc.
+    """
+    new_body: list = []
+    for node in body:
+        new_body.append(node)
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            loop_var_traces = _make_for_target_traces(node)
+            node.body = loop_var_traces + _transform_toplevel_block(node.body)
+            if node.orelse:
+                node.orelse = _transform_toplevel_block(node.orelse)
+            continue
+        if isinstance(node, (ast.If, ast.While)):
+            node.body = _transform_toplevel_block(node.body)
+            if node.orelse:
+                node.orelse = _transform_toplevel_block(node.orelse)
+            continue
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            node.body = _transform_toplevel_block(node.body)
+            continue
+        if isinstance(node, ast.Try):
+            node.body = _transform_toplevel_block(node.body)
+            for handler in node.handlers:
+                handler.body = _transform_toplevel_block(handler.body)
+            if node.orelse:
+                node.orelse = _transform_toplevel_block(node.orelse)
+            if node.finalbody:
+                node.finalbody = _transform_toplevel_block(node.finalbody)
+            continue
+
+        trace_stmts = _make_trace_stmts(node)
+        new_body.extend(trace_stmts)
 
     return new_body
 
@@ -360,8 +433,16 @@ def _transform_func_body(body: list) -> list:
         new_body.append(node)
 
         # Recurse into compound statements
-        if isinstance(node, (ast.If, ast.While, ast.For, ast.AsyncFor)):
+        if isinstance(node, (ast.If, ast.While)):
             node.body = _transform_func_body(node.body)
+            if hasattr(node, "orelse") and node.orelse:
+                node.orelse = _transform_func_body(node.orelse)
+            continue
+
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            # Trace the loop iteration variable(s) at the start of the body
+            loop_var_traces = _make_for_target_traces(node)
+            node.body = loop_var_traces + _transform_func_body(node.body)
             if hasattr(node, "orelse") and node.orelse:
                 node.orelse = _transform_func_body(node.orelse)
             continue
@@ -396,6 +477,34 @@ def _make_trace_stmts(node: ast.AST) -> list:
     stmts = []
     for name in names:
         # __trickle_tv(var_name_value, 'var_name', line_no)
+        trace_call = ast.Expr(
+            value=ast.Call(
+                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+                args=[
+                    ast.Name(id=name, ctx=ast.Load()),
+                    ast.Constant(value=name),
+                    ast.Constant(value=getattr(node, "lineno", 0)),
+                ],
+                keywords=[],
+            )
+        )
+        stmts.append(trace_call)
+    return stmts
+
+
+def _make_for_target_traces(node: ast.AST) -> list:
+    """Generate trace calls for for-loop iteration variables.
+
+    For ``for batch_idx, (data, target) in enumerate(loader):``,
+    this produces trace calls for batch_idx, data, and target
+    inserted at the start of the loop body.
+    """
+    if not isinstance(node, (ast.For, ast.AsyncFor)):
+        return []
+    names = _names_from_target(node.target)
+    names = [n for n in names if not n.startswith("_")]
+    stmts = []
+    for name in names:
         trace_call = ast.Expr(
             value=ast.Call(
                 func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
