@@ -60,13 +60,17 @@
  please commit and push once that piece of work is completed and fully working.
 
 
-   /loop 10min Think of 1 item to work on ML engineer user case to improve the developer experience. For example, when 
+   /loop 5min Think of 1 item to work on ML engineer user case to improve the developer experience. For example, when 
    the ML engineer first runs the cell in the jupyter notebook, the inline types should appear immediately, rather than 
    the user having to close the notebook, reopen for the inline types to appear. when the engineer changes the code,
    eg. changing the input/output dims of a linear layer, and runs the code, the inline types should update immediately after
    the code is run, basically real time updates. the goal is to allow the ML engineer to iterate quickly to know the shapes
    they are manipulating at any time, and when there is an error, the engineer should be able to trace the shapes,
-   by viewing at the inline hints to quickly know where it is going wrong. Once  
+   by viewing at the inline hints to quickly know where it is going wrong. this is just an example, please look at usecases directory for the customer journey and add 
+   to it as required by empathising with the user / audience. before you start work, please pull from remote. Once  
   you have a feature that you think will be useful to add, implement it in  
   full, please test on real code in the ML repos you can find online. for example test on karpathy's gpt-2 implementation.
- please commit and push once that piece of work is completed and fully working.
+ please commit and push once that piece of work is completed and fully working. then, please use the publish-skill to publish
+
+
+/loop 5min please refer to mission.md for your latest instructions.
