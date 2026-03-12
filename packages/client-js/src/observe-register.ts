@@ -34,7 +34,7 @@ import { detectEnvironment } from './env-detect';
 import { wrapFunction } from './wrap';
 import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
-import { instrumentExpress } from './express';
+import { instrumentExpress, trickleMiddleware } from './express';
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -307,12 +307,27 @@ if (enabled) {
         const origExpress = exports;
         const wrappedExpress = function (this: any, ...args: any[]): any {
           const app = origExpress.apply(this, args);
+          // Tag the app so we can verify the middleware was injected
+          (app as any).__trickle_instrumented = true;
           try {
+            // Wrap route methods for future route definitions
             instrumentExpress(app, { environment });
+            // Also inject middleware to capture routes defined BEFORE instrumentation
+            // (common in DI/class-based architectures where routes are defined in constructors)
+            if (typeof app.use === 'function') {
+              app.use(trickleMiddleware({ environment }));
+              if (debug) {
+                console.log('[trickle/observe] Injected trickleMiddleware into Express app');
+              }
+            }
             if (debug) {
               console.log('[trickle/observe] Auto-instrumented Express app (route types will be captured)');
             }
-          } catch { /* don't crash */ }
+          } catch (e: unknown) {
+            if (debug) {
+              console.log('[trickle/observe] Express instrumentation error:', (e as Error).message);
+            }
+          }
           return app;
         };
         // Copy all static properties (express.json, express.static, express.Router, etc.)

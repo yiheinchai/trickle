@@ -151,10 +151,17 @@ function autoDetectCommand(input: string): string {
 }
 
 function findTsRunner(): string {
+  const { execSync } = require("child_process");
+
+  // Add node_modules/.bin to PATH so local binaries are found
+  const binPath = path.join(process.cwd(), "node_modules", ".bin");
+  const currentPath = process.env.PATH || "";
+  const augmentedPath = currentPath.includes(binPath) ? currentPath : `${binPath}${path.delimiter}${currentPath}`;
+  const execOpts = { stdio: "ignore" as const, env: { ...process.env, PATH: augmentedPath } };
+
   // Check for tsx (fastest, most compatible)
   try {
-    const { execSync } = require("child_process");
-    execSync("tsx --version", { stdio: "ignore" });
+    execSync("tsx --version", execOpts);
     return "tsx";
   } catch {
     // not available
@@ -162,8 +169,7 @@ function findTsRunner(): string {
 
   // Check for ts-node
   try {
-    const { execSync } = require("child_process");
-    execSync("ts-node --version", { stdio: "ignore" });
+    execSync("ts-node --version", execOpts);
     return "ts-node";
   } catch {
     // not available
@@ -171,8 +177,7 @@ function findTsRunner(): string {
 
   // Check for bun (supports TS natively)
   try {
-    const { execSync } = require("child_process");
-    execSync("bun --version", { stdio: "ignore" });
+    execSync("bun --version", execOpts);
     return "bun";
   } catch {
     // not available
@@ -962,9 +967,17 @@ function injectObservation(
     const useEsm = isEsmFile(command) && observeEsmPath;
 
     if (useEsm) {
+      // Use both ESM hooks (for exported functions) and CJS hook (for Express auto-detection)
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
-        `${runner} --import ${observeEsmPath} `,
+        `${runner} -r ${observePath} --import ${observeEsmPath} `,
+      );
+      return { instrumentedCommand: modified, env };
+    } else if (runner === "tsx") {
+      // tsx always uses ESM internally — inject both CJS and ESM hooks
+      const modified = command.replace(
+        new RegExp(`^${runner}\\s`),
+        `${runner} -r ${observePath} --import ${observeEsmPath} `,
       );
       return { instrumentedCommand: modified, env };
     } else {
@@ -1069,10 +1082,15 @@ function runProcess(
   env: Record<string, string>,
 ): Promise<number> {
   return new Promise((resolve) => {
+    // Add node_modules/.bin to PATH so local binaries (tsx, ts-node, etc.) are found
+    const binPath = path.join(process.cwd(), "node_modules", ".bin");
+    const currentPath = process.env.PATH || "";
+    const augmentedPath = currentPath.includes(binPath) ? currentPath : `${binPath}${path.delimiter}${currentPath}`;
+
     const proc = spawn(command, [], {
       stdio: "inherit",
       shell: true,
-      env: { ...process.env, ...env },
+      env: { ...process.env, ...env, PATH: augmentedPath },
     });
 
     proc.on("error", (err) => {

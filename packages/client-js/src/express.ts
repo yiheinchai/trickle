@@ -320,6 +320,8 @@ export function trickleMiddleware(
     maxDepth: userOpts?.maxDepth ?? 5,
   };
 
+  const debug = process.env.TRICKLE_DEBUG === '1' || process.env.TRICKLE_DEBUG === 'true';
+
   return function trickleMiddlewareHandler(req: any, res: any, next: (...args: any[]) => void): void {
     if (!opts.enabled) {
       next();
@@ -330,6 +332,10 @@ export function trickleMiddleware(
     if (opts.sampleRate < 1 && Math.random() > opts.sampleRate) {
       next();
       return;
+    }
+
+    if (debug) {
+      console.log(`[trickle/middleware] Intercepting ${req.method} ${req.originalUrl || req.url}`);
     }
 
     let captured = false;
@@ -356,6 +362,9 @@ export function trickleMiddleware(
         if (!captured) {
           captured = true;
           const routeName = getRouteName();
+          if (debug) {
+            console.log(`[trickle/middleware] Captured res.json for ${routeName}`);
+          }
           // Re-extract input here because body parsers may have run since middleware was entered
           const latestInput = extractRequestInput(req);
           emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, data);
@@ -363,6 +372,8 @@ export function trickleMiddleware(
         res.json = originalJson;
         return originalJson.call(res, data);
       };
+    } else if (debug) {
+      console.log(`[trickle/middleware] res.json is not a function: ${typeof originalJson}`);
     }
 
     // Intercept res.send()
@@ -372,6 +383,9 @@ export function trickleMiddleware(
         if (!captured) {
           captured = true;
           const routeName = getRouteName();
+          if (debug) {
+            console.log(`[trickle/middleware] Captured res.send for ${routeName}`);
+          }
           const latestInput = extractRequestInput(req);
           const output = typeof data === 'string' ? { __html: true } : data;
           emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, output);
