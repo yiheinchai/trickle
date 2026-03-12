@@ -133,11 +133,8 @@ def _transform_module_source(source: str, filename: str, module_name: str) -> st
         if isinstance(node, ast.ClassDef):
             node.body = _transform_body(node.body)
 
-    # Transform function bodies (including parameter traces)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            param_traces = _make_param_traces(node)
-            node.body = param_traces + _transform_func_body(node.body)
+    # Transform function bodies with qualified names (Class.method)
+    _transform_functions_with_context(tree, class_name=None)
 
     ast.fix_missing_locations(tree)
 
@@ -160,7 +157,7 @@ import os as _trickle_os
 import json as _trickle_json
 _trickle_tv_cache = set()
 _trickle_tv_file = None
-def _trickle_tv(_val, _name, _line):
+def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
     try:
         if _trickle_tv_file is None:
@@ -186,6 +183,7 @@ def _trickle_tv(_val, _name, _line):
         else:
             _s = str(_val)[:100]
         _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}
+        if _func: _r['funcName'] = _func
         with open(_trickle_tv_file, 'a') as _f:
             _f.write(_trickle_json.dumps(_r) + '\\n')
     except Exception:
@@ -269,39 +267,69 @@ def _transform_toplevel_block(body: list) -> list:
     return new_body
 
 
-def _transform_func_body(body: list) -> list:
+def _transform_functions_with_context(node: ast.AST, class_name: str | None) -> None:
+    """Walk the AST and transform function bodies with qualified function names.
+
+    For methods inside classes, produces names like 'GPT.forward'.
+    For top-level functions, just 'train'.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.ClassDef):
+            _transform_functions_with_context(child, class_name=child.name)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            func_name = f"{class_name}.{child.name}" if class_name else child.name
+            param_traces = _make_param_traces(child, func_name=func_name)
+            child.body = param_traces + _transform_func_body(child.body, func_name=func_name)
+        else:
+            _transform_functions_with_context(child, class_name=class_name)
+
+
+def _make_tv_call(value_expr: ast.expr, var_name: str, lineno: int, func_name: str | None = None) -> ast.Expr:
+    """Build a single _trickle_tv(...) call AST node."""
+    args = [value_expr, ast.Constant(value=var_name), ast.Constant(value=lineno)]
+    if func_name:
+        args.append(ast.Constant(value=func_name))
+    return ast.Expr(value=ast.Call(
+        func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+        args=args,
+        keywords=[],
+    ))
+
+
+def _transform_func_body(body: list, func_name: str | None = None) -> list:
     """Insert trace calls after variable assignments inside function bodies.
 
     Also transforms ``return`` statements to trace return values before returning.
+    ``func_name`` is the qualified function name (e.g. 'GPT.forward') added to records.
     """
     new_body: list = []
     for node in body:
         # Recurse into compound statements
         if isinstance(node, (ast.If, ast.While)):
-            node.body = _transform_func_body(node.body)
+            node.body = _transform_func_body(node.body, func_name)
             if hasattr(node, "orelse") and node.orelse:
-                node.orelse = _transform_func_body(node.orelse)
+                node.orelse = _transform_func_body(node.orelse, func_name)
             new_body.append(node)
             continue
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            loop_var_traces = _make_for_target_traces(node)
-            node.body = loop_var_traces + _transform_func_body(node.body)
+            loop_var_traces = _make_for_target_traces(node, func_name)
+            node.body = loop_var_traces + _transform_func_body(node.body, func_name)
             if hasattr(node, "orelse") and node.orelse:
-                node.orelse = _transform_func_body(node.orelse)
+                node.orelse = _transform_func_body(node.orelse, func_name)
             new_body.append(node)
             continue
         if isinstance(node, (ast.With, ast.AsyncWith)):
-            node.body = _transform_func_body(node.body)
+            node.body = _transform_func_body(node.body, func_name)
             new_body.append(node)
             continue
         if isinstance(node, ast.Try):
-            node.body = _transform_func_body(node.body)
+            node.body = _transform_func_body(node.body, func_name)
             for handler in node.handlers:
-                handler.body = _transform_func_body(handler.body)
+                handler.body = _transform_func_body(handler.body, func_name)
             if node.orelse:
-                node.orelse = _transform_func_body(node.orelse)
+                node.orelse = _transform_func_body(node.orelse, func_name)
             if node.finalbody:
-                node.finalbody = _transform_func_body(node.finalbody)
+                node.finalbody = _transform_func_body(node.finalbody, func_name)
             new_body.append(node)
             continue
         # Don't recurse into nested functions
@@ -311,28 +339,19 @@ def _transform_func_body(body: list) -> list:
 
         # Trace return values
         if isinstance(node, ast.Return) and node.value is not None:
-            ret_stmts = _make_return_trace(node)
+            ret_stmts = _make_return_trace(node, func_name)
             new_body.extend(ret_stmts)
             continue
 
         new_body.append(node)
-        trace_stmts = _make_trace_stmts(node)
+        trace_stmts = _make_trace_stmts(node, func_name)
         new_body.extend(trace_stmts)
 
     return new_body
 
 
-def _make_return_trace(node: ast.Return) -> list:
-    """Transform a return statement to trace the return value before returning.
-
-    ``return logits, loss`` becomes::
-
-        _trickle_ret = (logits, loss)
-        _trickle_tv(logits, '<return:logits>', lineno)
-        _trickle_tv(loss, '<return:loss>', lineno)
-        _trickle_tv(_trickle_ret, '<return>', lineno)
-        return _trickle_ret
-    """
+def _make_return_trace(node: ast.Return, func_name: str | None = None) -> list:
+    """Transform a return statement to trace the return value before returning."""
     lineno = getattr(node, "lineno", 0)
     stmts: list = []
 
@@ -342,88 +361,44 @@ def _make_return_trace(node: ast.Return) -> list:
     )
     stmts.append(assign)
 
-    # If returning a tuple literal (return a, b, c), trace each element
     if isinstance(node.value, ast.Tuple):
         for elt in node.value.elts:
             if isinstance(elt, ast.Name) and not elt.id.startswith("_"):
-                trace = ast.Expr(value=ast.Call(
-                    func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                    args=[
-                        ast.Name(id=elt.id, ctx=ast.Load()),
-                        ast.Constant(value=f"<return:{elt.id}>"),
-                        ast.Constant(value=lineno),
-                    ],
-                    keywords=[],
+                stmts.append(_make_tv_call(
+                    ast.Name(id=elt.id, ctx=ast.Load()),
+                    f"<return:{elt.id}>", lineno, func_name,
                 ))
-                stmts.append(trace)
 
-    trace_ret = ast.Expr(value=ast.Call(
-        func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-        args=[
-            ast.Name(id="_trickle_ret", ctx=ast.Load()),
-            ast.Constant(value="<return>"),
-            ast.Constant(value=lineno),
-        ],
-        keywords=[],
+    stmts.append(_make_tv_call(
+        ast.Name(id="_trickle_ret", ctx=ast.Load()),
+        "<return>", lineno, func_name,
     ))
-    stmts.append(trace_ret)
 
     new_return = ast.Return(value=ast.Name(id="_trickle_ret", ctx=ast.Load()))
     stmts.append(new_return)
-
     return stmts
 
 
-def _make_trace_stmts(node: ast.AST) -> list:
-    """Generate _trickle_tv() calls for variable names assigned in this node.
-
-    Handles both simple names (x = ...) and attribute assignments (self.x = ...).
-    """
+def _make_trace_stmts(node: ast.AST, func_name: str | None = None) -> list:
+    """Generate _trickle_tv() calls for variable names assigned in this node."""
     lineno = getattr(node, "lineno", 0)
     stmts = []
 
-    # Simple variable names
     names = _extract_assigned_names(node)
     for name in names:
-        trace_call = ast.Expr(
-            value=ast.Call(
-                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                args=[
-                    ast.Name(id=name, ctx=ast.Load()),
-                    ast.Constant(value=name),
-                    ast.Constant(value=lineno),
-                ],
-                keywords=[],
-            )
-        )
-        stmts.append(trace_call)
+        stmts.append(_make_tv_call(
+            ast.Name(id=name, ctx=ast.Load()), name, lineno, func_name,
+        ))
 
-    # Attribute assignments (self.x = ..., obj.attr = ...)
     attrs = _extract_attr_assignments(node)
     for display_name, value_node in attrs:
-        trace_call = ast.Expr(
-            value=ast.Call(
-                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                args=[
-                    value_node,
-                    ast.Constant(value=display_name),
-                    ast.Constant(value=lineno),
-                ],
-                keywords=[],
-            )
-        )
-        stmts.append(trace_call)
+        stmts.append(_make_tv_call(value_node, display_name, lineno, func_name))
 
     return stmts
 
 
-def _make_param_traces(node: ast.AST) -> list:
-    """Generate trace calls for function parameters.
-
-    For ``def forward(self, x, mask=None):``, this produces trace calls
-    for x and mask (skipping self/cls and _-prefixed params) inserted
-    at the start of the function body.
-    """
+def _make_param_traces(node: ast.AST, func_name: str | None = None) -> list:
+    """Generate trace calls for function parameters."""
     if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return []
     skip = {"self", "cls"}
@@ -440,46 +415,24 @@ def _make_param_traces(node: ast.AST) -> list:
     stmts = []
     lineno = getattr(node, "lineno", 0)
     for name in names:
-        trace_call = ast.Expr(
-            value=ast.Call(
-                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                args=[
-                    ast.Name(id=name, ctx=ast.Load()),
-                    ast.Constant(value=name),
-                    ast.Constant(value=lineno),
-                ],
-                keywords=[],
-            )
-        )
-        stmts.append(trace_call)
+        stmts.append(_make_tv_call(
+            ast.Name(id=name, ctx=ast.Load()), name, lineno, func_name,
+        ))
     return stmts
 
 
-def _make_for_target_traces(node: ast.AST) -> list:
-    """Generate trace calls for for-loop iteration variables.
-
-    For ``for batch_idx, (data, target) in enumerate(loader):``,
-    this produces trace calls for batch_idx, data, and target
-    inserted at the start of the loop body.
-    """
+def _make_for_target_traces(node: ast.AST, func_name: str | None = None) -> list:
+    """Generate trace calls for for-loop iteration variables."""
     if not isinstance(node, (ast.For, ast.AsyncFor)):
         return []
     names = _names_from_target(node.target)
     names = [n for n in names if not n.startswith("_")]
+    lineno = getattr(node, "lineno", 0)
     stmts = []
     for name in names:
-        trace_call = ast.Expr(
-            value=ast.Call(
-                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
-                args=[
-                    ast.Name(id=name, ctx=ast.Load()),
-                    ast.Constant(value=name),
-                    ast.Constant(value=getattr(node, "lineno", 0)),
-                ],
-                keywords=[],
-            )
-        )
-        stmts.append(trace_call)
+        stmts.append(_make_tv_call(
+            ast.Name(id=name, ctx=ast.Load()), name, lineno, func_name,
+        ))
     return stmts
 
 
