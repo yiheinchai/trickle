@@ -384,12 +384,14 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
                     node.orelse = _transform_toplevel_block(node.orelse)
                 continue
             if isinstance(node, (ast.With, ast.AsyncWith)):
-                node.body = _transform_toplevel_block(node.body)
+                with_traces = _make_with_target_traces(node)
+                node.body = with_traces + _transform_toplevel_block(node.body)
                 continue
             if isinstance(node, ast.Try):
                 node.body = _transform_toplevel_block(node.body)
                 for handler in node.handlers:
-                    handler.body = _transform_toplevel_block(handler.body)
+                    except_traces = _make_except_target_trace(handler)
+                    handler.body = except_traces + _transform_toplevel_block(handler.body)
                 if node.orelse:
                     node.orelse = _transform_toplevel_block(node.orelse)
                 if node.finalbody:
@@ -425,12 +427,14 @@ def _transform_toplevel_block(body: list) -> list:
                 node.orelse = _transform_toplevel_block(node.orelse)
             continue
         if isinstance(node, (ast.With, ast.AsyncWith)):
-            node.body = _transform_toplevel_block(node.body)
+            with_traces = _make_with_target_traces(node)
+            node.body = with_traces + _transform_toplevel_block(node.body)
             continue
         if isinstance(node, ast.Try):
             node.body = _transform_toplevel_block(node.body)
             for handler in node.handlers:
-                handler.body = _transform_toplevel_block(handler.body)
+                except_traces = _make_except_target_trace(handler)
+                handler.body = except_traces + _transform_toplevel_block(handler.body)
             if node.orelse:
                 node.orelse = _transform_toplevel_block(node.orelse)
             if node.finalbody:
@@ -469,14 +473,16 @@ def _transform_func_body(body: list, func_name: str | None = None) -> list:
             continue
 
         if isinstance(node, (ast.With, ast.AsyncWith)):
-            node.body = _transform_func_body(node.body, func_name)
+            with_traces = _make_with_target_traces(node, func_name)
+            node.body = with_traces + _transform_func_body(node.body, func_name)
             new_body.append(node)
             continue
 
         if isinstance(node, ast.Try):
             node.body = _transform_func_body(node.body, func_name)
             for handler in node.handlers:
-                handler.body = _transform_func_body(handler.body, func_name)
+                except_traces = _make_except_target_trace(handler, func_name)
+                handler.body = except_traces + _transform_func_body(handler.body, func_name)
             if node.orelse:
                 node.orelse = _transform_func_body(node.orelse, func_name)
             if node.finalbody:
@@ -598,6 +604,42 @@ def _make_for_target_traces(node: ast.AST, func_name: str | None = None) -> list
             ast.Name(id=name, ctx=ast.Load()), name, lineno, func_name,
         ))
     return stmts
+
+
+def _make_with_target_traces(node: ast.AST, func_name: str | None = None) -> list:
+    """Generate trace calls for with-statement ``as`` variables.
+
+    For ``with open(path) as f:`` or ``with ctx_a as a, ctx_b as b:``,
+    trace each bound variable at the start of the with body.
+    """
+    if not isinstance(node, (ast.With, ast.AsyncWith)):
+        return []
+    stmts = []
+    lineno = getattr(node, "lineno", 0)
+    for item in node.items:
+        if item.optional_vars is None:
+            continue
+        names = _names_from_target(item.optional_vars)
+        for name in names:
+            if name.startswith("_"):
+                continue
+            stmts.append(_make_tv_call(
+                ast.Name(id=name, ctx=ast.Load()), name, lineno, func_name,
+            ))
+    return stmts
+
+
+def _make_except_target_trace(handler: ast.ExceptHandler, func_name: str | None = None) -> list:
+    """Generate a trace call for an exception handler ``as`` variable.
+
+    For ``except RuntimeError as e:``, trace ``e`` at the start of the handler body.
+    """
+    if not handler.name or handler.name.startswith("_"):
+        return []
+    lineno = getattr(handler, "lineno", 0)
+    return [_make_tv_call(
+        ast.Name(id=handler.name, ctx=ast.Load()), handler.name, lineno, func_name,
+    )]
 
 
 def _extract_assigned_names(node: ast.AST) -> list:
