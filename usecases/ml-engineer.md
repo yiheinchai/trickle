@@ -61,10 +61,10 @@ class SimpleModel(nn.Module):
         # x: Tensor[32, 784] float32 (traced as SimpleModel.forward.x)
         h = self.fc1(x)                          # → Tensor[32, 128] float32
         h = torch.relu(h)                        # → Tensor[32, 128] float32
-        return self.fc2(h)                       # → Tensor[32, 10] float32
+        return self.fc2(h)                       # → returns Tensor[32, 10] float32
 ```
 
-All variables inside class methods are traced with full context — `funcName` shows which method they belong to (e.g., `SimpleModel.forward`), and `self.x` attribute assignments are captured too.
+All variables inside class methods are traced with full context — `funcName` shows which method they belong to (e.g., `SimpleModel.forward`), and `self.x` attribute assignments are captured too. Return values are also traced: `return expr` shows `-> Tensor[...]` on the return line.
 
 **Swapping layers and re-running:**
 ```python
@@ -91,6 +91,7 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Function parameters: `def forward(self, x, targets=None)`
 - Attribute assignments: `self.fc1 = nn.Linear(...)`, `self.encoder = ...`
 - Variables inside class methods with full function context (e.g., `GPT.forward`)
+- Return values: `return logits` shows `-> Tensor[B, T, vocab_size]` inline
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**
