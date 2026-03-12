@@ -46,11 +46,13 @@ function detectProject(dir: string, forcePython: boolean): ProjectInfo {
   if (fs.existsSync(tsPath)) {
     info.hasTsConfig = true;
     try {
-      // Strip comments (simple approach: remove // and /* */ comments)
+      // Strip comments but preserve glob patterns like /**/*.ts
       const raw = fs.readFileSync(tsPath, "utf-8");
+      // Only strip // comments that are NOT inside strings
+      // And /* */ comments that are NOT inside strings (careful with globs)
       const cleaned = raw
         .replace(/\/\/.*$/gm, "")
-        .replace(/\/\*[\s\S]*?\*\//g, "");
+        .replace(/("[^"]*")|\/\*[\s\S]*?\*\//g, (match, str) => str || "");
       info.tsConfig = JSON.parse(cleaned);
     } catch {
       // ignore parse errors
@@ -206,7 +208,7 @@ function writeInitialTypes(trickleDir: string, isPython: boolean): void {
 function updateTsConfig(dir: string, info: ProjectInfo): boolean {
   const tsConfigPath = path.join(dir, "tsconfig.json");
 
-  if (!info.hasTsConfig || !info.tsConfig) {
+  if (!info.hasTsConfig) {
     // No tsconfig — create a minimal one that includes .trickle
     if (!info.isPython) {
       const newConfig = {
@@ -227,25 +229,52 @@ function updateTsConfig(dir: string, info: ProjectInfo): boolean {
     return false;
   }
 
-  // Read the raw file to preserve formatting as much as possible
+  // Use text-based insertion to preserve formatting and glob patterns
+  // (JSON.parse + stringify corrupts /**/ globs by treating them as comments)
   const raw = fs.readFileSync(tsConfigPath, "utf-8");
-  const config = info.tsConfig;
 
   // Check if .trickle is already included
-  const include = config.include as string[] | undefined;
-  if (include && include.some((p: string) => p === ".trickle" || p.startsWith(".trickle/"))) {
-    return false; // Already configured
+  if (raw.includes(".trickle")) return false;
+
+  // Find the "include" array and insert ".trickle" at the end
+  const includeMatch = raw.match(/"include"\s*:\s*\[([^\]]*)\]/);
+  if (includeMatch) {
+    const bracket = includeMatch.index! + includeMatch[0].length - 1; // position of ]
+    const inside = includeMatch[1];
+    // Detect if it's single-line or multi-line
+    if (inside.includes("\n")) {
+      // Multi-line — add before the closing bracket with same indentation
+      const lastEntry = inside.match(/.*\S[^\n]*/g);
+      const indent = lastEntry ? lastEntry[lastEntry.length - 1].match(/^(\s*)/)?.[1] || "        " : "        ";
+      const updated = raw.slice(0, bracket) + `,\n${indent}".trickle"` + raw.slice(bracket);
+      fs.writeFileSync(tsConfigPath, updated, "utf-8");
+    } else {
+      // Single-line: ["src/**/*.ts", "tmp/**/*.ts"] → add ".trickle"
+      const updated = raw.slice(0, bracket) + ', ".trickle"' + raw.slice(bracket);
+      fs.writeFileSync(tsConfigPath, updated, "utf-8");
+    }
+    return true;
   }
 
-  // Add .trickle to include array
-  if (include) {
-    include.push(".trickle");
-  } else {
-    (config as Record<string, unknown>).include = ["src", ".trickle"];
+  // No include array — add one after compilerOptions closing brace
+  const compilerEnd = raw.match(/"compilerOptions"\s*:\s*\{/);
+  if (compilerEnd) {
+    // Find the closing brace of compilerOptions
+    const startBrace = raw.indexOf("{", compilerEnd.index! + compilerEnd[0].length - 1);
+    let depth = 1;
+    let pos = startBrace + 1;
+    while (pos < raw.length && depth > 0) {
+      if (raw[pos] === "{") depth++;
+      else if (raw[pos] === "}") depth--;
+      pos++;
+    }
+    // pos is now right after the closing brace of compilerOptions
+    const updated = raw.slice(0, pos) + `,\n    "include": ["src", ".trickle"]` + raw.slice(pos);
+    fs.writeFileSync(tsConfigPath, updated, "utf-8");
+    return true;
   }
 
-  fs.writeFileSync(tsConfigPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
-  return true;
+  return false;
 }
 
 function updatePackageJson(dir: string, info: ProjectInfo): { scriptsAdded: string[] } {
@@ -300,6 +329,100 @@ function updatePackageJson(dir: string, info: ProjectInfo): { scriptsAdded: stri
   }
 
   return { scriptsAdded: added };
+}
+
+function updateVitestConfig(dir: string): boolean {
+  // Look for vitest.config.ts, vitest.config.js, vitest.config.mts, vite.config.ts, vite.config.js
+  const candidates = [
+    "vitest.config.ts",
+    "vitest.config.js",
+    "vitest.config.mts",
+    "vite.config.ts",
+    "vite.config.js",
+  ];
+
+  let configFile: string | null = null;
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(dir, c))) {
+      configFile = c;
+      break;
+    }
+  }
+
+  if (!configFile) return false;
+
+  const configPath = path.join(dir, configFile);
+  const content = fs.readFileSync(configPath, "utf-8");
+
+  // Already has tricklePlugin
+  if (content.includes("tricklePlugin")) return false;
+
+  // Find the import section end and plugins array
+  const lines = content.split("\n");
+  let lastImportLine = -1;
+  let pluginsLine = -1;
+  let pluginsArrayContent = "";
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*import\s/.test(line)) {
+      // Track multi-line imports
+      lastImportLine = i;
+      if (!line.includes(";") && !line.includes("from")) {
+        // Multi-line import — find the closing line
+        for (let j = i + 1; j < lines.length; j++) {
+          if (lines[j].includes("from")) {
+            lastImportLine = j;
+            break;
+          }
+        }
+      }
+    }
+    if (/plugins\s*:\s*\[/.test(line)) {
+      pluginsLine = i;
+      pluginsArrayContent = line;
+    }
+  }
+
+  if (lastImportLine === -1) return false;
+
+  // Add import after last import
+  const importLine = `import { tricklePlugin } from "trickle-observe/vite-plugin";`;
+  lines.splice(lastImportLine + 1, 0, importLine);
+
+  // Adjust pluginsLine index since we inserted a line
+  if (pluginsLine > lastImportLine) {
+    pluginsLine += 1;
+  }
+
+  // Add tricklePlugin() to plugins array
+  if (pluginsLine !== -1) {
+    const line = lines[pluginsLine];
+    // Check if plugins array is on one line: plugins: [something()],
+    if (/plugins\s*:\s*\[.*\]/.test(line)) {
+      // Insert tricklePlugin() before the closing bracket
+      lines[pluginsLine] = line.replace(/\]/, ", tricklePlugin()]");
+    } else {
+      // Multi-line plugins — add after the opening bracket line
+      const indent = line.match(/^(\s*)/)?.[1] || "";
+      const innerIndent = indent + "    ";
+      lines.splice(pluginsLine + 1, 0, `${innerIndent}tricklePlugin(),`);
+    }
+  } else {
+    // No plugins array found — need to add one
+    // Find defineConfig({ and add plugins after it
+    for (let i = 0; i < lines.length; i++) {
+      if (/defineConfig\s*\(\s*\{/.test(lines[i])) {
+        const indent = lines[i].match(/^(\s*)/)?.[1] || "";
+        const innerIndent = indent + "    ";
+        lines.splice(i + 1, 0, `${innerIndent}plugins: [tricklePlugin()],`);
+        break;
+      }
+    }
+  }
+
+  fs.writeFileSync(configPath, lines.join("\n"), "utf-8");
+  return true;
 }
 
 function updateGitignore(dir: string): boolean {
@@ -379,7 +502,15 @@ export async function initCommand(opts: InitOptions): Promise<void> {
     }
   }
 
-  // Step 5: Update package.json scripts
+  // Step 5: Update vitest/vite config with tricklePlugin
+  if (!info.isPython) {
+    const vitestUpdated = updateVitestConfig(dir);
+    if (vitestUpdated) {
+      console.log(`  ${chalk.green("~")} Updated ${chalk.bold("vitest.config.ts")} — added tricklePlugin() for variable tracing`);
+    }
+  }
+
+  // Step 6: Update package.json scripts
   if (info.hasPackageJson) {
     const { scriptsAdded } = updatePackageJson(dir, info);
     if (scriptsAdded.length > 0) {
@@ -389,13 +520,13 @@ export async function initCommand(opts: InitOptions): Promise<void> {
     }
   }
 
-  // Step 6: Update .gitignore
+  // Step 7: Update .gitignore
   const giUpdated = updateGitignore(dir);
   if (giUpdated) {
     console.log(`  ${chalk.green("~")} Updated ${chalk.bold(".gitignore")} — added .trickle/`);
   }
 
-  // Step 7: Print next steps
+  // Step 8: Print next steps
   console.log("");
   console.log(chalk.bold("  Next steps:"));
   console.log("");
@@ -412,6 +543,7 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   console.log("");
   console.log(chalk.gray("  Other commands:"));
   console.log(chalk.gray("     trickle functions         — list observed functions"));
+  console.log(chalk.gray("     trickle vars              — list captured variable types + values"));
   console.log(chalk.gray("     trickle types <name>      — see types + sample data"));
   console.log(chalk.gray("     trickle annotate src/     — add type annotations to source files"));
 
