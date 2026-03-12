@@ -90,16 +90,61 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(fileWatcher);
   }
 
-  // Watch for source file edits — clear stale hints when a tracked file changes
+  // Watch for source file edits — shift hint line numbers and invalidate edited lines
   context.subscriptions.push(
     vscode.workspace.onDidChangeTextDocument(e => {
       if (e.contentChanges.length === 0) return; // metadata-only change
       const filePath = e.document.uri.fsPath;
-      if (varIndex.has(filePath)) {
-        varIndex.delete(filePath);
-        updateStatusBar();
-        refreshInlineHints();
+      const lineMap = varIndex.get(filePath);
+      if (!lineMap) return;
+
+      // Process changes in reverse order (bottom-up) so earlier changes
+      // don't affect the line numbers of later changes
+      const sortedChanges = [...e.contentChanges].sort(
+        (a, b) => b.range.start.line - a.range.start.line,
+      );
+
+      for (const change of sortedChanges) {
+        const startLine1 = change.range.start.line + 1; // 1-based
+        const endLine1 = change.range.end.line + 1;
+        const oldLineCount = endLine1 - startLine1 + 1;
+        const newLineCount = change.text.split('\n').length;
+        const lineDelta = newLineCount - oldLineCount;
+
+        // Build new line map with shifted entries
+        const newEntries: [number, VariableObservation[]][] = [];
+        const toDelete: number[] = [];
+
+        for (const [line, obs] of lineMap) {
+          if (line >= startLine1 && line <= endLine1) {
+            // Line was directly edited — invalidate these hints
+            toDelete.push(line);
+          } else if (line > endLine1 && lineDelta !== 0) {
+            // Line is below the edit — shift it
+            toDelete.push(line);
+            const newLine = line + lineDelta;
+            // Update the line number in each observation too
+            const shifted = obs.map(o => ({ ...o, line: newLine }));
+            newEntries.push([newLine, shifted]);
+          }
+          // Lines above the edit are unchanged
+        }
+
+        for (const line of toDelete) {
+          lineMap.delete(line);
+        }
+        for (const [line, obs] of newEntries) {
+          lineMap.set(line, obs);
+        }
       }
+
+      // If the map is now empty, remove the file entry entirely
+      if (lineMap.size === 0) {
+        varIndex.delete(filePath);
+      }
+
+      updateStatusBar();
+      refreshInlineHints();
     }),
   );
 

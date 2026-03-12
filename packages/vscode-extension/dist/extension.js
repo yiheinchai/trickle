@@ -43,6 +43,8 @@ let notebookCellIndex = new Map();
 let fileWatcher;
 let statusBarItem;
 let inlineHintsProvider;
+/** Fires to tell VSCode to re-query inlay hints after data changes. */
+const inlayHintsChangeEmitter = new vscode.EventEmitter();
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     statusBarItem.command = 'trickle.refreshVariables';
@@ -62,20 +64,78 @@ function activate(context) {
     context.subscriptions.push(vscode.languages.registerHoverProvider(selector, new TrickleHoverProvider()));
     // Register inline hints provider
     registerInlineHints(context, selector);
-    // Watch for changes to variables.jsonl
+    // Watch for changes to variables.jsonl with debouncing for rapid writes
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders) {
         const pattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/variables.jsonl');
         fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
-        fileWatcher.onDidChange(() => loadAllVariables());
-        fileWatcher.onDidCreate(() => loadAllVariables());
+        let reloadTimer;
+        const debouncedReload = () => {
+            if (reloadTimer)
+                clearTimeout(reloadTimer);
+            reloadTimer = setTimeout(() => loadAllVariables(), 300);
+        };
+        fileWatcher.onDidChange(debouncedReload);
+        fileWatcher.onDidCreate(debouncedReload);
         fileWatcher.onDidDelete(() => {
+            if (reloadTimer)
+                clearTimeout(reloadTimer);
             varIndex.clear();
+            notebookCellIndex.clear();
             updateStatusBar();
             refreshInlineHints();
         });
         context.subscriptions.push(fileWatcher);
     }
+    // Watch for source file edits — shift hint line numbers and invalidate edited lines
+    context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
+        if (e.contentChanges.length === 0)
+            return; // metadata-only change
+        const filePath = e.document.uri.fsPath;
+        const lineMap = varIndex.get(filePath);
+        if (!lineMap)
+            return;
+        // Process changes in reverse order (bottom-up) so earlier changes
+        // don't affect the line numbers of later changes
+        const sortedChanges = [...e.contentChanges].sort((a, b) => b.range.start.line - a.range.start.line);
+        for (const change of sortedChanges) {
+            const startLine1 = change.range.start.line + 1; // 1-based
+            const endLine1 = change.range.end.line + 1;
+            const oldLineCount = endLine1 - startLine1 + 1;
+            const newLineCount = change.text.split('\n').length;
+            const lineDelta = newLineCount - oldLineCount;
+            // Build new line map with shifted entries
+            const newEntries = [];
+            const toDelete = [];
+            for (const [line, obs] of lineMap) {
+                if (line >= startLine1 && line <= endLine1) {
+                    // Line was directly edited — invalidate these hints
+                    toDelete.push(line);
+                }
+                else if (line > endLine1 && lineDelta !== 0) {
+                    // Line is below the edit — shift it
+                    toDelete.push(line);
+                    const newLine = line + lineDelta;
+                    // Update the line number in each observation too
+                    const shifted = obs.map(o => ({ ...o, line: newLine }));
+                    newEntries.push([newLine, shifted]);
+                }
+                // Lines above the edit are unchanged
+            }
+            for (const line of toDelete) {
+                lineMap.delete(line);
+            }
+            for (const [line, obs] of newEntries) {
+                lineMap.set(line, obs);
+            }
+        }
+        // If the map is now empty, remove the file entry entirely
+        if (lineMap.size === 0) {
+            varIndex.delete(filePath);
+        }
+        updateStatusBar();
+        refreshInlineHints();
+    }));
     // Register commands
     context.subscriptions.push(vscode.commands.registerCommand('trickle.refreshVariables', () => {
         loadAllVariables();
@@ -108,6 +168,7 @@ function activate(context) {
 function deactivate() {
     fileWatcher?.dispose();
     inlineHintsProvider?.dispose();
+    inlayHintsChangeEmitter.dispose();
 }
 function countVars() {
     let count = 0;
@@ -297,11 +358,21 @@ class TrickleHoverProvider {
         // Also check nearby lines (the line in JSONL might be the declaration line,
         // but the user might hover on a usage line)
         const candidates = [];
+        // Try to get the full "obj.attr" text if the cursor is on an attribute
+        const lineText = document.lineAt(position.line).text;
+        const attrRange = document.getWordRangeAtPosition(position, /[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$]*/);
+        const attrWord = attrRange ? document.getText(attrRange) : null;
         // Check exact line first
         const obsAtLine = lineMap.get(lineNo);
         if (obsAtLine) {
             for (const obs of obsAtLine) {
                 if (obs.varName === word)
+                    candidates.push(obs);
+                // Match attribute vars: hovering on "weight" matches "self.weight"
+                if (attrWord && obs.varName === attrWord)
+                    candidates.push(obs);
+                // Also match when varName is "self.x" and word is "x" (attr part)
+                if (obs.varName.endsWith('.' + word) && obs.varName.includes('.'))
                     candidates.push(obs);
                 // Show return value info when hovering over "return" keyword
                 if (word === 'return' && (obs.varName === '<return>' || obs.varName.startsWith('<return:'))) {
@@ -315,6 +386,8 @@ class TrickleHoverProvider {
                 for (const obs of obsArr) {
                     if (obs.varName === word)
                         candidates.push(obs);
+                    if (attrWord && obs.varName === attrWord)
+                        candidates.push(obs);
                 }
             }
         }
@@ -323,18 +396,48 @@ class TrickleHoverProvider {
         // Build hover content
         const showSamples = config.get('showSampleValues', true);
         const parts = [];
+        // For tensor variables with funcName, collect all observations of the same
+        // variable in the same function to show "shape flow" (how shape transforms)
+        const shapeFlowShown = new Set();
         for (const obs of candidates) {
             const typeStr = typeNodeToString(obs.type);
             const className = obs.type?.class_name;
-            // For tensors, show a richer display
-            if (className === 'Tensor' || className === 'ndarray') {
-                parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
-                if (showSamples && obs.sample !== undefined) {
-                    parts.push(`\n*Value:* \`${obs.sample}\``);
+            const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
+            // For tensors, show shape flow if available
+            if ((className === 'Tensor' || className === 'ndarray') && obs.funcName) {
+                const flowKey = `${obs.varName}:${obs.funcName}`;
+                if (shapeFlowShown.has(flowKey))
+                    continue;
+                shapeFlowShown.add(flowKey);
+                // Find all observations of this variable in the same function
+                const flowObs = collectShapeFlow(lineMap, obs.varName, obs.funcName);
+                if (flowObs.length > 1) {
+                    // Show shape flow chain
+                    parts.push(`**\`${obs.varName}\`**${funcCtx} — shape flow:`);
+                    const flowLines = [];
+                    for (const fo of flowObs) {
+                        const shape = extractShapeStr(fo.type);
+                        const stats = formatTensorStats(fo.type);
+                        const marker = fo.line === obs.line ? ' **←**' : '';
+                        flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
+                    }
+                    parts.push(flowLines.join('\n\n'));
+                }
+                else {
+                    parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
+                    const stats = formatTensorStats(obs.type);
+                    if (stats)
+                        parts.push(stats);
                 }
             }
+            else if (className === 'Tensor' || className === 'ndarray') {
+                parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
+                const stats = formatTensorStats(obs.type);
+                if (stats)
+                    parts.push(stats);
+            }
             else {
-                parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+                parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
                 if (showSamples && obs.sample !== undefined) {
                     const sampleStr = formatSample(obs.sample);
                     parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
@@ -349,6 +452,9 @@ class TrickleHoverProvider {
 }
 /** Inline hints (inlay hints) — show type after variable declarations */
 class TrickleInlayHintsProvider {
+    constructor() {
+        this.onDidChangeInlayHints = inlayHintsChangeEmitter.event;
+    }
     provideInlayHints(document, range) {
         const config = vscode.workspace.getConfiguration('trickle');
         if (!config.get('enabled', true) || !config.get('inlineHints', true))
@@ -377,15 +483,27 @@ class TrickleInlayHintsProvider {
                     const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
                     hint.paddingLeft = true;
                     hint.paddingRight = false;
+                    const tooltipParts = [];
+                    if (obs.funcName)
+                        tooltipParts.push(`**Function:** \`${obs.funcName}\``);
+                    const retStats = formatTensorStats(obs.type);
+                    if (retStats)
+                        tooltipParts.push(`**Stats:**${retStats}`);
                     if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-                        const sampleStr = formatSample(obs.sample);
-                        hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+                        tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                    }
+                    if (tooltipParts.length > 0) {
+                        hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
                     }
                     hints.push(hint);
                     continue;
                 }
                 // Find the variable name in the line
-                const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
+                // For attribute names like "self.weight", use non-word-boundary matching
+                const isAttrVar = obs.varName.includes('.');
+                const varPattern = isAttrVar
+                    ? new RegExp(escapeRegex(obs.varName))
+                    : new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
                 const match = varPattern.exec(lineText);
                 if (!match)
                     continue;
@@ -400,11 +518,14 @@ class TrickleInlayHintsProvider {
                     // 3. With-as: `with ... as x:`
                     // 4. Function param: `def fn(x, y=None):` or `def fn(self, x):`
                     // 5. Annotated: `x: int = ...` (skip — already has annotation)
+                    // 6. Attribute assignment: `self.x = ...`
                     const isAssignment = afterVar.startsWith('=') && !afterVar.startsWith('==');
                     const isAnnotated = afterVar.startsWith(':');
                     const isForVar = /\bfor\s+$/.test(beforeVar) || /\bfor\s+.*,\s*$/.test(beforeVar);
                     const isWithAs = /\bas\s+$/.test(beforeVar);
                     const isBareAssignment = /^\s*$/.test(beforeVar) || /,\s*$/.test(beforeVar);
+                    // Attribute assignment: `self.weight = ...` or `  self.proj = ...`
+                    const isAttrAssignment = isAttrVar && isAssignment && /^\s*$/.test(beforeVar);
                     // Function parameter: `def fn(x` or `def fn(self, x` or `def fn(x,`
                     // Also handles `async def fn(x`
                     const isFuncParam = /\b(?:async\s+)?def\s+\w+\s*\(/.test(beforeVar) &&
@@ -415,6 +536,7 @@ class TrickleInlayHintsProvider {
                         (afterVar.startsWith(',') || afterVar.startsWith('=') || afterVar.startsWith(')'));
                     const isValidPattern = ((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated)) ||
                         isFuncParam ||
+                        isAttrAssignment ||
                         (isTupleElement && !isFuncParam); // Tuple elements in assignments
                     if (!isValidPattern)
                         continue;
@@ -439,16 +561,72 @@ class TrickleInlayHintsProvider {
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
                 hint.paddingLeft = false;
                 hint.paddingRight = true;
-                // Add sample value as tooltip
+                // Add funcName, tensor stats, and sample value as tooltip
+                const tooltipParts = [];
+                if (obs.funcName)
+                    tooltipParts.push(`**Function:** \`${obs.funcName}\``);
+                const stats = formatTensorStats(obs.type);
+                if (stats)
+                    tooltipParts.push(`**Stats:**${stats}`);
                 if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-                    const sampleStr = formatSample(obs.sample);
-                    hint.tooltip = new vscode.MarkdownString(`**Sample value:**\n\`\`\`json\n${sampleStr}\n\`\`\``);
+                    tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                }
+                if (tooltipParts.length > 0) {
+                    hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
                 }
                 hints.push(hint);
             }
         }
         return hints;
     }
+}
+/** Collect all observations of a variable within the same function, sorted by line. */
+function collectShapeFlow(lineMap, varName, funcName) {
+    const results = [];
+    for (const [, obsArr] of lineMap) {
+        for (const obs of obsArr) {
+            if (obs.varName === varName && obs.funcName === funcName) {
+                results.push(obs);
+            }
+        }
+    }
+    results.sort((a, b) => a.line - b.line);
+    return results;
+}
+/** Extract a concise shape string from a tensor TypeNode. */
+function extractShapeStr(type) {
+    if (!type.properties)
+        return type.class_name || 'unknown';
+    const shape = type.properties['shape'];
+    const dtype = type.properties['dtype'];
+    const device = type.properties['device'];
+    const gradFn = type.properties['grad_fn'];
+    let result = type.class_name || 'Tensor';
+    if (shape?.kind === 'primitive' && shape.name) {
+        result += shape.name;
+    }
+    if (dtype?.kind === 'primitive' && dtype.name) {
+        result += ' ' + dtype.name.replace('torch.', '').replace('numpy.', '');
+    }
+    if (device?.kind === 'primitive' && device.name && device.name !== 'cpu') {
+        result += ` @${device.name}`;
+    }
+    if (gradFn?.kind === 'primitive' && gradFn.name) {
+        result += ` (${gradFn.name})`;
+    }
+    const val = type.properties['value'];
+    if (val?.kind === 'primitive' && val.name) {
+        result += ` = ${val.name}`;
+    }
+    const nan = type.properties['nan_count'];
+    if (nan?.kind === 'primitive' && nan.name && nan.name !== '0') {
+        result += ` NaN!(${nan.name})`;
+    }
+    const inf = type.properties['inf_count'];
+    if (inf?.kind === 'primitive' && inf.name && inf.name !== '0') {
+        result += ` [${inf.name} inf]`;
+    }
+    return result;
 }
 function registerInlineHints(context, selector) {
     inlineHintsProvider?.dispose();
@@ -459,9 +637,8 @@ function registerInlineHints(context, selector) {
     }
 }
 function refreshInlineHints() {
-    // Trigger inlay hints refresh by firing a dummy config change
-    // VS Code automatically re-queries inlay hints when the document changes
-    // For now, we rely on the file watcher triggering a refresh
+    // Fire the event emitter so VSCode re-queries all inlay hints providers
+    inlayHintsChangeEmitter.fire();
 }
 function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -504,6 +681,17 @@ function typeNodeToString(node, depth = 3) {
             // where the values are stored as primitive name strings like "[1, 16, 32]"
             if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
                 return formatTensorType(node.class_name, node.properties);
+            }
+            // nn.Module types: show key params, omit 'params' count from inline display
+            if (node.class_name && node.properties['params']) {
+                const paramCount = node.properties['params']?.name;
+                const displayEntries = entries.filter(([k]) => k !== 'params');
+                if (displayEntries.length === 0) {
+                    return paramCount ? `${node.class_name}(${paramCount} params)` : node.class_name;
+                }
+                const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
+                const suffix = displayEntries.length > 4 ? ', ...' : '';
+                return `${node.class_name}(${props.join(', ')}${suffix})`;
             }
             // Named class
             if (node.class_name) {
@@ -573,7 +761,34 @@ function formatTensorType(className, properties) {
     if (gradFnProp?.kind === 'primitive' && gradFnProp.name) {
         parts.push(`(${gradFnProp.name})`);
     }
+    // Scalar value: show actual number for 0-dim / 1-element tensors
+    const valueProp = properties['value'];
+    if (valueProp?.kind === 'primitive' && valueProp.name) {
+        parts.push(`= ${valueProp.name}`);
+    }
+    // NaN/Inf warnings — show prominently at the end
+    const nanProp = properties['nan_count'];
+    const infProp = properties['inf_count'];
+    // NaN is always a bug — show prominently
+    if (nanProp?.kind === 'primitive' && nanProp.name && nanProp.name !== '0') {
+        parts.push(`NaN!(${nanProp.name})`);
+    }
+    // Inf can be intentional (attention masking uses -inf) — show less alarming
+    if (infProp?.kind === 'primitive' && infProp.name && infProp.name !== '0') {
+        parts.push(`[${infProp.name} inf]`);
+    }
     return parts.join(' ');
+}
+/** Format tensor statistics (min/max/mean) for hover display. */
+function formatTensorStats(type) {
+    if (!type.properties)
+        return '';
+    const min = type.properties['min'];
+    const max = type.properties['max'];
+    const mean = type.properties['mean'];
+    if (!min || !max || !mean)
+        return '';
+    return ` \`min=${min.name} max=${max.name} mean=${mean.name}\``;
 }
 /** Format a sample value for display */
 function formatSample(sample) {
