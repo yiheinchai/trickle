@@ -200,7 +200,7 @@ interface Extracted { name: string; node: TypeNode; }
 
 function typeToTS(node: TypeNode, ext: Extracted[], parent: string, prop: string | undefined, indent: number): string {
   switch (node.kind) {
-    case 'primitive': return node.name || 'unknown';
+    case 'primitive': return node.name === 'integer' ? 'number' : (node.name || 'unknown');
     case 'unknown': return 'unknown';
     case 'array': {
       const inner = typeToTS(node.element!, ext, parent, prop, indent);
@@ -454,7 +454,7 @@ function generateDts(functions: FunctionData[]): string {
 
 function typeToJSDoc(node: TypeNode): string {
   switch (node.kind) {
-    case 'primitive': return node.name || '*';
+    case 'primitive': return node.name === 'integer' ? 'number' : (node.name || '*');
     case 'unknown': return '*';
     case 'array': {
       const inner = typeToJSDoc(node.element!);
@@ -801,7 +801,7 @@ const SNAPSHOT_FILE = '.trickle/type-snapshot.json';
 function typeToCompact(node: TypeNode, depth = 0): string {
   if (depth > 2) return '...';
   switch (node.kind) {
-    case 'primitive': return node.name || 'unknown';
+    case 'primitive': return node.name === 'integer' ? 'number' : (node.name || 'unknown');
     case 'unknown': return 'unknown';
     case 'array': return `${typeToCompact(node.element!, depth + 1)}[]`;
     case 'tuple': return `[${(node.elements || []).map(e => typeToCompact(e, depth + 1)).join(', ')}]`;

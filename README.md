@@ -69,6 +69,7 @@ trickle dev
   - [Class Method Observation](#class-method-observation)
   - [IPython & Jupyter Notebook Support](#ipython--jupyter-notebook-support)
   - [Async Function Types](#async-function-types)
+  - [Python int vs float Type Narrowing](#python-int-vs-float-type-narrowing)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3624,6 +3625,44 @@ Detection works via duck-typing (JS: checks if return value has `.then()`) and `
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-async-e2e.js
+```
+
+---
+
+### Python int vs float Type Narrowing
+
+Python distinguishes `int` from `float`, but JavaScript uses `number` for both. Trickle now preserves this distinction:
+
+```python
+# Python source
+def paginate(items, page, per_page):
+    ...
+
+paginate(["a", "b", "c"], 1, 10)  # page=int, per_page=int
+```
+
+```python
+# Generated .pyi — int stays int, not float
+def paginate(items: List[str], page: int, per_page: int) -> Dict[str, Any]: ...
+```
+
+```typescript
+// Generated .d.ts — JS still uses number for both
+export declare function paginate(items: string[], page: number, perPage: number): { ... };
+```
+
+How it works:
+- Python's type inference checks `isinstance(value, int)` before `isinstance(value, float)` (since `bool` is already handled first)
+- Integer values produce `{"kind": "primitive", "name": "integer"}` in observations
+- Float values produce `{"kind": "primitive", "name": "number"}`
+- Python codegen maps `"integer"` → `int` and `"number"` → `float`
+- JS codegen maps both `"integer"` and `"number"` → `number` (no leakage)
+
+Works with standalone functions, class methods, and mixed JS+Python observation files.
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-intfloat-e2e.js
 ```
 
 ---

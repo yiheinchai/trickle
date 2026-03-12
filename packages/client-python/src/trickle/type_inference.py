@@ -42,8 +42,12 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if isinstance(value, bool):
         return {"kind": "primitive", "name": "boolean"}
 
-    # --- int / float ---
-    if isinstance(value, (int, float)):
+    # --- int ---
+    if isinstance(value, int):
+        return {"kind": "primitive", "name": "integer"}
+
+    # --- float ---
+    if isinstance(value, float):
         return {"kind": "primitive", "name": "number"}
 
     # --- str ---

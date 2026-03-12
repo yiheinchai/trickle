@@ -105,9 +105,9 @@ async function run() {
     // Verify class stubs
     assert(pyiContent.includes('class Calculator:'), '.pyi has Calculator class');
     assert(pyiContent.includes('class Formatter:'), '.pyi has Formatter class');
-    assert(pyiContent.includes('def add(self, a: float, b: float)'), '.pyi has Calculator.add method');
-    assert(pyiContent.includes('def multiply(self, a: float, b: float)'), '.pyi has Calculator.multiply method');
-    assert(pyiContent.includes('def square(self, x: float)'), '.pyi has Calculator.square method');
+    assert(pyiContent.includes('def add(self, a: int, b: int)'), '.pyi has Calculator.add method');
+    assert(pyiContent.includes('def multiply(self, a: int, b: int)'), '.pyi has Calculator.multiply method');
+    assert(pyiContent.includes('def square(self, x: int)'), '.pyi has Calculator.square method');
     assert(pyiContent.includes('def format_name(self, first: str, last: str)'), '.pyi has Formatter.format_name method');
     assert(pyiContent.includes('def format_currency(self, amount: float, currency: str)'), '.pyi has Formatter.format_currency method');
 

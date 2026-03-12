@@ -169,6 +169,7 @@ def _type_to_python(
         mapping = {
             "string": "str",
             "number": "float",
+            "integer": "int",
             "boolean": "bool",
             "null": "None",
             "undefined": "None",
@@ -700,7 +701,7 @@ def _type_to_inline_python(node: Dict[str, Any]) -> str:
     if kind == "primitive":
         name = node.get("name", "unknown")
         mapping = {
-            "string": "str", "number": "float", "boolean": "bool",
+            "string": "str", "number": "float", "integer": "int", "boolean": "bool",
             "null": "None", "undefined": "None", "bigint": "int",
         }
         return mapping.get(name, "Any")
@@ -1029,7 +1030,7 @@ def _type_to_compact(node: Dict[str, Any], depth: int = 0) -> str:
     kind = node.get("kind", "unknown")
     if kind == "primitive":
         name = node.get("name", "unknown")
-        mapping = {"string": "str", "number": "float", "boolean": "bool", "null": "None", "undefined": "None", "bigint": "int"}
+        mapping = {"string": "str", "number": "float", "integer": "int", "boolean": "bool", "null": "None", "undefined": "None", "bigint": "int"}
         return mapping.get(name, "Any")
     if kind == "unknown":
         return "Any"
