@@ -1029,6 +1029,39 @@ export function generateTypeSummary(): string | null {
 }
 
 /**
+ * Cached recursive file index: maps basename (without ext) → full path.
+ * Built once on first call, then reused.
+ */
+let fileIndex: Map<string, string> | null = null;
+
+function buildFileIndex(): Map<string, string> {
+  const cwd = process.cwd();
+  const exts = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs']);
+  const index = new Map<string, string>();
+
+  // Common source directories to scan
+  const dirs = ['src', 'dist', 'lib', 'app', '.'];
+  for (const dir of dirs) {
+    const absDir = path.join(cwd, dir);
+    try {
+      const entries = fs.readdirSync(absDir, { recursive: true, withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
+        const ext = path.extname(entry.name);
+        if (!exts.has(ext)) continue;
+        const baseName = entry.name.replace(/\.[^.]+$/, '');
+        const fullPath = path.join(absDir, (entry as any).parentPath ? path.relative(absDir, (entry as any).parentPath) : '', entry.name);
+        // Prefer src/ over dist/ for the same basename
+        if (!index.has(baseName) || fullPath.includes('/src/')) {
+          index.set(baseName, fullPath);
+        }
+      }
+    } catch { /* dir doesn't exist */ }
+  }
+  return index;
+}
+
+/**
  * Try to find the source file for a given module name.
  */
 function findSourceFile(moduleName: string): string | null {
@@ -1054,5 +1087,9 @@ function findSourceFile(moduleName: string): string | null {
     if (fs.existsSync(candidate)) return candidate;
   }
 
-  return null;
+  // Recursive search using cached file index
+  if (!fileIndex) {
+    fileIndex = buildFileIndex();
+  }
+  return fileIndex.get(moduleName) || null;
 }

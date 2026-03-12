@@ -294,18 +294,18 @@ if (enabled) {
   M._load = function hookedLoad(request: string, parent: any, isMain: boolean): any {
     const exports = originalLoad.apply(this, arguments);
 
-    // Only process user modules (relative paths)
-    if (!request.startsWith('.') && !request.startsWith('/')) {
-      return exports;
-    }
-
-    // Resolve to absolute path for dedup
+    // Resolve to absolute path for dedup — do this FIRST since bundlers like
+    // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
+    // with './' or '/'. We need the resolved path to decide if it's user code.
     let resolvedPath: string;
     try {
       resolvedPath = M._resolveFilename(request, parent);
     } catch {
       return exports;
     }
+
+    // Skip built-in modules (they resolve to names like 'fs', 'path', not absolute paths)
+    if (!resolvedPath.startsWith('/')) return exports;
 
     // Skip node_modules and trickle internals
     if (resolvedPath.includes('node_modules')) return exports;
@@ -335,9 +335,21 @@ if (enabled) {
       for (const key of Object.keys(exports)) {
         if (typeof exports[key] === 'function' && key !== 'default') {
           const fn = exports[key];
-          // Skip classes — their prototype methods are wrapped separately below
-          const isClass = fn.prototype && fn.prototype.constructor === fn &&
-            Object.getOwnPropertyNames(fn.prototype).some(m => m !== 'constructor' && typeof fn.prototype[m] === 'function');
+          // Skip classes — wrapping them breaks DI containers (tsyringe, inversify, etc.)
+          // and decorator metadata. Detect via toString() for ES2015+ classes,
+          // and via prototype check for classes with prototype methods.
+          // Wrapped in try-catch because some prototype property access can throw
+          // (e.g., Node.js stream classes with getter-only properties).
+          let isClass = false;
+          try {
+            const fnStr = Function.prototype.toString.call(fn);
+            isClass = fnStr.startsWith('class ') ||
+              (fn.prototype && fn.prototype.constructor === fn &&
+                Object.getOwnPropertyNames(fn.prototype).some(m => {
+                  try { return m !== 'constructor' && typeof fn.prototype[m] === 'function'; }
+                  catch { return false; }
+                }));
+          } catch { /* assume not a class */ }
           if (isClass) continue;
           const paramNames = extractParamNames(fn);
           const wrapOpts: WrapOptions = {
@@ -351,36 +363,74 @@ if (enabled) {
             enabled: true,
             paramNames: paramNames.length > 0 ? paramNames : undefined,
           };
-          exports[key] = wrapFunction(fn, wrapOpts);
+          const wrapped = wrapFunction(fn, wrapOpts);
+          try {
+            exports[key] = wrapped;
+          } catch {
+            // Property might be getter-only (tsx/esbuild uses getter exports).
+            // Redefine with Object.defineProperty.
+            try {
+              Object.defineProperty(exports, key, {
+                value: wrapped,
+                enumerable: true,
+                configurable: true,
+                writable: true,
+              });
+            } catch { continue; /* truly read-only, skip */ }
+          }
           count++;
         }
       }
 
-      // Handle default export if it's a function
+      // Handle default export if it's a function (but not a class)
       if (typeof exports.default === 'function') {
         const fn = exports.default;
-        const paramNames = extractParamNames(fn);
-        const wrapOpts: WrapOptions = {
-          functionName: fn.name || 'default',
-          module: moduleName,
-          trackArgs: true,
-          trackReturn: true,
-          sampleRate: 1,
-          maxDepth: 5,
-          environment,
-          enabled: true,
-          paramNames: paramNames.length > 0 ? paramNames : undefined,
-        };
-        exports.default = wrapFunction(fn, wrapOpts);
-        count++;
+        let defaultIsClass = false;
+        try {
+          const defaultFnStr = Function.prototype.toString.call(fn);
+          defaultIsClass = defaultFnStr.startsWith('class ') ||
+            (fn.prototype && fn.prototype.constructor === fn &&
+              Object.getOwnPropertyNames(fn.prototype).some(m => {
+                try { return m !== 'constructor' && typeof fn.prototype[m] === 'function'; }
+                catch { return false; }
+              }));
+        } catch { /* assume not a class */ }
+        if (!defaultIsClass) {
+          const paramNames = extractParamNames(fn);
+          const wrapOpts: WrapOptions = {
+            functionName: fn.name || 'default',
+            module: moduleName,
+            trackArgs: true,
+            trackReturn: true,
+            sampleRate: 1,
+            maxDepth: 5,
+            environment,
+            enabled: true,
+            paramNames: paramNames.length > 0 ? paramNames : undefined,
+          };
+          const wrapped = wrapFunction(fn, wrapOpts);
+          try {
+            exports.default = wrapped;
+          } catch {
+            try {
+              Object.defineProperty(exports, 'default', {
+                value: wrapped, enumerable: true, configurable: true, writable: true,
+              });
+            } catch { /* skip */ }
+          }
+          count++;
+        }
       }
 
       // Wrap class prototype methods for exported classes
       for (const key of Object.keys(exports)) {
         const val = exports[key];
         if (typeof val === 'function' && val.prototype && val.prototype.constructor === val) {
-          const protoNames = Object.getOwnPropertyNames(val.prototype)
-            .filter(m => m !== 'constructor' && typeof val.prototype[m] === 'function');
+          let protoNames: string[];
+          try {
+            protoNames = Object.getOwnPropertyNames(val.prototype)
+              .filter(m => { try { return m !== 'constructor' && typeof val.prototype[m] === 'function'; } catch { return false; } });
+          } catch { continue; }
           for (const method of protoNames) {
             if (method.startsWith('_')) continue;
             try {
@@ -410,7 +460,13 @@ if (enabled) {
       }
     } else if (typeof exports === 'function') {
       // Module exports a single function (e.g. module.exports = fn)
+      // But skip classes — wrapping them breaks DI, decorators, and instanceof
       const fn = exports;
+      const singleFnStr = Function.prototype.toString.call(fn);
+      const singleIsClass = singleFnStr.startsWith('class ') ||
+        (fn.prototype && fn.prototype.constructor === fn &&
+          Object.getOwnPropertyNames(fn.prototype).some(m => m !== 'constructor' && typeof fn.prototype[m] === 'function'));
+      if (singleIsClass) return exports;
       const fnParamNames = extractParamNames(fn);
       const wrapOpts: WrapOptions = {
         functionName: fn.name || moduleName,

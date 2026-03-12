@@ -3273,7 +3273,14 @@ node --import trickle/auto-esm app.mjs
 
 Works with `.mjs` files and any ESM modules. Exported functions (`export function`, `export const`, `export default`, `export { }`) are all instrumented automatically. Async exports are handled too.
 
-**TypeScript** — works natively on Node.js 22.6+ (built-in type stripping):
+**TypeScript (tsx)** — works with tsx, the most popular TypeScript runner:
+```bash
+npx tsx -r trickle-observe/auto src/server.ts
+```
+
+Fully compatible with tsx/esbuild compilation, path aliases (`@config/env`, `@routes/users.route`), DI containers (tsyringe, inversify), and Express 5. All exported functions are instrumented automatically, including class prototype methods. Classes themselves are preserved (not wrapped) to avoid breaking decorators and dependency injection.
+
+**TypeScript (native)** — works natively on Node.js 22.6+ (built-in type stripping):
 ```bash
 node --import trickle/auto-esm app.ts
 ```

@@ -30,23 +30,15 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
       return fn.apply(this, args);
     }
 
-    // Set up arg tracking
-    const trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }> = [];
-    const proxiedArgs = args.map((arg, i) => {
-      if (arg !== null && arg !== undefined && typeof arg === 'object') {
-        const tracker = createTracker(arg);
-        trackers.push(tracker);
-        return tracker.proxy;
-      }
-      return arg;
-    });
-
     let result: any;
     let threwError = false;
     let caughtError: unknown;
+    const trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }> = [];
 
     try {
-      result = fn.apply(this, proxiedArgs);
+      // Always pass ORIGINAL args to the function — never proxied ones.
+      // Proxied args can break framework internals (Express Router, DI containers, etc.)
+      result = fn.apply(this, args);
     } catch (err) {
       threwError = true;
       caughtError = err;
