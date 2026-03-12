@@ -169,6 +169,16 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _module_type is not None and isinstance(value, _module_type):
         return _infer_nn_module(value)
 
+    # --- PyTorch Optimizer ---
+    _optim_type = _get_torch_optimizer_type()
+    if _optim_type is not None and isinstance(value, _optim_type):
+        return _infer_optimizer(value)
+
+    # --- PyTorch LR Scheduler ---
+    _sched_type = _get_torch_scheduler_type()
+    if _sched_type is not None and isinstance(value, _sched_type):
+        return _infer_scheduler(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -376,6 +386,109 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
         props["params"] = {"kind": "primitive", "name": str(n_params)}
     except Exception:
         pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+# --- PyTorch Optimizer support ---
+
+_torch_optimizer_type: Any = None
+_torch_optimizer_checked = False
+
+
+def _get_torch_optimizer_type() -> Any:
+    """Lazily resolve torch.optim.Optimizer."""
+    global _torch_optimizer_type, _torch_optimizer_checked
+    if _torch_optimizer_checked:
+        return _torch_optimizer_type
+    _torch_optimizer_checked = True
+    try:
+        import torch.optim
+        _torch_optimizer_type = torch.optim.Optimizer
+    except ImportError:
+        pass
+    return _torch_optimizer_type
+
+
+def _infer_optimizer(value: Any) -> Dict[str, Any]:
+    """Infer type for a torch.optim.Optimizer instance."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    try:
+        param_groups = value.param_groups
+        if param_groups:
+            pg = param_groups[0]
+            if "lr" in pg:
+                props["lr"] = {"kind": "primitive", "name": f"{pg['lr']:.6g}"}
+            if "weight_decay" in pg and pg["weight_decay"] != 0:
+                props["weight_decay"] = {"kind": "primitive", "name": f"{pg['weight_decay']:.6g}"}
+            if "betas" in pg:
+                props["betas"] = {"kind": "primitive", "name": str(pg["betas"])}
+            if "momentum" in pg and pg["momentum"] != 0:
+                props["momentum"] = {"kind": "primitive", "name": str(pg["momentum"])}
+            if "eps" in pg:
+                props["eps"] = {"kind": "primitive", "name": f"{pg['eps']:.1e}"}
+        props["param_groups"] = {"kind": "primitive", "name": str(len(param_groups))}
+        total_params = sum(sum(p.numel() for p in g["params"]) for g in param_groups)
+        props["params"] = {"kind": "primitive", "name": str(total_params)}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+# --- PyTorch LR Scheduler support ---
+
+_torch_scheduler_type: Any = None
+_torch_scheduler_checked = False
+
+
+def _get_torch_scheduler_type() -> Any:
+    """Lazily resolve torch.optim.lr_scheduler.LRScheduler."""
+    global _torch_scheduler_type, _torch_scheduler_checked
+    if _torch_scheduler_checked:
+        return _torch_scheduler_type
+    _torch_scheduler_checked = True
+    try:
+        import torch.optim.lr_scheduler
+        # _LRScheduler for older PyTorch, LRScheduler for newer
+        _torch_scheduler_type = getattr(
+            torch.optim.lr_scheduler, "LRScheduler",
+            getattr(torch.optim.lr_scheduler, "_LRScheduler", None)
+        )
+    except ImportError:
+        pass
+    return _torch_scheduler_type
+
+
+def _infer_scheduler(value: Any) -> Dict[str, Any]:
+    """Infer type for a torch.optim.lr_scheduler instance."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    try:
+        # Current learning rate(s)
+        lrs = value.get_last_lr() if hasattr(value, "get_last_lr") else None
+        if lrs:
+            if len(lrs) == 1:
+                props["lr"] = {"kind": "primitive", "name": f"{lrs[0]:.6g}"}
+            else:
+                props["lrs"] = {"kind": "primitive", "name": str([f"{lr:.6g}" for lr in lrs])}
+    except Exception:
+        pass
+
+    # Common scheduler attributes
+    for attr in ["step_size", "gamma", "T_max", "eta_min", "last_epoch"]:
+        try:
+            val = getattr(value, attr, None)
+            if val is not None:
+                if isinstance(val, float):
+                    props[attr] = {"kind": "primitive", "name": f"{val:.6g}"}
+                else:
+                    props[attr] = {"kind": "primitive", "name": str(val)}
+        except Exception:
+            continue
 
     return {"kind": "object", "properties": props, "class_name": class_name}
 

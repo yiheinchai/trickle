@@ -823,7 +823,7 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                 const paramCount = node.properties['params']?.name;
                 const trainingMode = node.properties['training']?.name;
                 const modeBadge = trainingMode === 'False' ? ' [eval]' : '';
-                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training');
+                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training' && k !== 'param_groups');
                 if (displayEntries.length === 0) {
                     return paramCount ? `${node.class_name}(${paramCount} params)${modeBadge}` : `${node.class_name}${modeBadge}`;
                 }
