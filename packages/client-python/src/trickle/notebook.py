@@ -196,6 +196,11 @@ class _TrickleCellTransformer(ast.NodeTransformer):
         """Insert trace calls inside function bodies."""
         new_body: list = []
         for node in body:
+            # Intercept return statements with a value — trace the return value
+            if isinstance(node, ast.Return) and node.value is not None:
+                new_body.extend(self._make_return_trace(node, func_name=func_name))
+                continue
+
             new_body.append(node)
 
             if isinstance(node, (ast.For, ast.AsyncFor)):
@@ -262,6 +267,29 @@ class _TrickleCellTransformer(ast.NodeTransformer):
         if node.args.kwarg and not node.args.kwarg.arg.startswith("_"):
             names.append(node.args.kwarg.arg)
         return [self._make_call(name, getattr(node, "lineno", 0), func_name=func_name) for name in names]
+
+    def _make_return_trace(self, node: ast.Return, func_name: str | None = None) -> list:
+        """Rewrite `return expr` to trace the return value.
+
+        Produces:
+            _trickle_ret = expr
+            _trickle_tv(_trickle_ret, '<return>', line, cell_id, cell_idx, func_name=...)
+            return _trickle_ret
+        """
+        lineno = getattr(node, "lineno", 0)
+        # _trickle_ret = expr
+        assign = ast.Assign(
+            targets=[ast.Name(id="_trickle_ret", ctx=ast.Store())],
+            value=node.value,
+            lineno=lineno,
+        )
+        # _trickle_tv(_trickle_ret, '<return>', ...)
+        trace = self._make_call("<return>", lineno, func_name=func_name)
+        # Override: the first arg should be _trickle_ret (not _name_to_ast('<return>'))
+        trace.value.args[0] = ast.Name(id="_trickle_ret", ctx=ast.Load())
+        # return _trickle_ret
+        ret = ast.Return(value=ast.Name(id="_trickle_ret", ctx=ast.Load()))
+        return [assign, trace, ret]
 
     def _make_call(self, name: str, lineno: int, func_name: str | None = None) -> ast.Expr:
         """Build an AST node for: _trickle_tv(var, 'name', line, cell_id, cell_idx, func_name)"""
