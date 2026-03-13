@@ -58,11 +58,39 @@ def _wrap(value: Any, path: str, paths: Set[str]) -> Any:
         return TrackedList(value, path, paths)
     if isinstance(value, (str, int, float, bool, bytes, type(None))):
         return value
+    # Skip types that break when wrapped (C extensions, numpy, pandas, sklearn, torch, etc.)
+    # Only wrap simple Python objects that are dict-like or dataclass-like.
+    if _should_skip_wrapping(value):
+        return value
     # Generic object wrapper (for dataclasses, pydantic, namedtuples, etc.)
     try:
         return TrackedObject(value, path, paths)
     except Exception:
         return value
+
+
+# Modules whose objects should never be wrapped in TrackedObject
+_SKIP_MODULES = frozenset({
+    "numpy", "np", "pandas", "pd", "sklearn", "torch", "tensorflow", "tf",
+    "scipy", "matplotlib", "PIL", "cv2", "jax", "xgboost", "lightgbm",
+    "catboost", "statsmodels", "networkx", "sympy", "dask",
+})
+
+
+def _should_skip_wrapping(value: Any) -> bool:
+    """Return True if value should NOT be wrapped in TrackedObject."""
+    cls = type(value)
+    mod = getattr(cls, "__module__", "") or ""
+    top_mod = mod.split(".")[0]
+    if top_mod in _SKIP_MODULES:
+        return True
+    # Skip C extension types (no __dict__ on the class, or defined in builtins)
+    if mod.startswith("_") or mod == "builtins":
+        return True
+    # Skip tuple subclasses (namedtuples are fine to read but break when wrapped)
+    if isinstance(value, tuple):
+        return True
+    return False
 
 
 class TrackedDict(dict):
@@ -168,6 +196,43 @@ class TrackedObject:
     def __contains__(self, item: Any) -> bool:
         inner = object.__getattribute__(self, "_inner")
         return item in inner
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Don't intercept our own slots
+        if name in ("_inner", "_path", "_paths"):
+            object.__setattr__(self, name, value)
+            return
+        inner = object.__getattribute__(self, "_inner")
+        setattr(inner, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        inner = object.__getattribute__(self, "_inner")
+        delattr(inner, name)
+
+    def __getitem__(self, key: Any) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        path = object.__getattribute__(self, "_path")
+        paths = object.__getattribute__(self, "_paths")
+        value = inner[key]
+        child = _index_path(path, key) if isinstance(key, int) else _child_path(path, str(key))
+        _record(paths, child)
+        return _wrap(value, child, paths)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        inner = object.__getattribute__(self, "_inner")
+        inner[key] = value
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        return inner(*args, **kwargs)
+
+    def __int__(self) -> int:
+        inner = object.__getattribute__(self, "_inner")
+        return int(inner)
+
+    def __float__(self) -> float:
+        inner = object.__getattribute__(self, "_inner")
+        return float(inner)
 
     @property
     def __class__(self):
