@@ -869,3 +869,34 @@ scheduler.step()  📈 lr=[1.04e-05, 1.04e-04]
 ```
 
 **How it works:** `trickle.auto` patches `torch.optim.lr_scheduler.LRScheduler.step()` (the base class). After each step, it reads the current LR from each optimizer param group, captures training context (epoch/step/loss) from the caller's frame, and writes a `kind: "lr_schedule"` record. Rate-limited to every 10 steps by default (`TRICKLE_LR_EVERY` to tune). Works with all PyTorch schedulers: CosineAnnealingLR, OneCycleLR, LinearWarmup, ReduceLROnPlateau, etc.
+
+---
+
+## Use Case 21: Memory Profiling Inlay Hints
+
+**User:** ML engineer hitting CUDA OOM errors, wanting to see which tensor allocations are consuming the most memory without adding `torch.cuda.memory_allocated()` print statements everywhere.
+
+**Before trickle:** Must manually add `print(f"GPU memory: {torch.cuda.memory_allocated()/1e9:.1f}GB")` after each suspicious line, or use memory profilers with separate workflows.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+# GPU training
+x = tokenizer(batch)            # x: Tensor[32,512] int64  🟡 342MB GPU
+embeddings = model.embed(x)     # embeddings: Tensor[32,512,768] float16  🟡 940MB GPU
+attn_output = attn(embeddings)  # attn_output: Tensor[32,512,768] float16  🔴 1.8GB GPU
+logits = head(attn_output)      # logits: Tensor[32,512,50257] float16  🔴 2.6GB GPU
+```
+
+🔴 appears when GPU memory exceeds 1GB, 🟡 otherwise. Hover shows:
+```
+GPU Memory: `940.2MB allocated (1024MB reserved)`
+```
+
+**CPU example:**
+```python
+weights = torch.randn(1024, 1024)  # weights: Tensor[1024,1024] float32  261MB RAM
+```
+
+**How it works:** `trickle.auto`'s variable tracer calls `torch.cuda.memory_allocated()` after tracing each CUDA tensor and `resource.getrusage()` for CPU tensors. The memory snapshot is stored in `gpu_memory_mb` / `cpu_memory_mb` fields of the variable record. The VSCode extension appends the memory suffix to the type hint label so it's visible at a glance.

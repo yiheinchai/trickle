@@ -4,13 +4,13 @@ For now, i want you to specifically focus on:
 <focus point>
 JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, and LR scheduler visualization are all implemented. Next priorities:
 
-1. Memory profiling inlay hints: show GPU/CPU memory usage (torch.cuda.memory_allocated()) as inlay hints on tensor creation and forward pass lines during training, so users can spot memory leaks and OOM risks without adding explicit profiling calls.
+1. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
 
-2. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
+2. Optimizer state observability: show gradient norms, weight update magnitudes, and parameter statistics (mean/std) as inlay hints on optimizer.step() lines, helping users detect issues like weight explosion or dead neurons without manual inspection.
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. Optimizer state observability: show gradient norms, weight update magnitudes, and parameter statistics (mean/std) as inlay hints on optimizer.step() lines, helping users detect issues like weight explosion or dead neurons without manual inspection.
+4. Training throughput metrics: automatically track samples/sec, batches/sec, and estimated time remaining, showing these as inlay hints on the training loop line without any instrumentation.
 
 </focus point>
 
