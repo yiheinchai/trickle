@@ -175,6 +175,16 @@ def _hooked_import(name: str, *args: Any, **kwargs: Any) -> Any:
         except Exception:
             logger.debug("trickle: failed to observe module %s", actual_name, exc_info=True)
 
+        # Also register the module file for variable tracing (multi-file tracing).
+        # This makes assignment lines in imported user modules visible to the
+        # sys.settrace-based var tracer, so inline hints appear in those files too.
+        if mod_file and mod_file.endswith(".py"):
+            try:
+                from trickle._auto_var_tracer import install_files as _install_files
+                _install_files([mod_file])
+            except Exception:
+                pass
+
     return module
 
 
