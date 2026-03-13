@@ -53,6 +53,13 @@ try:
 except Exception:
     pass
 
+# Install LR scheduler hook for learning rate visualization
+try:
+    from trickle._lr_scheduler_hook import install as _install_lr_hook  # noqa: E402
+    _install_lr_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 

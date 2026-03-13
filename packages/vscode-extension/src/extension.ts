@@ -104,6 +104,18 @@ interface GradientRecord {
   timestamp: number;
 }
 
+/** A learning rate schedule record emitted after scheduler.step() */
+interface LrScheduleRecord {
+  kind: 'lr_schedule';
+  file: string;
+  line: number;
+  lrs: number[];
+  step_num: number;
+  context: Record<string, number>;
+  timestamp: number;
+  scheduler_class: string;
+}
+
 /** A model checkpoint record emitted after torch.save / save_pretrained */
 interface CheckpointRecord {
   kind: 'checkpoint';
@@ -133,6 +145,8 @@ let latestProgress: ProgressRecord | null = null;
 let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
 /** Checkpoint records: filePath -> lineNo -> CheckpointRecord[] (all saves at that line) */
 let checkpointIndex: Map<string, Map<number, CheckpointRecord[]>> = new Map();
+/** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
+let lrScheduleIndex: Map<string, Map<number, LrScheduleRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -470,6 +484,7 @@ function loadAllVariables() {
   latestProgress = null;
   gradientIndex.clear();
   checkpointIndex.clear();
+  lrScheduleIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -491,6 +506,20 @@ function loadAllVariables() {
             const pr = record as ProgressRecord;
             if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
               latestProgress = pr;
+            }
+            continue;
+          }
+
+          // Handle LR schedule records emitted after scheduler.step()
+          if (record.kind === 'lr_schedule') {
+            const lr = record as LrScheduleRecord;
+            if (!lrScheduleIndex.has(lr.file)) {
+              lrScheduleIndex.set(lr.file, new Map());
+            }
+            const lineMap = lrScheduleIndex.get(lr.file)!;
+            const existing = lineMap.get(lr.line);
+            if (!existing || lr.timestamp > existing.timestamp) {
+              lineMap.set(lr.line, lr);
             }
             continue;
           }
@@ -1066,6 +1095,54 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         hints.push(hint);
+      }
+    }
+
+    // Add LR schedule inlay hints at scheduler.step() lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const lrLines = lrScheduleIndex.get(filePath);
+      if (lrLines) {
+        for (const [lineNo, lr] of lrLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          // Format LRs: single value or array
+          const lrStr = lr.lrs.length === 1
+            ? lr.lrs[0].toExponential(3)
+            : `[${lr.lrs.map(v => v.toExponential(2)).join(', ')}]`;
+
+          // Add context (epoch/step) if available
+          const ctxParts: string[] = [];
+          for (const key of ['epoch', 'step', 'global_step', 'iteration']) {
+            if (key in lr.context) {
+              ctxParts.push(`${key}=${lr.context[key]}`);
+              if (ctxParts.length >= 2) break;
+            }
+          }
+          const ctxStr = ctxParts.length > 0 ? ` | ${ctxParts.join(' | ')}` : '';
+          const label = ` 📈 lr=${lrStr}${ctxStr}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const allCtx = Object.entries(lr.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
+            const md = new vscode.MarkdownString(
+              `### 📈 Learning Rate: \`${lr.scheduler_class}\`\n\n` +
+              `Current LR: \`${lrStr}\`\n\n` +
+              (lr.lrs.length > 1 ? `Param groups: ${lr.lrs.map((v, i) => `group ${i}: \`${v.toExponential(3)}\``).join(', ')}\n\n` : '') +
+              (allCtx ? `Context: ${allCtx}\n\n` : '') +
+              `Step: ${lr.step_num}`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+            hints.push(hint);
+          } catch {
+            // Skip if line out of range
+          }
+        }
       }
     }
 
