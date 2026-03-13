@@ -461,3 +461,52 @@ out = W(x)
 - Return type changes after refactoring a function
 
 The ⚠ indicator appears inline next to the type hint and the hover tooltip explains the drift.
+
+---
+
+## Use Case 11: Variable Flow Across Function Calls — Input→Output Shape Transformation
+
+When debugging a neural network, you often want to know not just what shape a tensor is, but how it was transformed — what layer produced it and what the input shape was. Trickle now surfaces this automatically.
+
+```python
+import trickle.auto
+import torch
+import torch.nn as nn
+
+class MLP(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.fc1 = nn.Linear(n_embd, 4 * n_embd)
+        self.fc2 = nn.Linear(4 * n_embd, n_embd)
+
+    def forward(self, x):
+        h = self.fc1(x)
+        # Hover on `h` shows:
+        # Flow: `self.fc1` (Linear): `x`: `Tensor[8, 64]` → `Tensor[8, 256]`
+
+        out = self.fc2(h)
+        # Hover on `out` shows:
+        # Flow: `self.fc2` (Linear): `h`: `Tensor[8, 256]` → `Tensor[8, 64]`
+        return out
+
+mlp = MLP(64)
+x = torch.randn(8, 64)
+out = mlp(x)
+# Hover on `out` shows:
+# Flow: `mlp` (MLP): `x`: `Tensor[8, 64]` → `Tensor[8, 64]`
+
+W = nn.Linear(784, 10)
+inp = torch.randn(32, 784)
+result = W(inp)
+# Hover on `result` shows:
+# Flow: `W` (Linear): `inp`: `Tensor[32, 784]` → `Tensor[32, 10]`
+```
+
+**How it works:** Trickle's AST parser detects call-site assignments (`out = layer(x)`). At runtime, it captures the callee object's class and the input argument types, then associates them with the output variable. The VSCode hover shows the complete transformation chain.
+
+**Shape flow chain:** When a tensor variable changes shape multiple times within a function, the hover shows the entire chain:
+```
+x shape flow (in MLP.forward):
+  L12: Tensor[8, 256] (AddmmBackward0) ← self.fc1(Linear) ←
+  L13: Tensor[8, 64]  (AddmmBackward0) ← self.fc2(Linear) ←
+```
