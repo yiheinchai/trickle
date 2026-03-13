@@ -6,6 +6,7 @@ import datetime
 import functools
 import inspect
 import logging
+import threading
 from typing import Any, Callable, Dict, Optional, Set, overload
 
 from .attr_tracker import create_tracker
@@ -16,6 +17,11 @@ from .type_hash import hash_type
 from .type_inference import infer_type
 
 logger = logging.getLogger("trickle")
+
+# Re-entrancy guard: skip tracking/wrapping when already inside an observed call.
+# Prevents infinite recursion with complex class hierarchies where wrapped methods
+# call other wrapped methods (e.g. OrderedMultiDict with ~100 self-referential methods).
+_call_depth = threading.local()
 
 # Shared singleton cache
 _cache = TypeCache()
@@ -84,35 +90,50 @@ def _wrap(fn: Callable, *, name: Optional[str], module: Optional[str]) -> Callab
 
 
 def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kwargs: dict) -> Any:
-    tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
-
-    error_exc: Optional[Exception] = None
-    result = None
+    # Re-entrancy guard: if already inside an observed call, run directly
+    depth = getattr(_call_depth, "value", 0)
+    if depth > 0:
+        return fn(*args, **kwargs)
+    _call_depth.value = depth + 1
     try:
-        result = fn(*tracked_args, **tracked_kwargs)
-    except Exception as exc:
-        error_exc = exc
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False)
-        raise
-    else:
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False)
-    return result
+        tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
+
+        error_exc: Optional[Exception] = None
+        result = None
+        try:
+            result = fn(*tracked_args, **tracked_kwargs)
+        except Exception as exc:
+            error_exc = exc
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False)
+            raise
+        else:
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False)
+        return result
+    finally:
+        _call_depth.value = depth
 
 
 async def _invoke_async(fn: Callable, func_name: str, func_module: str, args: tuple, kwargs: dict) -> Any:
-    tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
-
-    error_exc: Optional[Exception] = None
-    result = None
+    depth = getattr(_call_depth, "value", 0)
+    if depth > 0:
+        return await fn(*args, **kwargs)
+    _call_depth.value = depth + 1
     try:
-        result = await fn(*tracked_args, **tracked_kwargs)
-    except Exception as exc:
-        error_exc = exc
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=True)
-        raise
-    else:
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=True)
-    return result
+        tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
+
+        error_exc: Optional[Exception] = None
+        result = None
+        try:
+            result = await fn(*tracked_args, **tracked_kwargs)
+        except Exception as exc:
+            error_exc = exc
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=True)
+            raise
+        else:
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=True)
+        return result
+    finally:
+        _call_depth.value = depth
 
 
 # ---------------------------------------------------------------------------
@@ -127,9 +148,15 @@ def _prepare_tracked(args: tuple, kwargs: dict, fn: Callable):
     """
     sig = None
     try:
-        sig = inspect.signature(fn)
-    except (ValueError, TypeError):
-        pass
+        # Use inspect.unwrap to see through decorators to the original function,
+        # so we get the real param names (not (*args, **kwargs) from wrappers)
+        unwrapped = inspect.unwrap(fn, stop=lambda f: hasattr(f, "__signature__"))
+        sig = inspect.signature(unwrapped)
+    except (ValueError, TypeError, StopIteration):
+        try:
+            sig = inspect.signature(fn)
+        except (ValueError, TypeError):
+            pass
 
     param_names: list[str] = []
     if sig is not None:
