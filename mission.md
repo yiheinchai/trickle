@@ -16,10 +16,6 @@ Next priorities discovered from real-world testing (minGPT, boltons, dataclass p
 
 3. **Generator yield types not captured** — `Iterator[Any]` instead of `Iterator[int]`. Need to trace generator yields to infer the element type.
 
-4. **Unnecessary type aliases for primitives** — `SlugifyOutput = str`, `AddOutput = int` add noise. Should inline simple primitive types directly in the return annotation.
-
-5. **Overloads with identical return types** — When all overloads return the same type, they should collapse to a single `Union` signature instead of verbose `@overload` blocks.
-
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
