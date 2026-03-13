@@ -275,11 +275,54 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
         "import json as _trickle_json",
     ]
 
-    # Function wrapper — when variable tracing is active, function wrapping
-    # is redundant (the tracer captures all values) and can interfere with
-    # frameworks like PyTorch whose tensors don't work through proxies.
+    # Function wrapper — captures arg/return types for .pyi generation.
+    # Uses a lightweight wrapper that infers types without proxying arguments
+    # (TrackedObject breaks PyTorch tensors, so we skip attribute tracking here).
     if trace_vars:
-        lines.append("def _trickle_wrap(__fn, __name): return __fn")
+        lines.extend([
+            "import functools as _trickle_functools",
+            "import inspect as _trickle_inspect",
+            "def _trickle_wrap(__fn, __name):",
+            "    if _trickle_inspect.iscoroutinefunction(__fn):",
+            "        @_trickle_functools.wraps(__fn)",
+            "        async def _aw(*args, **kwargs):",
+            "            _result = await __fn(*args, **kwargs)",
+            "            _trickle_emit_obs(__fn, __name, args, kwargs, _result, is_async=True)",
+            "            return _result",
+            "        return _aw",
+            "    else:",
+            "        @_trickle_functools.wraps(__fn)",
+            "        def _sw(*args, **kwargs):",
+            "            _result = __fn(*args, **kwargs)",
+            "            _trickle_emit_obs(__fn, __name, args, kwargs, _result, is_async=False)",
+            "            return _result",
+            "        return _sw",
+            "def _trickle_emit_obs(__fn, __name, args, kwargs, result, is_async=False):",
+            "    try:",
+            "        from trickle.type_inference import infer_type",
+            "        from trickle.type_hash import hash_type",
+            "        from trickle.transport import configure as _tc, enqueue",
+            "        _tc()  # ensure local mode file path is set",
+            "        _elements = [infer_type(a) for a in args]",
+            "        if kwargs:",
+            "            _kw_props = {k: infer_type(v) for k, v in kwargs.items()}",
+            "            _elements.append({'kind': 'object', 'properties': _kw_props})",
+            "        _args_type = {'kind': 'tuple', 'elements': _elements}",
+            "        _return_type = infer_type(result)",
+            "        _type_hash = hash_type(_args_type, _return_type)",
+            "        _param_names = []",
+            "        try:",
+            "            _sig = _trickle_inspect.signature(__fn)",
+            "            _param_names = [p.name for p in _sig.parameters.values() if p.kind in (_trickle_inspect.Parameter.POSITIONAL_ONLY, _trickle_inspect.Parameter.POSITIONAL_OR_KEYWORD)]",
+            "        except Exception:",
+            "            pass",
+            f"        _payload = {{'functionName': __name, 'module': {module_name!r}, 'language': 'python', 'typeHash': _type_hash, 'argsType': _args_type, 'returnType': _return_type}}",
+            "        if is_async: _payload['isAsync'] = True",
+            "        if _param_names: _payload['paramNames'] = _param_names",
+            "        enqueue(_payload)",
+            "    except Exception:",
+            "        pass",
+        ])
     else:
         lines.extend([
             "def _trickle_wrap(__fn, __name):",
