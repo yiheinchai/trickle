@@ -2,17 +2,17 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS inline type hints are now working for: plain JS (trickle run node app.js), TypeScript via ts-node, and modern ESM .mjs files. The next priorities are:
+JS/TS inline type hints are now working for: plain JS, TypeScript via ts-node, modern ESM .mjs files. Object type display is now compact (shows key names for large objects, full type on hover). The next priorities are:
 
-1. Better object type display: for large objects with many keys, the inline hint is verbose. Consider showing {key1, key2, ...N more} for compact inline display with full type on hover.
+1. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). Currently works for plain logic files but JSX/TSX isn't transformed by the ESM hooks.
 
-2. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). Currently works for plain logic files but JSX/TSX isn't transformed by the ESM hooks.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the observe hooks.
 
-3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the observe hooks.
+3. Test with a real-world JS/TS project (e.g. a Next.js or Express app) to verify the end-to-end experience works smoothly for actual developer workflows. Focus on the ESM path since that's newly added.
 
-4. Test with a real-world JS/TS project (e.g. a Next.js or Express app) to verify the end-to-end experience works smoothly for actual developer workflows. Focus on the ESM path since that's newly added.
+4. Vitest/Jest integration: test files should get variable tracing so developers see types while writing tests.
 
-5. Vitest/Jest integration: test files should get variable tracing so developers see types while writing tests.
+5. Python: better display for dataclasses and NamedTuples — these are common in ML code and should show field names compactly like JS objects now do.
 
 </focus point>
 
