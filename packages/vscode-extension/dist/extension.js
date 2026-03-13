@@ -1037,6 +1037,14 @@ function typeNodeToString(node, depth = 3, dimLabels) {
  * This keeps inline hints short. Full type is shown in hover tooltip.
  */
 function typeNodeToStringCompact(node, dimLabels) {
+    // Arrays: recursively compact the element type
+    if (node.kind === 'array' && node.element) {
+        const inner = typeNodeToStringCompact(node.element, dimLabels);
+        // Wrap in Array<...> if inner contains special chars, else use T[]
+        const needsWrapper = inner.includes('|') || inner.includes('(') ||
+            (inner.includes('<') && !inner.endsWith('>'));
+        return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+    }
     if (node.kind !== 'object' || !node.properties) {
         return typeNodeToString(node, 3, dimLabels);
     }
