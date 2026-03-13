@@ -1,6 +1,6 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.34",
+  "version": "0.2.35",
   "description": "Runtime type observability for JavaScript applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,11 +12,14 @@
     "./auto": "./auto.js",
     "./auto-env": "./auto-env.js",
     "./auto-esm": "./auto-esm.mjs",
-    "./vite-plugin": "./dist/vite-plugin.js",
+    "./vite-plugin": {
+      "import": "./dist-esm/vite-plugin.js",
+      "require": "./dist/vite-plugin.js"
+    },
     "./trace-var": "./dist/trace-var.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.esm.json",
     "prepublishOnly": "npm run build"
   },
   "optionalDependencies": {

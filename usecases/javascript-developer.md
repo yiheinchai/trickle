@@ -295,6 +295,60 @@ trickle run ts-node --transpile-only app.ts
 
 ---
 
+## Use Case 8: Vitest Integration — See Types While Writing Tests
+
+Add trickle to your Vitest setup to get inline type hints in both your source files and your test files as you run them.
+
+**Setup:**
+```bash
+npm install trickle-observe
+```
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';  // if using React
+import { tricklePlugin } from 'trickle-observe/vite-plugin';
+
+export default defineConfig({
+  plugins: [react(), tricklePlugin()],
+  test: {
+    environment: 'jsdom',  // or 'node'
+  },
+});
+```
+
+**Run your tests:**
+```bash
+npx vitest run
+# or: npx vitest --watch
+```
+
+Now open any source file or test file in VSCode — inline type hints appear for every variable in both:
+
+```typescript
+// utils.test.ts
+describe('filterActiveUsers', () => {
+  it('filters by role', () => {
+    const result = filterActiveUsers(testUsers, 'admin');
+    // → result: {filtered: User[], count: number, names: string[]}
+
+    const adminCount = result.count;
+    // → adminCount: 2
+
+    const adminNames = result.names;
+    // → adminNames: ["Alice", "Charlie"]
+  });
+});
+```
+
+Trickle transforms both the source module AND the test file — so you see the types flowing from your implementation into your assertions. Useful when:
+- Debugging what shape a function actually returns (vs what you expected)
+- Understanding what a complex transformation produces mid-way
+- Spotting when a type changes between test runs (type hash changes → new hint)
+
+---
+
 ## Tips
 
 - **Reload hints**: If you re-run your code, type hints update automatically (VSCode watches the `.trickle/` folder)
