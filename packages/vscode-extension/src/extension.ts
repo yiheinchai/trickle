@@ -104,6 +104,17 @@ interface GradientRecord {
   timestamp: number;
 }
 
+/** A model checkpoint record emitted after torch.save / save_pretrained */
+interface CheckpointRecord {
+  kind: 'checkpoint';
+  file: string;
+  line: number;
+  path: string;
+  metrics: Record<string, number | string>;
+  timestamp: number;
+  save_count: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -120,6 +131,8 @@ let dimLabelIndex: DimLabelIndex = new Map();
 let latestProgress: ProgressRecord | null = null;
 /** Gradient flow records: filePath -> lineNo -> GradientRecord (latest per line) */
 let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
+/** Checkpoint records: filePath -> lineNo -> CheckpointRecord[] (all saves at that line) */
+let checkpointIndex: Map<string, Map<number, CheckpointRecord[]>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -456,6 +469,7 @@ function loadAllVariables() {
   dimLabelIndex.clear();
   latestProgress = null;
   gradientIndex.clear();
+  checkpointIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -478,6 +492,20 @@ function loadAllVariables() {
             if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
               latestProgress = pr;
             }
+            continue;
+          }
+
+          // Handle checkpoint records emitted after torch.save / save_pretrained
+          if (record.kind === 'checkpoint') {
+            const cr = record as CheckpointRecord;
+            if (!checkpointIndex.has(cr.file)) {
+              checkpointIndex.set(cr.file, new Map());
+            }
+            const lineMap = checkpointIndex.get(cr.file)!;
+            if (!lineMap.has(cr.line)) {
+              lineMap.set(cr.line, []);
+            }
+            lineMap.get(cr.line)!.push(cr);
             continue;
           }
 
@@ -1038,6 +1066,66 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         hints.push(hint);
+      }
+    }
+
+    // Add checkpoint inlay hints at torch.save / save_pretrained lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const ckptLines = checkpointIndex.get(filePath);
+      if (ckptLines) {
+        for (const [lineNo, saves] of ckptLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+          if (saves.length === 0) continue;
+
+          // Show info from the most recent save at this line
+          const latest = saves[saves.length - 1];
+          const total = latest.save_count;
+          const basename = latest.path.split('/').pop() || latest.path;
+
+          // Build metrics string from the most recent save
+          const PRIORITY_KEYS = ['epoch', 'step', 'loss', 'val_loss', 'acc', 'lr'];
+          const metricParts: string[] = [];
+          for (const key of PRIORITY_KEYS) {
+            if (key in latest.metrics) {
+              const v = latest.metrics[key];
+              metricParts.push(`${key}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
+            }
+          }
+          // Add any remaining metrics not in the priority list
+          for (const [k, v] of Object.entries(latest.metrics)) {
+            if (!PRIORITY_KEYS.includes(k) && metricParts.length < 5) {
+              metricParts.push(`${k}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
+            }
+          }
+
+          const metricsStr = metricParts.length > 0 ? ` | ${metricParts.join(' | ')}` : '';
+          const countStr = total > 1 ? ` (×${total})` : '';
+          const label = ` 💾 ${basename}${metricsStr}${countStr}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Tooltip with history of all saves at this line
+            const historyRows = saves.map((s, i) => {
+              const mStr = Object.entries(s.metrics).map(([k, v]) => `${k}=${v}`).join(', ');
+              const d = new Date(s.timestamp * 1000).toLocaleTimeString();
+              return `${i + 1}. \`${s.path.split('/').pop()}\` — ${mStr || 'no metrics'} @ ${d}`;
+            });
+            const md = new vscode.MarkdownString(
+              `### 💾 Checkpoint Saves\n\n${historyRows.join('\n\n')}`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
       }
     }
 

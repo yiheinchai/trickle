@@ -46,6 +46,13 @@ try:
 except Exception:
     pass
 
+# Install checkpoint hook for torch.save / save_pretrained observability
+try:
+    from trickle._checkpoint_hook import install as _install_checkpoint_hook  # noqa: E402
+    _install_checkpoint_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 
