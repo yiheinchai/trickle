@@ -372,7 +372,11 @@ async function executeSingleRun(
     await sleep(3000);
 
     // Show summary with inline type signatures
-    await showSummary(functionsBefore, errorsBefore);
+    const varsPath = path.join(
+      process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle"),
+      "variables.jsonl",
+    );
+    await showSummary(functionsBefore, errorsBefore, varsPath);
 
     // Auto-generate stubs if --stubs was specified
     if (opts.stubs) {
@@ -1121,6 +1125,7 @@ function runProcess(
 async function showSummary(
   functionsBefore: FunctionRow[],
   errorsBefore: ErrorRow[],
+  varsJsonlPath?: string,
 ): Promise<void> {
   try {
     const { functions } = await listFunctions();
@@ -1139,17 +1144,38 @@ async function showSummary(
     console.log(chalk.bold("  Summary"));
     console.log(chalk.gray("  " + "─".repeat(50)));
 
+    // Count variable observations from variables.jsonl
+    let varCount = 0;
+    if (varsJsonlPath && fs.existsSync(varsJsonlPath)) {
+      try {
+        const content = fs.readFileSync(varsJsonlPath, "utf-8");
+        varCount = content.trim().split("\n").filter(l => {
+          try { return JSON.parse(l).kind === "variable"; } catch { return false; }
+        }).length;
+      } catch { /* ignore */ }
+    }
+
     if (functions.length === 0) {
-      console.log(
-        chalk.yellow("  No functions captured. The command may not have"),
-      );
-      console.log(
-        chalk.yellow("  loaded any modules that could be instrumented."),
-      );
+      if (varCount > 0) {
+        console.log(
+          `  Variables traced: ${chalk.bold(String(varCount))} inline hints ready`,
+        );
+        console.log(chalk.gray("  Open the file in VSCode to see type hints inline."));
+      } else {
+        console.log(
+          chalk.yellow("  No functions captured. The command may not have"),
+        );
+        console.log(
+          chalk.yellow("  loaded any modules that could be instrumented."),
+        );
+      }
     } else {
       console.log(
         `  Functions observed: ${chalk.bold(String(functions.length))} total, ${chalk.green(String(newFunctions.length) + " new")}`,
       );
+      if (varCount > 0) {
+        console.log(`  Variables traced:   ${chalk.bold(String(varCount))} inline hints ready`);
+      }
 
       if (newFunctions.length > 0) {
         console.log("");

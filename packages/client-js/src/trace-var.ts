@@ -148,19 +148,21 @@ function flushVarBuffer(): void {
  * Sanitize a variable value for safe serialization.
  * More aggressive truncation than function samples since there are many more variables.
  */
-function sanitizeVarSample(value: unknown, depth: number = 2): unknown {
-  if (depth <= 0) return '[truncated]';
+function sanitizeVarSample(value: unknown, depth: number = 3): unknown {
   if (value === null || value === undefined) return value;
 
   const t = typeof value;
+  // Primitives are always safe to return at any depth
   if (t === 'string') {
     const s = value as string;
-    return s.length > 100 ? s.substring(0, 100) + '...' : s;
+    return s.length > 60 ? s.substring(0, 60) + '...' : s;
   }
   if (t === 'number' || t === 'boolean') return value;
   if (t === 'bigint') return String(value);
   if (t === 'symbol') return String(value);
   if (t === 'function') return `[Function: ${(value as Function).name || 'anonymous'}]`;
+
+  if (depth <= 0) return '[...]';
 
   if (Array.isArray(value)) {
     return value.slice(0, 3).map(item => sanitizeVarSample(item, depth - 1));
