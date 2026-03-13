@@ -20,7 +20,9 @@ Next priorities:
 
 4. ~~trickle rn CLI~~ ✅ DONE — `trickle rn setup` prints metro.config.js config, Expo/bare RN variants, simulator/real-device/Android emulator setup. `trickle rn ip` auto-detects LAN IP for real-device config. 12 tests passing.
 
-5. Next focus area: Think about what would most help a React/React Native developer debug a real application. Consider: (a) arrow function component render tracking already covers static components, but what about **dynamic renders** — e.g. components rendered inside `.map()` or conditionals? (b) Can trickle detect which prop change caused a re-render? (c) Is there a good story for Next.js (Server Components vs Client Components) — Server Components run on the server and need the Lambda-style backend, Client Components work like regular React with Vite plugin or Metro transformer.
+5. ~~Next.js observability~~ ✅ DONE — `withTrickle(nextConfig)` HOC wraps `next.config.js`, adds webpack loader for Client and Server Components. Tested on real vercel/commerce codebase. Known gap: concise arrow bodies `=> (...)` without `{}` are not tracked (affects simple presentational components — workaround: add `{}` block body).
+
+6. Next: **Concise arrow body support** `=> (...)` — common in Next.js/React for simple presentational components like `const Layout = (props) => (<div>...</div>)`. Convert these to block bodies to enable render tracking. Also consider: **`trickle next` CLI command** (similar to `trickle rn setup`) for Next.js setup instructions.
 
 </focus point>
 
