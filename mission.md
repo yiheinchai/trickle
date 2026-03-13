@@ -8,6 +8,18 @@ Find the pain points. Implement features to fix the pain point.
 
 <focus point>
 
+Next priorities discovered from real-world testing (minGPT, boltons, dataclass patterns):
+
+1. **TrackedObject proxy corrupts program behavior** — `CfgNode.merge_from_dict({'n_layer': 3})` silently fails to apply dict values when wrapped by trickle's `create_tracker`. The proxy doesn't properly pass through `self.__dict__.update(d)`. This is a silent correctness bug.
+
+2. **@staticmethod/@classmethod stubs show wrong `self`/`cls`** — `@staticmethod` methods appear with `(self)` in stubs. `@classmethod` shows `(self, cls: type, ...)`. Need observation-level metadata to mark static/class methods so stub generator can omit `self` or use `@staticmethod`/`@classmethod` decorators.
+
+3. **Generator yield types not captured** — `Iterator[Any]` instead of `Iterator[int]`. Need to trace generator yields to infer the element type.
+
+4. **Unnecessary type aliases for primitives** — `SlugifyOutput = str`, `AddOutput = int` add noise. Should inline simple primitive types directly in the return annotation.
+
+5. **Overloads with identical return types** — When all overloads return the same type, they should collapse to a single `Union` signature instead of verbose `@overload` blocks.
+
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
