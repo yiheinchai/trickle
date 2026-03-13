@@ -315,6 +315,16 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "        pass",
         ])
 
+    # Backward hook: re-emit nn.Module variables with gradient info after loss.backward()
+    if trace_vars:
+        lines.extend([
+            "try:",
+            "    from trickle._backward_hook import install as _trickle_bh_install",
+            f"    _trickle_bh_install(trace_fn=_trickle_tv, file_path={filename!r})",
+            "except Exception:",
+            "    pass",
+        ])
+
     lines.append("# --- end trickle preamble ---")
     return "\n".join(lines)
 

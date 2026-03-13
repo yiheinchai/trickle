@@ -32,6 +32,13 @@ os.environ["TRICKLE_LOCAL"] = "1"
 from trickle._observe_auto import install as _install_observe_hook  # noqa: E402
 _install_observe_hook()
 
+# Install backward hook for gradient norm tracking on nn.Module
+try:
+    from trickle._backward_hook import install as _install_backward_hook  # noqa: E402
+    _install_backward_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 

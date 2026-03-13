@@ -108,6 +108,8 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Datasets: `TensorDataset(size=10000, tensors=2)`, `Subset(size=8000, from=TensorDataset)`
 - Memory footprint: hover shows `mem=4.0 MB` per tensor (helps debug OOM)
 - Model memory: `GPT(110280192 params 420.7 MB)` shows total model size inline
+- Gradient norms: after `loss.backward()`, models show `GPT(834304 params) |∇|=5.32` — total gradient norm across all parameters, plus top layers by norm on hover
+- NaN/Inf gradient detection: immediately flags `⚠ grad NaN!` if any parameter has NaN gradients
 - Scalar tracking: `loss: 2.51 ↓ 0.21 (50 steps)` tracks value evolution in loops
 - Variables inside imported local modules (your model.py, not torch internals)
 
@@ -177,7 +179,40 @@ When your code crashes with a shape mismatch, trickle automatically prints the t
 
 No more guessing. You immediately see that `x` is `[4, 8]` but `weight` expects `[16, 32]`.
 
-## Use Case 4: Without the CLI
+## Use Case 4: Gradient Debugging
+
+After `loss.backward()`, trickle automatically re-traces your model with gradient information:
+
+```python
+model = GPT(config)                    # → GPT(834304 params 3.2 MB)
+logits, loss = model(idx, targets)
+loss.backward()                        # → model updates to: GPT(834304 params 3.2 MB) |∇|=5.32
+```
+
+The `|∇|=5.32` badge shows the total L2 gradient norm across all parameters. Hover for per-layer breakdown:
+
+```
+grad_norm=5.32 top: c_proj.weight=2.29, c_proj.weight=1.92, wte.weight=1.73
+```
+
+**What to look for:**
+- `|∇|` very small (< 1e-6) → vanishing gradients, learning has stalled
+- `|∇|` very large (> 1000) → exploding gradients, training will diverge
+- `⚠ grad NaN!` → NaN in gradients, something is numerically unstable
+- `⚠ grad Inf!` → Inf in gradients, likely overflow
+
+This replaces the common debugging pattern:
+```python
+# Before trickle — manual gradient inspection
+for name, param in model.named_parameters():
+    if param.grad is not None:
+        print(f"{name}: {param.grad.norm():.4f}")
+
+# After trickle — just look at the inline hint
+loss.backward()  # gradient info appears automatically on the model variable
+```
+
+## Use Case 5: Without the CLI
 
 If you don't want to install Node.js/npm at all:
 

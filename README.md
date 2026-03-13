@@ -32,7 +32,7 @@ loss = criterion(output, target) # → Tensor[] float32 = 2.3041
 #   loss (L7): 2.513 ↓ 0.209 (min=0.2025, max=2.513, 50 steps)
 ```
 
-**What gets traced:** Tensors (shape, dtype, device, memory), nn.Modules (params, memory, train/eval), optimizers, schedulers, DataLoaders, datasets, gradient context, return values, NaN/Inf detection, and more.
+**What gets traced:** Tensors (shape, dtype, device, memory), nn.Modules (params, memory, train/eval, gradient norms after backward), optimizers, schedulers, DataLoaders, datasets, gradient context, NaN/Inf detection in tensors and gradients, return values, and more.
 
 **[Full ML Engineer Guide →](usecases/ml-engineer.md)**
 

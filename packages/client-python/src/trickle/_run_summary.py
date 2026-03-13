@@ -199,10 +199,12 @@ def _format_module_concise(t: Dict[str, Any]) -> str:
     class_name = t.get("class_name", "Module")
     props = t.get("properties", {})
     params = props.get("params", {}).get("name", "")
+    grad_norm = props.get("grad_norm", {}).get("name", "")
     # Only show short primitive properties (skip bias/weight tensor representations)
+    _skip_keys = {"params", "grad_norm", "grad_nan", "grad_inf", "grad_top"}
     display = []
     for k, v in props.items():
-        if k == "params":
+        if k in _skip_keys:
             continue
         if v.get("kind") == "primitive" and v.get("name"):
             val = v["name"]
@@ -213,7 +215,12 @@ def _format_module_concise(t: Dict[str, Any]) -> str:
     if display:
         inner = ", ".join(display[:4])
         suffix = f", {params} params" if params else ""
-        return f"{class_name}({inner}{suffix})"
-    if params:
-        return f"{class_name}({params} params)"
-    return class_name
+        result = f"{class_name}({inner}{suffix})"
+    elif params:
+        result = f"{class_name}({params} params)"
+    else:
+        result = class_name
+    # Append gradient norm badge
+    if grad_norm:
+        result += f" |∇|={grad_norm}"
+    return result

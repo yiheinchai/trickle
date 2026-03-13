@@ -927,15 +927,30 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                 const paramCount = node.properties['params']?.name;
                 const trainingMode = node.properties['training']?.name;
                 const memorySize = node.properties['memory']?.name;
+                const gradNorm = node.properties['grad_norm']?.name;
+                const gradNan = node.properties['grad_nan']?.name;
+                const gradInf = node.properties['grad_inf']?.name;
                 const modeBadge = trainingMode === 'False' ? ' [eval]' : '';
                 const memBadge = memorySize ? ` ${memorySize}` : '';
-                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training' && k !== 'param_groups' && k !== 'memory');
+                // Gradient badges
+                let gradBadge = '';
+                if (gradNan) {
+                    gradBadge = ` ⚠ grad NaN!(${gradNan})`;
+                }
+                else if (gradInf) {
+                    gradBadge = ` ⚠ grad Inf!(${gradInf})`;
+                }
+                else if (gradNorm) {
+                    gradBadge = ` |∇|=${gradNorm}`;
+                }
+                const skipKeys = new Set(['params', 'training', 'param_groups', 'memory', 'grad_norm', 'grad_nan', 'grad_inf', 'grad_top']);
+                const displayEntries = entries.filter(([k]) => !skipKeys.has(k));
                 if (displayEntries.length === 0) {
-                    return paramCount ? `${node.class_name}(${paramCount} params${memBadge})${modeBadge}` : `${node.class_name}${modeBadge}`;
+                    return paramCount ? `${node.class_name}(${paramCount} params${memBadge})${modeBadge}${gradBadge}` : `${node.class_name}${modeBadge}${gradBadge}`;
                 }
                 const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
                 const suffix = displayEntries.length > 4 ? ', ...' : '';
-                return `${node.class_name}(${props.join(', ')}${suffix})${modeBadge}`;
+                return `${node.class_name}(${props.join(', ')}${suffix})${modeBadge}${gradBadge}`;
             }
             // Named class
             if (node.class_name) {
@@ -1079,6 +1094,21 @@ function formatTensorStats(type) {
     const aggSteps = type.properties['agg_steps'];
     if (aggFirst?.kind === 'primitive' && aggLast?.kind === 'primitive') {
         parts.push(`loop: ${aggFirst.name}→${aggLast.name} min=${aggMin?.name} max=${aggMax?.name} (${aggSteps?.name} steps)`);
+    }
+    // Gradient info for nn.Module (after backward)
+    const gradNorm = type.properties['grad_norm'];
+    const gradTop = type.properties['grad_top'];
+    const gradNan = type.properties['grad_nan'];
+    const gradInf = type.properties['grad_inf'];
+    if (gradNorm?.kind === 'primitive' && gradNorm.name) {
+        let gradStr = `grad_norm=${gradNorm.name}`;
+        if (gradNan?.kind === 'primitive')
+            gradStr += ` NaN_grads=${gradNan.name}`;
+        if (gradInf?.kind === 'primitive')
+            gradStr += ` Inf_grads=${gradInf.name}`;
+        if (gradTop?.kind === 'primitive' && gradTop.name)
+            gradStr += ` top: ${gradTop.name}`;
+        parts.push(gradStr);
     }
     if (parts.length === 0)
         return '';

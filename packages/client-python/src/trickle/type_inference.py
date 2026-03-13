@@ -461,6 +461,38 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # Gradient norms — after loss.backward(), show gradient health at a glance
+    try:
+        import torch
+        grads = [p.grad for p in value.parameters() if p.grad is not None]
+        if grads:
+            # Total gradient norm (L2 across all parameters)
+            total_norm = torch.sqrt(sum(g.detach().pow(2).sum() for g in grads)).item()
+            props["grad_norm"] = {"kind": "primitive", "name": f"{total_norm:.4g}"}
+            # Check for NaN/Inf gradients
+            nan_grads = sum(1 for g in grads if torch.isnan(g).any())
+            inf_grads = sum(1 for g in grads if torch.isinf(g).any())
+            if nan_grads > 0:
+                props["grad_nan"] = {"kind": "primitive", "name": str(nan_grads)}
+            if inf_grads > 0:
+                props["grad_inf"] = {"kind": "primitive", "name": str(inf_grads)}
+            # Per-layer max gradient norm (top 3 by norm, helps find exploding layers)
+            if len(grads) >= 2:
+                layer_norms = []
+                for name, p in value.named_parameters():
+                    if p.grad is not None:
+                        layer_norms.append((name, p.grad.detach().norm().item()))
+                layer_norms.sort(key=lambda x: -x[1])
+                top = layer_norms[:3]
+                # Show last 2 path segments for context (e.g. "h.0.attn.weight")
+                def _short_name(n: str) -> str:
+                    parts = n.split(".")
+                    return ".".join(parts[-2:]) if len(parts) > 2 else n
+                top_str = ", ".join(f"{_short_name(n)}={v:.3g}" for n, v in top)
+                props["grad_top"] = {"kind": "primitive", "name": top_str}
+    except Exception:
+        pass
+
     return {"kind": "object", "properties": props, "class_name": class_name}
 
 

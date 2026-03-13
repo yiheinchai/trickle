@@ -658,6 +658,13 @@ def activate() -> None:
         except Exception:
             pass
 
+    # Install backward hook for gradient norm tracking on nn.Module
+    try:
+        from ._backward_hook import install as _install_backward_hook
+        _install_backward_hook()
+    except Exception:
+        pass
+
     vars_file = _get_vars_file()
     print(f"[trickle] Variable tracing active. Data → {os.path.relpath(vars_file)}")
 
