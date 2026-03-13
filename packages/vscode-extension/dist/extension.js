@@ -658,7 +658,22 @@ class TrickleInlayHintsProvider {
                         continue;
                 }
                 const obsLabels = getDimLabels(obs);
-                const typeStr = typeNodeToString(obs.type, 3, obsLabels);
+                let typeStr = typeNodeToString(obs.type, 3, obsLabels);
+                // For primitive types, show actual value inline instead of just "number"/"integer"
+                if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+                    if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+                        typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+                    }
+                    else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+                        typeStr = String(obs.sample);
+                    }
+                    else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+                        typeStr = obs.sample ? 'True' : 'False';
+                    }
+                    else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+                        typeStr = `"${obs.sample}"`;
+                    }
+                }
                 const position = new vscode.Position(lineNo - 1, varEnd);
                 const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
@@ -1049,6 +1064,11 @@ function formatTensorType(className, properties, dimLabels) {
     const deviceProp = properties['device'];
     if (deviceProp?.kind === 'primitive' && deviceProp.name && deviceProp.name !== 'cpu') {
         parts.push(`@${deviceProp.name}`);
+    }
+    // Memory: show inline for tensors (e.g. "98.0 KB")
+    const memProp = properties['memory'];
+    if (memProp?.kind === 'primitive' && memProp.name) {
+        parts.push(memProp.name);
     }
     // requires_grad: show when True
     const gradProp = properties['requires_grad'];

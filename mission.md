@@ -2,11 +2,17 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-Improving the developer experience of typescript / javascript developers (both frontend and backend).
+JS/TS inline type hints are now working for plain JS (trickle run node app.js) and TypeScript via ts-node. The next priorities for JS/TS developer experience are:
 
-Lots of progress has been made for ML engineers and lots of very useful features like inline type hints. All these good features needs to be available to ts/js developers too. it should work like python, to be able to work on any arbituary line of code (no framework), and also in frameworks, eg. react, express, AWS lambda (impt!)
+1. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). Currently works for plain logic files but JSX isn't transformed.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup.
+3. ESM module support: tsx and modern ESM JavaScript don't go through the Module._compile hook, so variables aren't traced in those files. Add variable tracing to the ESM hooks (observe-esm-hooks.mjs).
 
-the vision is that users working in any ts/js code will be able to have line by line type hints for a better devex to know what they data they manipulating, and removing the need for lots of console.logs
+2. ESM module support: tsx and modern ESM JavaScript don't go through the Module._compile hook, so variables aren't traced in those files. Add variable tracing to the ESM hooks (observe-esm-hooks.mjs).
+
+3. Better object type display: for large objects with many keys, the inline hint is verbose. Consider showing {key1, key2, ...N more} for compact inline display, with full type in hover.
+
+4. Test with a real-world JS/TS project (e.g. a Next.js or Express app) to verify the end-to-end experience works smoothly for actual developer workflows.
 
 </focus point>
 

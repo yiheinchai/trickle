@@ -153,12 +153,12 @@ function findClosingBrace(source: string, openBrace: number): number {
  * Handles: const x = ...; let x = ...; var x = ...;
  * Skips: destructuring, for-loop vars, require() calls, imports.
  */
-function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
+function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ lineEnd: number; varName: string; lineNo: number }> {
   const varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
 
-  // Match: const/let/var <identifier> = <something>
-  // We look for lines containing a simple variable declaration with an assignment
-  const varRegex = /^([ \t]*)(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=[^=]/gm;
+  // Match: const/let/var <identifier>[: TypeAnnotation] = <something>
+  // Handles both JS (no annotation) and TS (with annotation like `: string` or `: MyType`)
+  const varRegex = /^([ \t]*)(?:export\s+)?(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:[^=]+?)?\s*=[^=]/gm;
   let vmatch;
 
   while ((vmatch = varRegex.exec(source)) !== null) {
@@ -174,10 +174,12 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
     if (/^\s*require\s*\(/.test(restOfLine)) continue;
 
     // Calculate line number (count newlines before this position)
+    // Subtract lineOffset to map compiled line numbers back to original source lines
     let lineNo = 1;
     for (let i = 0; i < vmatch.index; i++) {
       if (source[i] === '\n') lineNo++;
     }
+    lineNo = Math.max(1, lineNo - lineOffset);
 
     // Find the end of this statement — look for the semicolon at depth 0
     // or the end of the line for semicolon-free code
@@ -237,7 +239,7 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
 /**
  * Find destructured variable declarations: const { a, b } = ... and const [a, b] = ...
  */
-function findDestructuredDeclarations(source: string): Array<{ lineEnd: number; varNames: string[]; lineNo: number }> {
+function findDestructuredDeclarations(source: string, lineOffset: number = 0): Array<{ lineEnd: number; varNames: string[]; lineNo: number }> {
   const results: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
 
   const destructRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\])\s*(?::\s*[^=]+?)?\s*=[^=]/gm;
@@ -255,6 +257,7 @@ function findDestructuredDeclarations(source: string): Array<{ lineEnd: number; 
     for (let i = 0; i < match.index; i++) {
       if (source[i] === '\n') lineNo++;
     }
+    lineNo = Math.max(1, lineNo - lineOffset);
 
     const startPos = match.index + match[0].length - 1;
     let pos = startPos;
@@ -388,8 +391,82 @@ function transformCjsSource(source: string, filename: string, moduleName: string
 
   // Also find variable declarations for tracing
   const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0';
-  const varInsertions = varTraceEnabled ? findVarDeclarations(source) : [];
-  const destructInsertions = varTraceEnabled ? findDestructuredDeclarations(source) : [];
+
+  // For TypeScript files (compiled by ts-node/tsc), type declarations (interfaces, type aliases)
+  // are stripped from the compiled JS, shifting line numbers. The only accurate way to get correct
+  // line numbers is to read the original .ts source file and parse it directly.
+  // For plain JS files, we parse the source directly.
+  let varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
+  let destructInsertions: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
+
+  if (varTraceEnabled) {
+    const isTsFile = /\.[mc]?tsx?$/.test(filename);
+    if (isTsFile) {
+      try {
+        // Read original TypeScript source to get correct line numbers
+        const fs = require('fs');
+        const originalSource: string = fs.readFileSync(filename, 'utf8');
+        const tsVarInsertions = findVarDeclarations(originalSource);
+        const tsDestructInsertions = findDestructuredDeclarations(originalSource);
+
+        // Map TypeScript variable names → correct line numbers (by occurrence order)
+        // Use a counter map to handle duplicate variable names in different scopes
+        const tsLineByVarAndOccurrence = new Map<string, number[]>();
+        for (const { varName, lineNo } of tsVarInsertions) {
+          if (!tsLineByVarAndOccurrence.has(varName)) tsLineByVarAndOccurrence.set(varName, []);
+          tsLineByVarAndOccurrence.get(varName)!.push(lineNo);
+        }
+
+        // Find positions in compiled JS (for inserting trace calls),
+        // but use line numbers from original TypeScript source
+        const compiledInsertions = findVarDeclarations(source);
+        const varOccurrenceCounter = new Map<string, number>();
+        for (const ins of compiledInsertions) {
+          const occCount = (varOccurrenceCounter.get(ins.varName) || 0);
+          varOccurrenceCounter.set(ins.varName, occCount + 1);
+          const tsLines = tsLineByVarAndOccurrence.get(ins.varName);
+          const correctLineNo = tsLines ? (tsLines[occCount] ?? tsLines[tsLines.length - 1]) : undefined;
+          varInsertions.push({ ...ins, lineNo: correctLineNo ?? ins.lineNo });
+        }
+
+        const compiledDestructInsertions = findDestructuredDeclarations(source);
+        destructInsertions = compiledDestructInsertions; // Keep compiled line numbers as fallback
+        // Try to fix destructured line numbers too
+        const tsDestructByKey = new Map<string, number[]>();
+        for (const { varNames, lineNo } of tsDestructInsertions) {
+          const key = varNames.join(',');
+          if (!tsDestructByKey.has(key)) tsDestructByKey.set(key, []);
+          tsDestructByKey.get(key)!.push(lineNo);
+        }
+        const destructOccCounter = new Map<string, number>();
+        destructInsertions = compiledDestructInsertions.map(ins => {
+          const key = ins.varNames.join(',');
+          const occ = destructOccCounter.get(key) || 0;
+          destructOccCounter.set(key, occ + 1);
+          const tsLines = tsDestructByKey.get(key);
+          const correctLineNo = tsLines ? (tsLines[occ] ?? tsLines[tsLines.length - 1]) : undefined;
+          return { ...ins, lineNo: correctLineNo ?? ins.lineNo };
+        });
+      } catch {
+        // Fallback: use compiled line numbers with prologue offset
+        let lineOffset = 0;
+        const lines = source.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (trimmed === '"use strict";' || trimmed === "'use strict';" || trimmed === '') {
+            lineOffset++;
+          } else {
+            break;
+          }
+        }
+        varInsertions = findVarDeclarations(source, lineOffset);
+        destructInsertions = findDestructuredDeclarations(source, lineOffset);
+      }
+    } else {
+      varInsertions = findVarDeclarations(source);
+      destructInsertions = findDestructuredDeclarations(source);
+    }
+  }
 
   if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
 

@@ -186,11 +186,14 @@
   <h1><span>trickle</span></h1>
   <p>Runtime type observability for JavaScript and Python. Run your code, get types in your IDE automatically.</p>
   <div class="hero-code">
-    <span class="comment"># One line. Types appear in VSCode.</span><br>
-    <span class="cmd">import trickle.auto</span><br><br>
-    <span style="color: var(--text);">model = nn.Linear(784, 10)</span><span style="color: var(--text-muted);"> &nbsp;# → Linear(7850 params 30.7 KB)</span><br>
-    <span style="color: var(--text);">x = torch.randn(32, 784)</span><span style="color: var(--text-muted);"> &nbsp;&nbsp;&nbsp;# → Tensor[32, 784] float32 98.0 KB</span><br>
-    <span style="color: var(--text);">loss.backward()</span><span style="color: var(--text-muted);"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# → model: |∇|=5.32</span>
+    <span class="comment">// JavaScript — one command, types appear in VSCode</span><br>
+    <span class="cmd">trickle run node app.js</span><br><br>
+    <span style="color: var(--text);">const users = fetchUsers()</span><span style="color: var(--text-muted);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// → User[]</span><br>
+    <span style="color: var(--text);">const filtered = users.filter(u => u.active)</span><span style="color: var(--text-muted);">&nbsp;// → User[]</span><br>
+    <span style="color: var(--text);">const avg = scores.reduce(...) / n</span><span style="color: var(--text-muted);">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// → 84.5</span><br><br>
+    <span class="comment"># Python — same idea</span><br>
+    <span class="cmd">import trickle.auto</span><br>
+    <span style="color: var(--text);">x = torch.randn(32, 784)</span><span style="color: var(--text-muted);">&nbsp;&nbsp;&nbsp;// → Tensor[32, 784] float32</span>
   </div>
   <div class="cta-row">
     <a href="https://github.com/yiheinchai/trickle" class="cta cta-primary">View on GitHub</a>
@@ -202,6 +205,14 @@
 <section class="roles">
   <h2>Find your use case</h2>
   <div class="role-grid">
+    <div class="role-card">
+      <h3>JavaScript / TypeScript Developers</h3>
+      <div class="pain">"I'm tired of adding console.log everywhere to see what my data looks like."</div>
+      <div class="solution">
+        <code>trickle run node app.js</code> &mdash; every variable gets an inline type hint. Works with plain JS, TypeScript (ts-node), Express, and any Node.js code. No code changes.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/javascript-developer.md" class="link">JavaScript Guide &rarr;</a>
+    </div>
     <div class="role-card">
       <h3>ML Engineers</h3>
       <div class="pain">"I'm tired of printing tensor shapes everywhere."</div>
