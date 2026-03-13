@@ -215,6 +215,16 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _ds_type is not None and isinstance(value, _ds_type):
         return _infer_dataset(value)
 
+    # --- Pandas DataFrame ---
+    _df_type = _get_pandas_dataframe_type()
+    if _df_type is not None and isinstance(value, _df_type):
+        return _infer_dataframe(value)
+
+    # --- Pandas Series ---
+    _series_type = _get_pandas_series_type()
+    if _series_type is not None and isinstance(value, _series_type):
+        return _infer_series(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -658,6 +668,143 @@ def _infer_dataset(value: Any) -> Dict[str, Any]:
             pass
 
     return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+# --- Pandas DataFrame / Series support ---
+
+_pandas_dataframe_type: Any = None
+_pandas_dataframe_checked = False
+
+
+def _get_pandas_dataframe_type() -> Any:
+    """Lazily resolve pandas.DataFrame."""
+    global _pandas_dataframe_type, _pandas_dataframe_checked
+    if _pandas_dataframe_checked:
+        return _pandas_dataframe_type
+    _pandas_dataframe_checked = True
+    try:
+        import pandas
+        _pandas_dataframe_type = pandas.DataFrame
+    except ImportError:
+        pass
+    return _pandas_dataframe_type
+
+
+_pandas_series_type: Any = None
+_pandas_series_checked = False
+
+
+def _get_pandas_series_type() -> Any:
+    """Lazily resolve pandas.Series."""
+    global _pandas_series_type, _pandas_series_checked
+    if _pandas_series_checked:
+        return _pandas_series_type
+    _pandas_series_checked = True
+    try:
+        import pandas
+        _pandas_series_type = pandas.Series
+    except ImportError:
+        pass
+    return _pandas_series_type
+
+
+def _infer_dataframe(value: Any) -> Dict[str, Any]:
+    """Infer type for a pandas DataFrame."""
+    props: Dict[str, Any] = {}
+    try:
+        rows, cols = value.shape
+        props["rows"] = {"kind": "primitive", "name": str(rows)}
+        props["cols"] = {"kind": "primitive", "name": str(cols)}
+    except Exception:
+        pass
+
+    # Column dtypes summary
+    try:
+        dtypes = value.dtypes
+        dtype_counts: Dict[str, int] = {}
+        for dt in dtypes:
+            name = str(dt)
+            dtype_counts[name] = dtype_counts.get(name, 0) + 1
+        dtype_parts = [f"{v}x {k}" for k, v in sorted(dtype_counts.items(), key=lambda x: -x[1])]
+        props["dtypes"] = {"kind": "primitive", "name": ", ".join(dtype_parts[:4])}
+    except Exception:
+        pass
+
+    # Column names (first few)
+    try:
+        col_names = list(value.columns[:8])
+        if len(value.columns) > 8:
+            col_names.append(f"... +{len(value.columns) - 8}")
+        props["columns"] = {"kind": "primitive", "name": ", ".join(str(c) for c in col_names)}
+    except Exception:
+        pass
+
+    # Memory usage
+    try:
+        mem_bytes = value.memory_usage(deep=True).sum()
+        if mem_bytes >= 1_073_741_824:
+            props["memory"] = {"kind": "primitive", "name": f"{mem_bytes / 1_073_741_824:.1f} GB"}
+        elif mem_bytes >= 1_048_576:
+            props["memory"] = {"kind": "primitive", "name": f"{mem_bytes / 1_048_576:.1f} MB"}
+        elif mem_bytes >= 1024:
+            props["memory"] = {"kind": "primitive", "name": f"{mem_bytes / 1024:.1f} KB"}
+        else:
+            props["memory"] = {"kind": "primitive", "name": f"{mem_bytes} B"}
+    except Exception:
+        pass
+
+    # Null count
+    try:
+        null_count = int(value.isnull().sum().sum())
+        if null_count > 0:
+            props["nulls"] = {"kind": "primitive", "name": str(null_count)}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": "DataFrame"}
+
+
+def _infer_series(value: Any) -> Dict[str, Any]:
+    """Infer type for a pandas Series."""
+    props: Dict[str, Any] = {}
+    try:
+        props["length"] = {"kind": "primitive", "name": str(len(value))}
+    except Exception:
+        pass
+
+    try:
+        props["dtype"] = {"kind": "primitive", "name": str(value.dtype)}
+    except Exception:
+        pass
+
+    if value.name is not None:
+        props["name"] = {"kind": "primitive", "name": str(value.name)}
+
+    # Null count
+    try:
+        null_count = int(value.isnull().sum())
+        if null_count > 0:
+            props["nulls"] = {"kind": "primitive", "name": str(null_count)}
+    except Exception:
+        pass
+
+    # Stats for numeric series
+    try:
+        if value.dtype.kind in ('i', 'u', 'f'):
+            props["min"] = {"kind": "primitive", "name": f"{value.min():.4g}"}
+            props["max"] = {"kind": "primitive", "name": f"{value.max():.4g}"}
+            props["mean"] = {"kind": "primitive", "name": f"{value.mean():.4g}"}
+    except Exception:
+        pass
+
+    # Unique count for categorical/object
+    try:
+        if value.dtype == 'object' or str(value.dtype) == 'category':
+            props["unique"] = {"kind": "primitive", "name": str(value.nunique())}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": "Series"}
 
 
 _numpy_ndarray_type: Any = None

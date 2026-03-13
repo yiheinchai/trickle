@@ -910,6 +910,33 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
         return formatTensorType(node.class_name, node.properties, dimLabels);
       }
 
+      // Pandas DataFrame: show rows x cols with memory
+      if (node.class_name === 'DataFrame') {
+        const rows = node.properties['rows']?.name;
+        const cols = node.properties['cols']?.name;
+        const mem = node.properties['memory']?.name;
+        const nulls = node.properties['nulls']?.name;
+        const parts: string[] = [];
+        if (rows && cols) parts.push(`${rows} rows x ${cols} cols`);
+        if (mem) parts.push(mem);
+        if (nulls) parts.push(`${nulls} nulls`);
+        return `DataFrame(${parts.join(', ')})`;
+      }
+
+      // Pandas Series: show length and dtype
+      if (node.class_name === 'Series') {
+        const len = node.properties['length']?.name;
+        const dtype = node.properties['dtype']?.name;
+        const name = node.properties['name']?.name;
+        const nulls = node.properties['nulls']?.name;
+        const parts: string[] = [];
+        if (len) parts.push(len);
+        if (dtype) parts.push(dtype);
+        if (name) parts.push(`"${name}"`);
+        if (nulls) parts.push(`${nulls} nulls`);
+        return `Series(${parts.join(', ')})`;
+      }
+
       // nn.Module types: show key params, omit 'params'/'training'/'memory' from inline props
       if (node.class_name && node.properties['params']) {
         const paramCount = node.properties['params']?.name;

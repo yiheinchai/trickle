@@ -38,6 +38,26 @@ loss = criterion(output, target) # → Tensor[] float32 = 2.3041
 
 ---
 
+### Data Scientists / Analysts
+
+> *"I'm tired of calling `df.shape` and `df.head()` after every operation."*
+
+`%load_ext trickle` in Jupyter. Every DataFrame and Series shows its dimensions, dtypes, memory, and null counts inline.
+
+```python
+%load_ext trickle
+
+df = pd.read_csv("sales.csv")       # → DataFrame(10000 rows x 12 cols, 1.2 MB)
+revenue = df["revenue"]             # → Series(10000, float64, "revenue")
+filtered = df[df["region"] == "US"] # → DataFrame(3200 rows x 12 cols, 389.1 KB)
+```
+
+**What gets traced:** DataFrames (rows, cols, dtypes, memory, nulls), Series (length, dtype, name, stats), NumPy arrays (shape, dtype, memory).
+
+**[Full Data Scientist Guide →](usecases/data-scientist.md)**
+
+---
+
 ### Python Developers
 
 > *"I have a Python codebase with no type annotations. I don't want to add them manually."*
