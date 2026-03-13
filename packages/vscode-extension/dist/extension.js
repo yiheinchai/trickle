@@ -659,7 +659,7 @@ class TrickleInlayHintsProvider {
                 }
                 const obsLabels = getDimLabels(obs);
                 const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
-                let typeStr = typeNodeToStringCompact(obs.type, obsLabels);
+                let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
                 // For primitive types, show actual value inline instead of just "number"/"integer"
                 if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
                     if (obs.type.name === 'number' && typeof obs.sample === 'number') {
@@ -1036,7 +1036,27 @@ function typeNodeToString(node, depth = 3, dimLabels) {
  * For objects with many keys, shows just key names: {key1, key2, +N more}
  * This keeps inline hints short. Full type is shown in hover tooltip.
  */
-function typeNodeToStringCompact(node, dimLabels) {
+/** Format a scalar sample value as a short string for inline display. Returns null if not suitable. */
+function formatScalarSample(val) {
+    if (val === null || val === undefined)
+        return null;
+    if (typeof val === 'boolean')
+        return val ? 'True' : 'False';
+    if (typeof val === 'number') {
+        if (!isFinite(val))
+            return null;
+        return Number.isInteger(val) ? String(val) : val.toFixed(4).replace(/\.?0+$/, '');
+    }
+    if (typeof val === 'string') {
+        // Class reference like "ModelConfig(...)" — show without quotes
+        if (/^\w+\(\.\.\.\)$/.test(val))
+            return val;
+        if (val.length <= 20)
+            return `"${val}"`;
+    }
+    return null;
+}
+function typeNodeToStringCompact(node, dimLabels, sample) {
     // Arrays: recursively compact the element type
     if (node.kind === 'array' && node.element) {
         const inner = typeNodeToStringCompact(node.element, dimLabels);
@@ -1064,6 +1084,26 @@ function typeNodeToStringCompact(node, dimLabels) {
         'DatetimeIndex', 'Dataset', 'DatasetDict']);
     if (node.class_name && mlClasses.has(node.class_name)) {
         return typeNodeToString(node, 3, dimLabels);
+    }
+    // Named classes (dataclasses, NamedTuples, Pydantic models): show key=value when sample available
+    const sampleObj = (sample !== null && sample !== undefined && typeof sample === 'object' && !Array.isArray(sample))
+        ? sample
+        : null;
+    if (node.class_name && sampleObj) {
+        const MAX_SHOW = 4;
+        const shown = [];
+        let idx = 0;
+        for (const [key] of entries) {
+            if (idx >= MAX_SHOW)
+                break;
+            const val = sampleObj[key];
+            const formatted = formatScalarSample(val);
+            shown.push(formatted !== null ? `${key}=${formatted}` : key);
+            idx++;
+        }
+        const remaining = entries.length - shown.length;
+        const suffix = remaining > 0 ? `, +${remaining}` : '';
+        return `${node.class_name}(${shown.join(', ')}${suffix})`;
     }
     // Small objects (≤ 3 keys): show normally with types
     if (entries.length <= 3) {

@@ -142,7 +142,13 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
 def _sanitize(value: Any, depth: int = 2) -> Any:
     """Create a small JSON-safe sample of a value for display."""
     if depth <= 0:
-        return "[truncated]"
+        # For structured objects, show ClassName(...) instead of truncating
+        if value is None or isinstance(value, (bool, int, float)):
+            return value
+        cls_name = type(value).__name__
+        if cls_name not in ('list', 'dict', 'tuple', 'set', 'str'):
+            return f"{cls_name}(...)"
+        return "[...]"
     if value is None:
         return None
     t = type(value)
@@ -189,15 +195,15 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
     # Pydantic v2
     if hasattr(type(value), 'model_fields') and hasattr(value, 'model_dump'):
         try:
-            d = value.model_dump()
-            return {k: _sanitize(v, depth - 1) for k, v in list(d.items())[:8]}
+            fields = list(type(value).model_fields.keys())[:8]
+            return {f: _sanitize(getattr(value, f, None), depth - 1) for f in fields}
         except Exception:
             pass
     # Pydantic v1
     if hasattr(type(value), '__fields__') and hasattr(value, 'dict'):
         try:
-            d = value.dict()
-            return {k: _sanitize(v, depth - 1) for k, v in list(d.items())[:8]}
+            fields = list(type(value).__fields__.keys())[:8]
+            return {f: _sanitize(getattr(value, f, None), depth - 1) for f in fields}
         except Exception:
             pass
     return str(value)[:100]
@@ -320,6 +326,8 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            def _sv(v):",
             "                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
             "                if isinstance(v, str): return v[:40]",
+            "                _cn = type(v).__name__",
+            "                if _cn not in ('list','dict','tuple','set'): return f'{_cn}(...)'",
             "                return None",
             "            _s = {f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}",
             "        else:",
@@ -327,19 +335,21 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            def _sv2(v):",
             "                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
             "                if isinstance(v, str): return v[:40]",
+            "                _cn = type(v).__name__",
+            "                if _cn not in ('list','dict','tuple','set'): return f'{_cn}(...)'",
             "                return None",
             "            if _dc.is_dataclass(_val) and not isinstance(_val, type):",
             "                _s = {f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}",
             "            elif hasattr(type(_val), 'model_fields') and hasattr(_val, 'model_dump'):",
             "                try:",
-            "                    _d = _val.model_dump()",
-            "                    _s = {k: _sv2(v) for k, v in list(_d.items())[:8]}",
+            "                    _fields = list(type(_val).model_fields.keys())[:8]",
+            "                    _s = {f: _sv2(getattr(_val, f, None)) for f in _fields}",
             "                except Exception:",
             "                    _s = str(_val)[:100]",
             "            elif hasattr(type(_val), '__fields__') and hasattr(_val, 'dict'):",
             "                try:",
-            "                    _d = _val.dict()",
-            "                    _s = {k: _sv2(v) for k, v in list(_d.items())[:8]}",
+            "                    _fields = list(type(_val).__fields__.keys())[:8]",
+            "                    _s = {f: _sv2(getattr(_val, f, None)) for f in _fields}",
             "                except Exception:",
             "                    _s = str(_val)[:100]",
             "            else:",

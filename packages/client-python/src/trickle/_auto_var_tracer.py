@@ -206,13 +206,17 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
 
 
 def _simple_scalar(v: Any) -> Any:
-    """Return a JSON-safe scalar for a field value, or None if complex."""
+    """Return a JSON-safe scalar for a field value.
+    Scalars returned as-is; nested structured objects shown as 'ClassName(...)'."""
     if v is None or isinstance(v, bool):
         return v
     if isinstance(v, (int, float)):
         return v
     if isinstance(v, str):
         return v[:40]
+    cls_name = type(v).__name__
+    if cls_name not in ('list', 'dict', 'tuple', 'set'):
+        return f"{cls_name}(...)"
     return None
 
 
@@ -258,15 +262,15 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
         elif hasattr(type(value), 'model_fields') and hasattr(value, 'model_dump'):
             # Pydantic v2
             try:
-                d = value.model_dump()
-                sample = {k: _simple_scalar(v) for k, v in list(d.items())[:8]}
+                fields = list(type(value).model_fields.keys())[:8]
+                sample = {f: _simple_scalar(getattr(value, f, None)) for f in fields}
             except Exception:
                 sample = str(value)[:100]
         elif hasattr(type(value), '__fields__') and hasattr(value, 'dict'):
             # Pydantic v1
             try:
-                d = value.dict()
-                sample = {k: _simple_scalar(v) for k, v in list(d.items())[:8]}
+                fields = list(type(value).__fields__.keys())[:8]
+                sample = {f: _simple_scalar(getattr(value, f, None)) for f in fields}
             except Exception:
                 sample = str(value)[:100]
         else:
