@@ -2,15 +2,11 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-Improving communication eg. via the main readme, the usecases docs. The goal is for any user to land on this repo, and be able to identify themselves with one of our target users in the user journey. we can group by use case / job. so that they can instantly know what the value is for them, and make them want to start using trickle immediately.
+Improving the developer experience of typescript / javascript developers (both frontend and backend).
 
-and them optimise for each user type to be able to get started as quickly as possible to extract value.
+Lots of progress has been made for ML engineers and lots of very useful features like inline type hints. All these good features needs to be available to ts/js developers too. it should work like python, to be able to work on any arbituary line of code (no framework), and also in frameworks, eg. react, express.
 
-also make sure the index.html at root for github pages is good.
-
-while working on this focus point, and working through use cases, if there is an important use case that would provide value and get that type of customer to immediately start using trickle but we don't support it, just build it in full. Goal is to maximise value for customer
-
-To find out what would be of value, it would be helpful for each use case you go and find a real codebase and test trickle on it, see what pain points you experience and then improve trickle.
+the vision is that users working in any ts/js code will be able to have line by line type hints for a better devex to know what they data they manipulating, and removing the need for lots of console.logs
 
 </focus point>
 
