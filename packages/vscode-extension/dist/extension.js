@@ -48,6 +48,10 @@ let inlineHintsProvider;
 let diagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
 const inlayHintsChangeEmitter = new vscode.EventEmitter();
+/** Type hashes from the previous load: "file:line:varName" → typeHash */
+let prevTypeHashes = new Map();
+/** Variables whose type changed since the last run: "file:line:varName" */
+let changedVarKeys = new Set();
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     statusBarItem.command = 'trickle.refreshVariables';
@@ -255,6 +259,16 @@ function loadAllVariables() {
         updateStatusBar();
         return;
     }
+    // Snapshot current hashes before clearing, for drift detection
+    const currentHashes = new Map();
+    for (const [filePath, lineMap] of varIndex) {
+        for (const [lineNo, obsArr] of lineMap) {
+            for (const obs of obsArr) {
+                const key = `${filePath}:${lineNo}:${obs.varName}`;
+                currentHashes.set(key, obs.typeHash);
+            }
+        }
+    }
     varIndex.clear();
     notebookCellIndex.clear();
     dimLabelIndex.clear();
@@ -326,6 +340,23 @@ function loadAllVariables() {
             // File read error
         }
     }
+    // Detect type drift: compare new hashes against previous run's hashes
+    changedVarKeys.clear();
+    if (prevTypeHashes.size > 0) {
+        for (const [filePath, lineMap] of varIndex) {
+            for (const [lineNo, obsArr] of lineMap) {
+                for (const obs of obsArr) {
+                    const key = `${filePath}:${lineNo}:${obs.varName}`;
+                    const prev = prevTypeHashes.get(key);
+                    if (prev !== undefined && prev !== obs.typeHash) {
+                        changedVarKeys.add(key);
+                    }
+                }
+            }
+        }
+    }
+    // Update prevTypeHashes with the current run's data
+    prevTypeHashes = currentHashes;
     updateStatusBar();
     refreshInlineHints();
 }
@@ -675,13 +706,26 @@ class TrickleInlayHintsProvider {
                         typeStr = `"${obs.sample}"`;
                     }
                 }
+                // For class instances with a config, sample is a constructor-call string like
+                // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
+                if (obs.type.kind === 'object' && obs.type.class_name &&
+                    typeof obs.sample === 'string' &&
+                    obs.sample.startsWith(obs.type.class_name + '(') &&
+                    obs.sample.endsWith(')')) {
+                    typeStr = obs.sample;
+                }
                 const position = new vscode.Position(lineNo - 1, varEnd);
-                const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
+                // Check for type drift (type changed since last run)
+                const driftKey = `${obs.file}:${obs.line}:${obs.varName}`;
+                const hasDrift = changedVarKeys.has(driftKey);
+                const label = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
                 hint.paddingLeft = false;
                 hint.paddingRight = true;
                 // Add funcName, full type (if compacted), tensor stats, and sample value as tooltip
                 const tooltipParts = [];
+                if (hasDrift)
+                    tooltipParts.push(`⚠ **Type changed since last run**`);
                 if (obs.funcName)
                     tooltipParts.push(`**Function:** \`${obs.funcName}\``);
                 // Show full type in tooltip when inline was compacted
