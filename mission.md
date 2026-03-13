@@ -18,7 +18,9 @@ Next priorities:
 
 3. ~~Arrow function / typed component tracking~~ ✅ DONE — Now tracks `React.FC`, `React.FC<Props>`, `React.memo()`, `memo()`, `React.forwardRef()`, `export default function`, and plain arrows. Fixed type-annotated destructured props.
 
-4. Next: Consider what a React Native developer actually sees in VSCode — currently all trickle data (render counts, state, hooks) is written to `.trickle/variables.jsonl` and shown as inlay hints. But for React Native, the device posts to the backend URL. Add a `trickle rn` CLI command that prints setup instructions for React Native (similar to `trickle lambda setup`), covering: metro.config.js setup, real-device IP configuration, and how to view inline hints in VSCode.
+4. ~~trickle rn CLI~~ ✅ DONE — `trickle rn setup` prints metro.config.js config, Expo/bare RN variants, simulator/real-device/Android emulator setup. `trickle rn ip` auto-detects LAN IP for real-device config. 12 tests passing.
+
+5. Next focus area: Think about what would most help a React/React Native developer debug a real application. Consider: (a) arrow function component render tracking already covers static components, but what about **dynamic renders** — e.g. components rendered inside `.map()` or conditionals? (b) Can trickle detect which prop change caused a re-render? (c) Is there a good story for Next.js (Server Components vs Client Components) — Server Components run on the server and need the Lambda-style backend, Client Components work like regular React with Vite plugin or Metro transformer.
 
 </focus point>
 

@@ -84,6 +84,18 @@ export function ProductCard({ product }) { ... }
 export default function ProductScreen() { ... }
 ```
 
+### CLI helpers
+
+```bash
+# Get step-by-step setup guide
+trickle rn setup
+
+# Find your machine's IP for real-device setup
+trickle rn ip
+# → LAN IP: 192.168.1.5
+# → TRICKLE_BACKEND_URL=http://192.168.1.5:4888 npx expo start
+```
+
 ## Customer journey
 
 1. **Frustrated** by having to add/remove `console.log` to debug state changes on device
