@@ -430,3 +430,34 @@ model = AutoModelForCausalLM.from_config(small_config)
 **Priority fields shown first:** `vocab_size`, `hidden_size`/`n_embd`/`d_model`, `num_hidden_layers`/`n_layer`, `num_attention_heads`/`n_head`, `intermediate_size`, `max_position_embeddings`, `model_type`.
 
 Works for all `PretrainedConfig` subclasses: GPT-2, BERT, T5, LLaMA, Mistral, Falcon, etc.
+
+---
+
+## Use Case 10: Type Drift Alerts — Catch Shape Regressions Between Runs
+
+When you change a model architecture or dataset and re-run training, tensor shapes may silently change. Trickle detects when a variable's type changes between runs and marks the inline hint with ⚠.
+
+```python
+import trickle.auto
+import torch
+import torch.nn as nn
+
+# First run: hidden_size=768
+W = nn.Linear(768, 10)
+x = torch.randn(32, 768)
+out = W(x)
+# → out: Tensor[32, 10] float32
+
+# Second run after refactoring to hidden_size=512:
+W = nn.Linear(512, 10)
+x = torch.randn(32, 512)
+out = W(x)
+# → out: Tensor[32, 10] float32 ⚠  ← hover shows "Type changed since last run"
+```
+
+**When it triggers:** any time the `typeHash` of a variable at the same file+line changes between two executions within a VSCode session. Useful for catching:
+- Tensor shape changes (e.g. batch size or embedding dim changes)
+- dtype changes (float32 → float16 after mixed precision is enabled)
+- Return type changes after refactoring a function
+
+The ⚠ indicator appears inline next to the type hint and the hover tooltip explains the drift.
