@@ -726,3 +726,45 @@ The VSCode status bar automatically shows:
 ```
 
 **How it works:** `trickle.auto` uses the AST variable tracer to detect which lines are inside `for`/`while` loop bodies. When a variable with a training-metric name (`loss`, `acc`, `epoch`, `step`, `lr`, `val_loss`, etc.) is assigned in a loop, trickle automatically emits a `kind: "progress"` record to `.trickle/variables.jsonl`. Rate-limited to every 10 iterations by default (configurable via `TRICKLE_AUTO_PROGRESS_EVERY`). No code changes required beyond `import trickle.auto`.
+
+---
+
+## Use Case 17: Gradient Flow Visualization
+
+**User:** ML engineer debugging a deep neural network that's not converging, suspecting vanishing gradients.
+
+**Before trickle:** Must add `for name, p in model.named_parameters(): print(name, p.grad.norm())` after every backward call, or register manual hooks.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for step in range(1000):
+    loss = criterion(model(x), y)
+    optimizer.zero_grad()
+    loss.backward()  # ← inlay hint appears here automatically
+    optimizer.step()
+```
+
+VSCode shows at the `loss.backward()` line:
+```
+loss.backward()  ∇ model: ↓ vanishing: layers.0, layers.1, layers.2 | layers.9=4.09e-01
+```
+
+Hover tooltip shows the full table:
+```
+∇ Gradient Norms: `model`
+
+| Layer    | Grad Norm  |
+|----------|------------|
+| out      | 5.30e+00   |
+| layers.9 | 4.09e-01   |
+| layers.8 | 4.78e-04   |
+| layers.7 | 6.60e-07 ↓ |
+| layers.0 | 0.00e+00 ↓ |
+
+max: 5.30e+00 · min: 6.60e-07
+↓ Vanishing (<1e-6): layers.7, layers.0, layers.1, ...
+```
+
+**How it works:** `trickle.auto` patches `torch.Tensor.backward()`. After each backward pass it walks the caller's frame locals to find `nn.Module` instances, calls `model.named_parameters()` to compute per-parameter gradient norms, groups by module path (e.g. `layers.0`), then writes a `kind: "gradient"` record to `.trickle/variables.jsonl`. The VSCode extension reads this and shows it as an inlay hint at the exact `backward()` call line.

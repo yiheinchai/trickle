@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, and automatic training metric detection are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, and gradient flow visualization are all implemented. Next priorities:
 
-1. Gradient flow visualization: for PyTorch training, show per-parameter gradient norms as inlay hints on the model's forward() method lines, so the user can see which layers have vanishing/exploding gradients without adding hooks manually.
+1. Multi-file tracing: when `trickle.auto` is active, also trace variables in imported user modules (not just the entry file), so that helper functions and model definitions in separate files also show inline hints.
 
-2. Multi-file tracing: when `trickle.auto` is active, also trace variables in imported user modules (not just the entry file), so that helper functions and model definitions in separate files also show inline hints.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+3. Model checkpoint observability: when `torch.save()` or `model.save_pretrained()` is called, automatically record which epoch/step it was saved at and show this as an inlay hint on the save line — so the user can see checkpoint history without checking filenames manually.
 
-4. Model checkpoint observability: when `torch.save()` or `model.save_pretrained()` is called, automatically record which epoch/step it was saved at and show this as an inlay hint on the save line — so the user can see checkpoint history without checking filenames manually.
+4. Multi-file tracing: when `trickle.auto` is active, also trace variables in imported user modules (not just the entry file), so that helper functions and model definitions in separate files also show inline hints.
 
 </focus point>
 
