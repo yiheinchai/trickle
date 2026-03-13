@@ -1134,6 +1134,12 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
     parts.push(`@${deviceProp.name}`);
   }
 
+  // Memory: show inline for tensors (e.g. "98.0 KB")
+  const memProp = properties['memory'];
+  if (memProp?.kind === 'primitive' && memProp.name) {
+    parts.push(memProp.name);
+  }
+
   // requires_grad: show when True
   const gradProp = properties['requires_grad'];
   if (gradProp?.kind === 'primitive' && gradProp.name === 'True') {

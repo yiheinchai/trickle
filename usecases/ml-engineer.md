@@ -222,7 +222,7 @@ If you don't want to install Node.js/npm at all:
 # Option A: magic command in notebooks
 %load_ext trickle
 
-# Option B: one import in scripts
+# Option B: one import in scripts — traces all variables automatically
 import trickle.auto
 
 # Option C: command line without CLI
@@ -230,6 +230,8 @@ TRICKLE_LOCAL=1 python -m trickle train.py
 ```
 
 All three work with just `pip install trickle-observe`.
+
+**Option B** is the easiest way to get started — just add `import trickle.auto` as the first line of your training script. It traces all variables (tensors, models, optimizers, schedulers, DataLoaders) plus gradient norms after `loss.backward()`. Open the file in VSCode and inline hints appear everywhere.
 
 ## Environment Variables
 

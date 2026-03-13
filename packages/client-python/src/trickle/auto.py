@@ -32,6 +32,13 @@ os.environ["TRICKLE_LOCAL"] = "1"
 from trickle._observe_auto import install as _install_observe_hook  # noqa: E402
 _install_observe_hook()
 
+# Install variable tracer for entry file (sys.settrace-based)
+try:
+    from trickle._auto_var_tracer import install as _install_var_tracer  # noqa: E402
+    _install_var_tracer()
+except Exception:
+    pass
+
 # Install backward hook for gradient norm tracking on nn.Module
 try:
     from trickle._backward_hook import install as _install_backward_hook  # noqa: E402
