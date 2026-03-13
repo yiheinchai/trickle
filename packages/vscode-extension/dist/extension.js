@@ -658,7 +658,8 @@ class TrickleInlayHintsProvider {
                         continue;
                 }
                 const obsLabels = getDimLabels(obs);
-                let typeStr = typeNodeToString(obs.type, 3, obsLabels);
+                const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
+                let typeStr = typeNodeToStringCompact(obs.type, obsLabels);
                 // For primitive types, show actual value inline instead of just "number"/"integer"
                 if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
                     if (obs.type.name === 'number' && typeof obs.sample === 'number') {
@@ -679,10 +680,14 @@ class TrickleInlayHintsProvider {
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
                 hint.paddingLeft = false;
                 hint.paddingRight = true;
-                // Add funcName, tensor stats, and sample value as tooltip
+                // Add funcName, full type (if compacted), tensor stats, and sample value as tooltip
                 const tooltipParts = [];
                 if (obs.funcName)
                     tooltipParts.push(`**Function:** \`${obs.funcName}\``);
+                // Show full type in tooltip when inline was compacted
+                if (fullTypeStr !== typeStr) {
+                    tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+                }
                 const stats = formatTensorStats(obs.type);
                 if (stats)
                     tooltipParts.push(`**Stats:**${stats}`);
@@ -1025,6 +1030,46 @@ function typeNodeToString(node, depth = 3, dimLabels) {
         default:
             return 'unknown';
     }
+}
+/**
+ * Compact type string for inline display.
+ * For objects with many keys, shows just key names: {key1, key2, +N more}
+ * This keeps inline hints short. Full type is shown in hover tooltip.
+ */
+function typeNodeToStringCompact(node, dimLabels) {
+    if (node.kind !== 'object' || !node.properties) {
+        return typeNodeToString(node, 3, dimLabels);
+    }
+    const entries = Object.entries(node.properties);
+    if (entries.length === 0)
+        return node.class_name || '{}';
+    // Special values — use full rendering
+    if ('__date' in node.properties)
+        return 'Date';
+    if ('__regexp' in node.properties)
+        return 'RegExp';
+    if ('__error' in node.properties)
+        return 'Error';
+    // ML/data types — keep their special compact rendering
+    const mlClasses = new Set(['Tensor', 'ndarray', 'DataFrame', 'Series',
+        'DataFrameGroupBy', 'SeriesGroupBy', 'RangeIndex', 'MultiIndex',
+        'DatetimeIndex', 'Dataset', 'DatasetDict']);
+    if (node.class_name && mlClasses.has(node.class_name)) {
+        return typeNodeToString(node, 3, dimLabels);
+    }
+    // Small objects (≤ 3 keys): show normally with types
+    if (entries.length <= 3) {
+        return typeNodeToString(node, 3, dimLabels);
+    }
+    // Large objects: show key names only, with count of remaining
+    const MAX_SHOW = 3;
+    const shown = entries.slice(0, MAX_SHOW).map(([k]) => k);
+    const remaining = entries.length - MAX_SHOW;
+    const suffix = remaining > 0 ? `, +${remaining}` : '';
+    if (node.class_name) {
+        return `${node.class_name}(${shown.join(', ')}${suffix})`;
+    }
+    return `{${shown.join(', ')}${suffix}}`;
 }
 /** Format a tensor type as a concise readable string.
  * E.g. Tensor[B=1, T=16, C=32] float32 @cpu
