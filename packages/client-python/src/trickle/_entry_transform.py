@@ -217,13 +217,8 @@ def _transform_to_source(source: str, filename: str, module_name: str, trace_var
     """
     tree = ast.parse(source, filename)
 
-    # Transform the top-level body
+    # Transform the top-level body (recurses into class bodies for method wrapping)
     tree.body = _transform_body(tree.body, trace_vars=trace_vars)
-
-    # Also transform class bodies (methods)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            node.body = _transform_body(node.body, trace_vars=trace_vars)
 
     # Transform function bodies for variable tracing (including parameter traces)
     # Walk with class context to build qualified function names (Class.method)
@@ -562,13 +557,8 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
     """
     tree = ast.parse(source, filename)
 
-    # Transform the top-level body
+    # Transform the top-level body (recurses into class bodies for method wrapping)
     tree.body = _transform_body(tree.body, trace_vars=trace_vars)
-
-    # Also transform class bodies (methods)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            node.body = _transform_body(node.body, trace_vars=trace_vars)
 
     # Transform function bodies for variable tracing (including parameter traces)
     if trace_vars:
@@ -578,12 +568,15 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
     return compile(tree, filename, "exec")
 
 
-def _transform_body(body: list, trace_vars: bool = True) -> list:
+def _transform_body(body: list, trace_vars: bool = True, class_name: str = "") -> list:
     """Insert wrapper calls after function defs and trace calls after assignments.
 
     Also recurses into compound statements (for, if, while, with, try) at
     module/class level so that variable assignments and for-loop iteration
     variables inside those blocks are traced.
+
+    When class_name is set, methods are wrapped with 'ClassName.method' names
+    so observations are correctly grouped by class.
     """
     new_body: list = []
 
@@ -603,14 +596,17 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
             ):
                 continue
 
-            # Insert: func_name = _trickle_wrap(func_name, 'func_name')
+            # Use 'ClassName.method' format when inside a class
+            obs_name = f"{class_name}.{node.name}" if class_name else node.name
+
+            # Insert: func_name = _trickle_wrap(func_name, 'obs_name')
             wrap_stmt = ast.Assign(
                 targets=[ast.Name(id=node.name, ctx=ast.Store())],
                 value=ast.Call(
                     func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
                     args=[
                         ast.Name(id=node.name, ctx=ast.Load()),
-                        ast.Constant(value=node.name),
+                        ast.Constant(value=obs_name),
                     ],
                     keywords=[],
                 ),
@@ -619,6 +615,8 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
             continue
 
         if isinstance(node, ast.ClassDef):
+            # Recurse into class body to wrap its methods
+            node.body = _transform_body(node.body, trace_vars=trace_vars, class_name=node.name)
             continue
 
         # Recurse into compound statements at module level
