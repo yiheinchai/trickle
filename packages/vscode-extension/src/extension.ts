@@ -154,6 +154,26 @@ interface OptimizerStepRecord {
   timestamp: number;
 }
 
+/** Activation statistics record emitted after each nn.Module forward pass */
+interface ActivationStatsRecord {
+  kind: 'activation_stats';
+  file: string;
+  line: number;
+  module_name: string;
+  call_count: number;
+  mean: number;
+  std: number;
+  min: number;
+  max: number;
+  numel: number;
+  shape: number[];
+  zero_frac?: number;
+  sat_frac?: number;
+  vanishing?: boolean;
+  exploding?: boolean;
+  timestamp: number;
+}
+
 /** A DataLoader batch shape record emitted on each iteration */
 interface DataloaderBatchShape {
   shape?: number[];
@@ -211,6 +231,8 @@ let optimizerIndex: Map<string, Map<number, OptimizerStepRecord>> = new Map();
 let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
 /** Training throughput: filePath -> lineNo -> TrainingThroughputRecord (latest) */
 let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Map();
+/** Activation statistics: filePath -> lineNo -> ActivationStatsRecord (latest) */
+let activationIndex: Map<string, Map<number, ActivationStatsRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -552,6 +574,7 @@ function loadAllVariables() {
   dataloaderIndex.clear();
   optimizerIndex.clear();
   throughputIndex.clear();
+  activationIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -643,6 +666,20 @@ function loadAllVariables() {
             const existing = lineMap.get(dl.line);
             if (!existing || dl.timestamp > existing.timestamp) {
               lineMap.set(dl.line, dl);
+            }
+            continue;
+          }
+
+          // Handle activation statistics records
+          if (record.kind === 'activation_stats') {
+            const ac = record as ActivationStatsRecord;
+            if (!activationIndex.has(ac.file)) {
+              activationIndex.set(ac.file, new Map());
+            }
+            const lineMap = activationIndex.get(ac.file)!;
+            const existing = lineMap.get(ac.line);
+            if (!existing || ac.timestamp > existing.timestamp) {
+              lineMap.set(ac.line, ac);
             }
             continue;
           }
@@ -1557,6 +1594,73 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             const md = new vscode.MarkdownString(
               `### ⚡ Training Throughput\n\n` + tooltipLines.join('\n\n') +
               `\n\n*Tracked by trickle (rolling avg)*`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add activation statistics inlay hints at nn.Module forward call lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const actLines = activationIndex.get(filePath);
+      if (actLines) {
+        for (const [lineNo, ac] of actLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          // Format a compact stats label
+          const fmtNum = (n: number): string => {
+            const a = Math.abs(n);
+            if (a >= 100) return n.toFixed(1);
+            if (a >= 10) return n.toFixed(2);
+            if (a >= 1) return n.toFixed(3);
+            return n.toFixed(4);
+          };
+
+          let label = ` ◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)}`;
+
+          // Anomaly flags
+          if (ac.exploding) {
+            label = ` ⚡◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [explode]`;
+          } else if (ac.vanishing) {
+            label = ` ↓◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [vanish]`;
+          } else if (ac.zero_frac !== undefined && ac.zero_frac > 0.5) {
+            label += ` [dead:${Math.round(ac.zero_frac * 100)}%]`;
+          } else if (ac.sat_frac !== undefined && ac.sat_frac > 0.5) {
+            label += ` [sat:${Math.round(ac.sat_frac * 100)}%]`;
+          }
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const tooltipLines = [
+              `**Module:** \`${ac.module_name}\``,
+              `**Shape:** \`[${ac.shape.join(', ')}]\``,
+              `**Mean:** \`${ac.mean}\``,
+              `**Std:** \`${ac.std}\``,
+              `**Min:** \`${ac.min}\` · **Max:** \`${ac.max}\``,
+            ];
+            if (ac.zero_frac !== undefined && ac.zero_frac > 0) {
+              tooltipLines.push(`**Zero fraction:** \`${(ac.zero_frac * 100).toFixed(1)}%\` ${ac.zero_frac > 0.5 ? '⚠ dead neurons detected' : ''}`);
+            }
+            if (ac.sat_frac !== undefined) {
+              tooltipLines.push(`**Saturation (|x|>0.9):** \`${(ac.sat_frac * 100).toFixed(1)}%\` ${ac.sat_frac > 0.5 ? '⚠ saturated' : ''}`);
+            }
+            if (ac.vanishing) tooltipLines.push('⚠ **Vanishing activations** (std < 1e-5)');
+            if (ac.exploding) tooltipLines.push('⚠ **Exploding activations** (|max| > 1e3)');
+            tooltipLines.push(`*Sampled at call #${ac.call_count} by trickle*`);
+
+            const md = new vscode.MarkdownString(
+              `### ◆ Activation Stats\n\n` + tooltipLines.join('\n\n'),
             );
             md.isTrusted = true;
             hint.tooltip = md;

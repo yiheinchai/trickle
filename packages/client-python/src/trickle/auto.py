@@ -74,6 +74,13 @@ try:
 except Exception:
     pass
 
+# Install activation statistics hook for layer output observability
+try:
+    from trickle._activation_hook import install as _install_activation_hook  # noqa: E402
+    _install_activation_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 
