@@ -140,6 +140,25 @@ export function UserCard({ userId }: { userId: number }) {
 
 Inline hints appear for every `const`/`let` declaration and destructured variable — including `useState` results, computed values, and mapped arrays.
 
+**React component render count hints:**
+
+Trickle also tracks how many times each component re-renders and shows it as an inlay hint on the component definition line — zero instrumentation required:
+
+```tsx
+// src/components/UserCard.tsx
+function UserCard({ userId }: { userId: number }) {  // 🔄 ×12 renders
+  const [user, setUser] = useState(null);
+  // → user: {id, name, email, role} | null
+  ...
+}
+
+const Dashboard = () => {  // 🔄 ×3 renders
+  return <div>...</div>;
+};
+```
+
+Hover over the hint to see the component name and cumulative render count since the dev server started. Useful for spotting unnecessary re-renders without adding any `console.log` or profiler setup.
+
 **Via ESM loader (for scripts and tests without Vite):**
 ```bash
 # Run a .jsx file with trickle tracing
