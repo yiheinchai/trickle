@@ -850,6 +850,53 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                     parts.push(`${nulls} nulls`);
                 return `Series(${parts.join(', ')})`;
             }
+            // Pandas GroupBy: show ngroups and keys
+            if (node.class_name === 'DataFrameGroupBy' || node.class_name === 'SeriesGroupBy') {
+                const ngroups = node.properties['ngroups']?.name;
+                const by = node.properties['by']?.name;
+                const groupSize = node.properties['group_size']?.name;
+                const parts = [];
+                if (by)
+                    parts.push(`by=${by}`);
+                if (ngroups)
+                    parts.push(`${ngroups} groups`);
+                if (groupSize)
+                    parts.push(`size=${groupSize}`);
+                return `${node.class_name}(${parts.join(', ')})`;
+            }
+            // Pandas Index types
+            if (node.class_name === 'RangeIndex') {
+                const len = node.properties['length']?.name;
+                const range = node.properties['range']?.name;
+                return range ? `RangeIndex(${range}, len=${len})` : `RangeIndex(${len})`;
+            }
+            if (node.class_name === 'MultiIndex') {
+                const len = node.properties['length']?.name;
+                const names = node.properties['names']?.name;
+                const levels = node.properties['levels']?.name;
+                const parts = [];
+                if (len)
+                    parts.push(len);
+                if (names)
+                    parts.push(names);
+                if (levels)
+                    parts.push(`${levels} levels`);
+                return `MultiIndex(${parts.join(', ')})`;
+            }
+            if (node.class_name === 'DatetimeIndex') {
+                const len = node.properties['length']?.name;
+                const start = node.properties['start']?.name;
+                const end = node.properties['end']?.name;
+                const freq = node.properties['freq']?.name;
+                const parts = [];
+                if (len)
+                    parts.push(len);
+                if (start && end)
+                    parts.push(`${start}..${end}`);
+                if (freq)
+                    parts.push(freq);
+                return `DatetimeIndex(${parts.join(', ')})`;
+            }
             // nn.Module types: show key params, omit 'params'/'training'/'memory' from inline props
             if (node.class_name && node.properties['params']) {
                 const paramCount = node.properties['params']?.name;

@@ -36,7 +36,21 @@ grouped = df.groupby("region")["revenue"].mean()
 
 Every DataFrame and Series shows its dimensions, dtypes, and memory usage inline — no `print()` needed.
 
-**Cell 3 — data cleaning:**
+**Cell 3 — groupby and aggregation:**
+```python
+grouped = df.groupby("region")
+# → DataFrameGroupBy(by=region, 5 groups, size=1800-2200)
+
+agg = grouped["revenue"].mean()
+# → Series(5, float64, "revenue", min=45000, max=62000, mean=53500)
+
+pivot = df.pivot_table(values="revenue", index="region", columns="quarter")
+# → DataFrame(5 rows x 4 cols, 399 B)
+```
+
+GroupBy objects show the number of groups and size range. Aggregation results display as Series with stats.
+
+**Cell 4 — data cleaning:**
 ```python
 df["price"] = df["price"].fillna(0)
 # → Series(10000, float64, "price")
@@ -59,6 +73,10 @@ You can see null counts drop as you clean, and memory change as you convert type
 | **Series (categorical)** | length, dtype, name, unique count |
 | **Series (with nulls)** | null count shown |
 | **Tensors** | shape, dtype, device, memory |
+| **GroupBy** | keys, ngroups, group size range |
+| **Index / RangeIndex** | length, range, dtype |
+| **MultiIndex** | length, level names, nlevels |
+| **DatetimeIndex** | length, date range, frequency |
 | **NumPy arrays** | shape, dtype, memory |
 
 ## Use Case 2: Python Scripts

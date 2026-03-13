@@ -225,6 +225,16 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _series_type is not None and isinstance(value, _series_type):
         return _infer_series(value)
 
+    # --- Pandas GroupBy ---
+    _groupby_type = _get_pandas_groupby_type()
+    if _groupby_type is not None and isinstance(value, _groupby_type):
+        return _infer_groupby(value)
+
+    # --- Pandas Index ---
+    _index_type = _get_pandas_index_type()
+    if _index_type is not None and isinstance(value, _index_type):
+        return _infer_index(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -805,6 +815,128 @@ def _infer_series(value: Any) -> Dict[str, Any]:
         pass
 
     return {"kind": "object", "properties": props, "class_name": "Series"}
+
+
+_pandas_groupby_type: Any = None
+_pandas_groupby_checked = False
+
+
+def _get_pandas_groupby_type() -> Any:
+    """Lazily resolve pandas GroupBy base type."""
+    global _pandas_groupby_type, _pandas_groupby_checked
+    if _pandas_groupby_checked:
+        return _pandas_groupby_type
+    _pandas_groupby_checked = True
+    try:
+        from pandas.core.groupby import GroupBy
+        _pandas_groupby_type = GroupBy
+    except ImportError:
+        pass
+    return _pandas_groupby_type
+
+
+def _infer_groupby(value: Any) -> Dict[str, Any]:
+    """Infer type for a pandas GroupBy object."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    try:
+        props["ngroups"] = {"kind": "primitive", "name": str(value.ngroups)}
+    except Exception:
+        pass
+
+    try:
+        keys = value.keys
+        if isinstance(keys, list):
+            props["by"] = {"kind": "primitive", "name": ", ".join(str(k) for k in keys)}
+        else:
+            props["by"] = {"kind": "primitive", "name": str(keys)}
+    except Exception:
+        pass
+
+    try:
+        sizes = value.size()
+        if hasattr(sizes, 'min') and hasattr(sizes, 'max'):
+            mn, mx = int(sizes.min()), int(sizes.max())
+            if mn == mx:
+                props["group_size"] = {"kind": "primitive", "name": str(mn)}
+            else:
+                props["group_size"] = {"kind": "primitive", "name": f"{mn}-{mx}"}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+_pandas_index_type: Any = None
+_pandas_index_checked = False
+
+
+def _get_pandas_index_type() -> Any:
+    """Lazily resolve pandas Index base type."""
+    global _pandas_index_type, _pandas_index_checked
+    if _pandas_index_checked:
+        return _pandas_index_type
+    _pandas_index_checked = True
+    try:
+        import pandas
+        _pandas_index_type = pandas.Index
+    except ImportError:
+        pass
+    return _pandas_index_type
+
+
+def _infer_index(value: Any) -> Dict[str, Any]:
+    """Infer type for a pandas Index or MultiIndex."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    try:
+        props["length"] = {"kind": "primitive", "name": str(len(value))}
+    except Exception:
+        pass
+
+    try:
+        props["dtype"] = {"kind": "primitive", "name": str(value.dtype)}
+    except Exception:
+        pass
+
+    # RangeIndex: show start/stop/step
+    if class_name == "RangeIndex":
+        try:
+            props["range"] = {"kind": "primitive", "name": f"{value.start}:{value.stop}:{value.step}"}
+        except Exception:
+            pass
+
+    # MultiIndex: show levels and names
+    if class_name == "MultiIndex":
+        try:
+            names = [str(n) for n in value.names if n is not None]
+            if names:
+                props["names"] = {"kind": "primitive", "name": ", ".join(names)}
+            props["levels"] = {"kind": "primitive", "name": str(value.nlevels)}
+        except Exception:
+            pass
+
+    # DatetimeIndex: show range
+    if class_name == "DatetimeIndex":
+        try:
+            props["start"] = {"kind": "primitive", "name": str(value[0].date())}
+            props["end"] = {"kind": "primitive", "name": str(value[-1].date())}
+            if value.freq is not None:
+                props["freq"] = {"kind": "primitive", "name": str(value.freq)}
+        except Exception:
+            pass
+
+    # Unique count for non-range indices
+    if class_name != "RangeIndex":
+        try:
+            if not value.is_unique:
+                props["unique"] = {"kind": "primitive", "name": str(value.nunique())}
+        except Exception:
+            pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
 
 
 _numpy_ndarray_type: Any = None
