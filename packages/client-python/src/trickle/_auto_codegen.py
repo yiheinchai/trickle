@@ -270,6 +270,11 @@ def _type_to_python(
             return cn
         if not props:
             return "Dict[str, Any]"
+        # If any key is not a valid Python identifier, fall back to Dict
+        if any(not k.isidentifier() for k in props):
+            val_types = list({_type_to_python(props[k], extracted, parent_name, prop_name) for k in list(props.keys())[:4]})
+            val_t = val_types[0] if len(val_types) == 1 else "Any"
+            return f"Dict[str, {val_t}]"
         if prop_name:
             class_name = _to_pascal_case(parent_name) + _to_pascal_case(prop_name)
             if not any(n == class_name for n, _ in extracted):

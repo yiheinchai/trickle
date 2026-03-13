@@ -594,6 +594,14 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
             # Skip private/dunder methods
             if node.name.startswith("_"):
                 continue
+            # Skip @classmethod and @staticmethod — wrapping breaks descriptors
+            _skip_decorators = {"classmethod", "staticmethod", "property"}
+            if any(
+                (isinstance(d, ast.Name) and d.id in _skip_decorators)
+                or (isinstance(d, ast.Attribute) and d.attr in _skip_decorators)
+                for d in node.decorator_list
+            ):
+                continue
 
             # Insert: func_name = _trickle_wrap(func_name, 'func_name')
             wrap_stmt = ast.Assign(

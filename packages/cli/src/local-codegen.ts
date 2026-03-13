@@ -323,6 +323,7 @@ function typeNodeToTS(
   propName: string | undefined,
   indent: number,
 ): string {
+  if (!node || !node.kind) return "unknown";
   switch (node.kind) {
     case "primitive":
       return node.name || "unknown";
@@ -560,6 +561,7 @@ function typeNodeToPython(
   parentName: string,
   propName: string | undefined,
 ): string {
+  if (!node || !node.kind) return "Any";
   switch (node.kind) {
     case "primitive":
       switch (node.name) {
@@ -614,6 +616,13 @@ function typeNodeToPython(
     case "object": {
       const keys = Object.keys(node.properties || {});
       if (keys.length === 0) return "Dict[str, Any]";
+      // If any key is not a valid Python identifier, fall back to Dict
+      if (keys.some((k) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k))) {
+        const valTypes = [...new Set(keys.slice(0, 4).map((k) =>
+          typeNodeToPython(node.properties![k], extracted, parentName, undefined)))];
+        const valT = valTypes.length === 1 ? valTypes[0] : "Any";
+        return `Dict[str, ${valT}]`;
+      }
       if (propName) {
         const className = toPascalCase(parentName) + toPascalCase(propName);
         if (!extracted.some((e) => e.name === className)) {
@@ -699,9 +708,13 @@ function generatePyForFunction(fn: FunctionTypeData): string {
   const sections: string[] = [];
 
   // Input type
-  if (fn.argsType.kind === "tuple" && fn.argsType.elements?.length === 1 && fn.argsType.elements[0].kind === "object") {
+  const _hasValidObjKeys = (n: TypeNode) => {
+    const ks = Object.keys(n.properties || {});
+    return ks.length > 0 && ks.every((k) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k));
+  };
+  if (fn.argsType.kind === "tuple" && fn.argsType.elements?.length === 1 && fn.argsType.elements[0].kind === "object" && _hasValidObjKeys(fn.argsType.elements[0])) {
     sections.push(renderPythonTypedDict(`${baseName}Input`, fn.argsType.elements[0], extracted));
-  } else if (fn.argsType.kind === "object") {
+  } else if (fn.argsType.kind === "object" && _hasValidObjKeys(fn.argsType)) {
     sections.push(renderPythonTypedDict(`${baseName}Input`, fn.argsType, extracted));
   } else {
     const pyType = typeNodeToPython(fn.argsType, extracted, baseName, undefined);
@@ -711,7 +724,9 @@ function generatePyForFunction(fn: FunctionTypeData): string {
   sections.push("");
 
   // Output type
-  if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties || {}).length > 0) {
+  const retKeys = Object.keys(fn.returnType.properties || {});
+  const retKeysValid = retKeys.every((k) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k));
+  if (fn.returnType.kind === "object" && retKeys.length > 0 && retKeysValid) {
     sections.push(renderPythonTypedDict(`${baseName}Output`, fn.returnType, extracted));
   } else {
     const pyType = typeNodeToPython(fn.returnType, extracted, baseName, undefined);
