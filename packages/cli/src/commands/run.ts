@@ -1021,6 +1021,8 @@ function injectObservation(
     const rest = command.slice(pyMatch[0].length);
     if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
     if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
+    // Auto-enable terminal type summary when running via trickle run
+    if (!process.env.TRICKLE_SUMMARY) env.TRICKLE_SUMMARY = "1";
     return {
       instrumentedCommand: `${python} -c "from trickle.observe_runner import main; main()" ${rest}`,
       env,

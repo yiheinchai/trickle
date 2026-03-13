@@ -710,6 +710,17 @@ def generate_types() -> int:
         # Only include variants if there are 2-5 distinct patterns
         if 2 <= len(variants) <= 5:
             entry["variants"] = variants
+
+        # Filter spurious constructor observations: zero-arg functions returning null
+        # These come from observing dataclass/class __init__ calls via the import hook
+        args_elems = merged_args.get("elements", []) if merged_args.get("kind") == "tuple" else []
+        ret_is_null = (
+            merged_return.get("kind") == "primitive"
+            and merged_return.get("name") == "null"
+        )
+        if ret_is_null and len(args_elems) == 0:
+            continue  # Skip spurious constructor
+
         functions.append(entry)
 
     # Group by module
@@ -1280,6 +1291,13 @@ def generate_type_summary() -> Optional[str]:
             entry["isAsync"] = True
         if param_names:
             entry["paramNames"] = param_names
+
+        # Filter spurious constructor observations: zero-arg → null
+        args_elems = merged_args.get("elements", []) if merged_args.get("kind") == "tuple" else []
+        ret_is_null = merged_return.get("kind") == "primitive" and merged_return.get("name") == "null"
+        if ret_is_null and len(args_elems) == 0:
+            continue
+
         functions.append(entry)
 
     if not functions:

@@ -206,12 +206,14 @@ def _run_generation(is_final: bool) -> None:
             except Exception:
                 pass
             # Print type summary if TRICKLE_SUMMARY=1
-            try:
-                summary = generate_type_summary()
-                if summary:
-                    print(summary)
-            except Exception:
-                pass
+            # (skipped here when _run_summary.py prints the comprehensive summary at exit)
+            if os.environ.get("TRICKLE_SUMMARY") != "1":
+                try:
+                    summary = generate_type_summary()
+                    if summary:
+                        print(summary)
+                except Exception:
+                    pass
     except Exception:
         # Never crash user's app
         pass
@@ -435,6 +437,13 @@ def _exit_handler() -> None:
             generate_types()
         except Exception:
             pass
+
+    # Print terminal type summary if TRICKLE_SUMMARY=1
+    try:
+        from trickle._run_summary import print_run_summary
+        print_run_summary()
+    except Exception:
+        pass
 
 
 atexit.register(_exit_handler)

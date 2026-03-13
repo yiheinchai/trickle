@@ -89,6 +89,30 @@ What is NOT instrumented:
   ✗ Third-party packages (torch, numpy, pandas, etc.)
   ✗ Only your own code is observed
 
+Terminal type output (no VSCode needed):
+─────────────────────────────────────────
+  TRICKLE_SUMMARY=1 python app.py
+
+  After your script finishes, prints a summary of all observed
+  variable types and function signatures directly to the terminal:
+
+    ──────────────────────────────────────────────────────────────
+      trickle: 8 variables | 3 functions typed
+    ──────────────────────────────────────────────────────────────
+      app.py
+        L5   user_id        int           = 42
+        L6   name           str           = "Alice"
+        L9   scores         list[float]
+        L12  result         dict[str, int]
+
+      Functions:
+        process(data: list[float], n: int) → dict[str, int]
+        greet(name: str) → str
+    ──────────────────────────────────────────────────────────────
+
+  Works with import trickle.auto too:
+    TRICKLE_SUMMARY=1 python -c "import trickle.auto; ..."
+
 Advanced options:
 ─────────────────
   # Only observe specific modules
