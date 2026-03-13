@@ -2,18 +2,11 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <general directive>
-Improve on the python developer experience, any arbituary python code (even without framework) can be run and instantly generate inline type hints
+First pick a usecase, get a real world repo from online for that use case. Test trickle on that repo. 
+Find the pain points. Implement features to fix the pain point.
 </general directive>
 
 <focus point>
-
-Next priorities for Python DX:
-
-1. **Improve async generator and context manager type inference** — Async generators return `Iterator[Any]` instead of `AsyncIterator[YieldType]`. Context managers show as `Callable` instead of `ContextManager[YieldType]`. The profile hook doesn't distinguish sync vs async generators.
-
-2. **Improve kwargs rendering in .pyi stubs** — Keyword arguments are captured as a TypedDict element in the args tuple (e.g. `fetch_with_limit(ids, limit=3)` shows `limit: FetchWithLimitLimit`). Should render kwargs as normal keyword parameters with defaults.
-
-3. **Better `List[dataclass]` types** — When a function returns `List[Item]`, the .pyi shows the correct class name, but the elements inside the list aren't typed (e.g. `List[Dict[str, Any]]` for a list of dicts with uniform structure). Could infer and render proper element TypedDicts.
 
 </focus point>
 
