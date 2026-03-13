@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest plugin auto-activates. Model config fields shown inline. Python async support is complete: variables assigned via `await` (including `asyncio.gather()` results) are now correctly traced by fixing the CO_COROUTINE flag detection and using partial pending flush on coroutine suspension events. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace `PretrainedConfig` all supported. HuggingFace configs now show priority fields (vocab_size, hidden_size, n_layer, etc.) inline for any PretrainedConfig subclass (GPT-2, BERT, T5, LLaMA, etc.). Next priorities:
 
-1. HuggingFace integration: when using `transformers` models (e.g., `AutoModelForCausalLM.from_pretrained()`), surface the model config (vocab_size, hidden_size, num_layers, etc.) inline. HuggingFace `PretrainedConfig` is not a dataclass — need to handle `config.to_dict()` or `vars(config)` to extract primitive fields for the constructor-call hint.
+1. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes from `[32, 768]` to `[32, 512]`), surface a warning inline in VSCode — useful for catching shape regressions between training iterations. Implement by comparing typeHash across runs in the VSCode extension and marking changed hints with a visual indicator.
 
-2. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes from `[32, 768]` to `[32, 512]`), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+3. Variable flow across function calls: when a function is called and returns a value, the inline hint for the call site shows the return type but not the intermediate transformations. Consider showing a hover card with the input → output shape transformation (e.g. `Linear(784→10): Tensor[32,784] → Tensor[32,10]`).
 
-4. Improve `asyncio.gather()` result typing: currently shown as `array[][]` (list of lists). When the gather args are known, show more specific types like `[UserDict, PermsList]` for heterogeneous gather calls.
+4. Improve `asyncio.gather()` result typing: currently shown as `array[][]` (list of lists). When gather args are heterogeneous, show more specific per-element types.
 
 </focus point>
 
