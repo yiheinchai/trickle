@@ -154,6 +154,24 @@ interface OptimizerStepRecord {
   timestamp: number;
 }
 
+/** Attention statistics record emitted after each attention softmax call */
+interface AttentionStatsRecord {
+  kind: 'attention_stats';
+  file: string;
+  line: number;
+  n_heads: number;
+  seq_len: number;
+  mean_entropy: number;
+  max_entropy: number;
+  head_entropies: number[];
+  dead_heads: number;
+  sharp_heads: number;
+  mean_max_pos: number;
+  diag_attn: number;
+  call_count: number;
+  timestamp: number;
+}
+
 /** Loss probe record emitted after each loss.backward() call */
 interface LossProbeRecord {
   kind: 'loss_probe';
@@ -249,6 +267,8 @@ let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Ma
 let activationIndex: Map<string, Map<number, ActivationStatsRecord>> = new Map();
 /** Loss probe records: filePath -> lineNo -> LossProbeRecord (latest) */
 let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
+/** Attention statistics: filePath -> lineNo -> AttentionStatsRecord (latest) */
+let attentionIndex: Map<string, Map<number, AttentionStatsRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -592,6 +612,7 @@ function loadAllVariables() {
   throughputIndex.clear();
   activationIndex.clear();
   lossProbeIndex.clear();
+  attentionIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -683,6 +704,20 @@ function loadAllVariables() {
             const existing = lineMap.get(dl.line);
             if (!existing || dl.timestamp > existing.timestamp) {
               lineMap.set(dl.line, dl);
+            }
+            continue;
+          }
+
+          // Handle attention statistics records
+          if (record.kind === 'attention_stats') {
+            const at = record as AttentionStatsRecord;
+            if (!attentionIndex.has(at.file)) {
+              attentionIndex.set(at.file, new Map());
+            }
+            const lineMap = attentionIndex.get(at.file)!;
+            const existing = lineMap.get(at.line);
+            if (!existing || at.timestamp > existing.timestamp) {
+              lineMap.set(at.line, at);
             }
             continue;
           }
@@ -1629,6 +1664,59 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             md.isTrusted = true;
             hint.tooltip = md;
 
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add attention statistics inlay hints at F.softmax / attention call lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const atLines = attentionIndex.get(filePath);
+      if (atLines) {
+        for (const [lineNo, at] of atLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          const entropyPct = at.max_entropy > 0
+            ? Math.round((at.mean_entropy / at.max_entropy) * 100)
+            : 0;
+
+          let label = ` 🎯 H=${at.mean_entropy.toFixed(2)}/${at.max_entropy.toFixed(2)}`;
+          if (at.sharp_heads > 0) label += ` | sharp:${at.sharp_heads}`;
+          if (at.dead_heads > 0) label += ` | dead:${at.dead_heads}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Per-head entropy breakdown
+            const headRows = at.head_entropies.map((h, i) => {
+              const pct = Math.round((h / at.max_entropy) * 100);
+              const flag = h > 0.95 * at.max_entropy ? ' 💤 dead'
+                : h < 0.10 * at.max_entropy ? ' ⚡ sharp' : '';
+              return `head ${i}: \`${h.toFixed(3)}\` (${pct}%${flag})`;
+            });
+
+            const tooltipLines = [
+              `**Heads:** \`${at.n_heads}\` · **Seq len:** \`${at.seq_len}\``,
+              `**Mean entropy:** \`${at.mean_entropy.toFixed(4)}\` / \`${at.max_entropy.toFixed(4)}\` (${entropyPct}% of max)`,
+              `**Sharp heads** (< 10% entropy): \`${at.sharp_heads}\``,
+              `**Dead heads** (> 95% entropy): \`${at.dead_heads}\``,
+              `**Mean max-attended position:** \`${at.mean_max_pos.toFixed(1)}\``,
+              `**Diagonal attention (self):** \`${(at.diag_attn * 100).toFixed(1)}%\``,
+              `\n**Per-head entropy:**\n${headRows.join('\n')}`,
+              `\n*Sampled at call #${at.call_count} by trickle*`,
+            ];
+            const md = new vscode.MarkdownString(
+              `### 🎯 Attention Pattern Stats\n\n` + tooltipLines.join('\n\n'),
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
             hints.push(hint);
           } catch {
             // Skip if line is out of range
