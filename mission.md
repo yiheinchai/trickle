@@ -2,7 +2,7 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS inline type hints are working end-to-end for plain JS, TypeScript, and ESM .mjs files. Real-world multi-file ESM testing confirmed: 21 variables traced across 2 files with correct line numbers, types, and readable sample values. CLI summary now shows "Variables traced: N" instead of confusing "No functions captured". Next priorities:
+JS/TS inline type hints are working end-to-end for plain JS, TypeScript, and ESM .mjs files. Compact type display is fully working: large objects show `{key1, key2, key3, +N}` inline with full type on hover, and arrays of objects now show `{id, name, +N}[]` instead of verbose `object[]`. Next priorities:
 
 1. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). JSX/TSX files aren't yet transformed by the ESM hooks. Approach: detect JSX syntax and strip it before regex-based variable finding, or integrate with a TSX/Babel transform.
 
@@ -12,7 +12,7 @@ JS/TS inline type hints are working end-to-end for plain JS, TypeScript, and ESM
 
 4. Python: better display for dataclasses and NamedTuples — show field names compactly (like JS objects now do) instead of verbose property listings.
 
-5. Better array element type display: currently shows `object[]` for arrays of objects. Should show `{id, name, ...}[]` using the compact format to reveal the element shape inline.
+5. Nested type compaction: when a compact type like `{id, name, +N}[]` is shown, hovering should show the full expanded object shape. Currently the hover tooltip shows the full TypeNode string but may be hard to read for deeply nested types — consider a structured hover card with collapsible sections.
 
 </focus point>
 
