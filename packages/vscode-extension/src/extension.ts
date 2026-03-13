@@ -249,6 +249,16 @@ interface ReactRenderRecord {
   timestamp: number;
 }
 
+/** React hook invocation record emitted by the Vite plugin */
+interface ReactHookRecord {
+  kind: 'react_hook';
+  file: string;
+  line: number;
+  hookName: string;
+  invokeCount: number;
+  timestamp: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -283,6 +293,8 @@ let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
 let attentionIndex: Map<string, Map<number, AttentionStatsRecord>> = new Map();
 /** React render counts: filePath -> lineNo -> ReactRenderRecord (latest) */
 let reactRenderIndex: Map<string, Map<number, ReactRenderRecord>> = new Map();
+/** React hook invocation counts: filePath -> lineNo -> ReactHookRecord (latest) */
+let reactHookIndex: Map<string, Map<number, ReactHookRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -628,6 +640,7 @@ function loadAllVariables() {
   lossProbeIndex.clear();
   attentionIndex.clear();
   reactRenderIndex.clear();
+  reactHookIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -761,6 +774,20 @@ function loadAllVariables() {
             const existing = lineMap.get(ac.line);
             if (!existing || ac.timestamp > existing.timestamp) {
               lineMap.set(ac.line, ac);
+            }
+            continue;
+          }
+
+          // Handle React hook invocation records
+          if (record.kind === 'react_hook') {
+            const rh = record as ReactHookRecord;
+            if (!reactHookIndex.has(rh.file)) {
+              reactHookIndex.set(rh.file, new Map());
+            }
+            const lineMap = reactHookIndex.get(rh.file)!;
+            const existing = lineMap.get(rh.line);
+            if (!existing || rh.invokeCount > existing.invokeCount) {
+              lineMap.set(rh.line, rh);
             }
             continue;
           }
@@ -1878,6 +1905,55 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             md.isTrusted = true;
             hint.tooltip = md;
 
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add React hook invocation count inlay hints
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const rhLines = reactHookIndex.get(filePath);
+      if (rhLines) {
+        for (const [lineNo, rh] of rhLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          const hookIcon: Record<string, string> = {
+            useEffect: '⚡',
+            useMemo: '💾',
+            useCallback: '🎯',
+          };
+          const hookVerb: Record<string, string> = {
+            useEffect: 'ran',
+            useMemo: 'computed',
+            useCallback: 'called',
+          };
+          const icon = hookIcon[rh.hookName] ?? '🪝';
+          const verb = hookVerb[rh.hookName] ?? 'invoked';
+          const label = ` ${icon} ${verb} ×${rh.invokeCount}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const tipByHook: Record<string, string> = {
+              useEffect: 'Each invocation = effect ran (deps changed or first mount)',
+              useMemo: 'Each invocation = cache miss (expensive value recomputed)',
+              useCallback: 'Each invocation = callback was actually called by user code',
+            };
+            const md = new vscode.MarkdownString(
+              `### ${icon} \`${rh.hookName}\` Hook Invocations\n\n` +
+              `**${verb.charAt(0).toUpperCase() + verb.slice(1)}:** \`${rh.invokeCount}×\`\n\n` +
+              `${tipByHook[rh.hookName] ?? ''}\n\n` +
+              `*Tracked by trickle (cumulative since dev server start)*`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
             hints.push(hint);
           } catch {
             // Skip if line is out of range

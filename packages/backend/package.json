@@ -1,6 +1,6 @@
 {
   "name": "trickle-backend",
-  "version": "0.1.56",
+  "version": "0.1.59",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

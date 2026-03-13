@@ -201,3 +201,69 @@ describe('Correct function body brace detection', () => {
     assert.ok(wrapIdx > bodyIdx, 'function wrap should be after the function body');
   });
 });
+
+// ── React hook observability ──────────────────────────────────────────────────
+
+describe('React hook observability', () => {
+  it('wraps useEffect callback with __trickle_hw', () => {
+    const code = `function App() {\n  useEffect(() => {\n    console.log('hi');\n  }, []);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_hw'), 'should inject hook wrapper');
+    assert.ok(out!.includes('"useEffect"'), 'should include hook name');
+  });
+
+  it('wraps useMemo callback with __trickle_hw', () => {
+    const code = `function App() {\n  const val = useMemo(() => {\n    return expensive();\n  }, [dep]);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_hw'), 'should inject hook wrapper');
+    assert.ok(out!.includes('"useMemo"'), 'should include hook name');
+  });
+
+  it('wraps useCallback callback with __trickle_hw', () => {
+    const code = `function App() {\n  const fn = useCallback(() => {\n    doSomething();\n  }, [dep]);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_hw'), 'should inject hook wrapper');
+    assert.ok(out!.includes('"useCallback"'), 'should include hook name');
+  });
+
+  it('wraps all three hook types in the same component', () => {
+    const code = [
+      `function Dashboard() {`,
+      `  useEffect(() => { fetch('/api'); }, []);`,
+      `  const data = useMemo(() => { return transform(raw); }, [raw]);`,
+      `  const handler = useCallback(() => { handleClick(); }, []);`,
+      `  return null;`,
+      `}`,
+    ].join('\n');
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    const hwCount = (out!.match(/__trickle_hw/g) || []).length;
+    // preamble definition + 3 call sites = 4 occurrences
+    assert.ok(hwCount >= 4, `should have at least 4 __trickle_hw occurrences (preamble + 3 wraps), got ${hwCount}`);
+  });
+
+  it('includes react_hook kind in emitted record code', () => {
+    const code = `function App() {\n  useEffect(() => {\n    console.log('hi');\n  }, []);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes("'react_hook'"), 'emitted record should have kind react_hook');
+  });
+
+  it('does NOT inject hook tracking in .ts files', () => {
+    const code = `function helper() {\n  useEffect(() => { doStuff(); }, []);\n  return null;\n}`;
+    const out = transformTs(code);
+    if (out) {
+      assert.ok(!out.includes('__trickle_hw'), 'should NOT inject hook tracker in .ts files');
+    }
+  });
+
+  it('wraps useEffect with single identifier param callback', () => {
+    const code = `function App() {\n  useEffect(function() {\n    console.log('hi');\n  }, []);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_hw'), 'should inject hook wrapper for function() {} form');
+  });
+});

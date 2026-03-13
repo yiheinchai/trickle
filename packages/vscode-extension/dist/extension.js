@@ -64,6 +64,8 @@ let lossProbeIndex = new Map();
 let attentionIndex = new Map();
 /** React render counts: filePath -> lineNo -> ReactRenderRecord (latest) */
 let reactRenderIndex = new Map();
+/** React hook invocation counts: filePath -> lineNo -> ReactHookRecord (latest) */
+let reactHookIndex = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex = new Map();
 let fileWatcher;
@@ -377,6 +379,7 @@ function loadAllVariables() {
     lossProbeIndex.clear();
     attentionIndex.clear();
     reactRenderIndex.clear();
+    reactHookIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -499,6 +502,19 @@ function loadAllVariables() {
                         const existing = lineMap.get(ac.line);
                         if (!existing || ac.timestamp > existing.timestamp) {
                             lineMap.set(ac.line, ac);
+                        }
+                        continue;
+                    }
+                    // Handle React hook invocation records
+                    if (record.kind === 'react_hook') {
+                        const rh = record;
+                        if (!reactHookIndex.has(rh.file)) {
+                            reactHookIndex.set(rh.file, new Map());
+                        }
+                        const lineMap = reactHookIndex.get(rh.file);
+                        const existing = lineMap.get(rh.line);
+                        if (!existing || rh.invokeCount > existing.invokeCount) {
+                            lineMap.set(rh.line, rh);
                         }
                         continue;
                     }
@@ -1543,6 +1559,51 @@ class TrickleInlayHintsProvider {
                 }
             }
         }
+        // Add React hook invocation count inlay hints
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const rhLines = reactHookIndex.get(filePath);
+            if (rhLines) {
+                for (const [lineNo, rh] of rhLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    const hookIcon = {
+                        useEffect: '⚡',
+                        useMemo: '💾',
+                        useCallback: '🎯',
+                    };
+                    const hookVerb = {
+                        useEffect: 'ran',
+                        useMemo: 'computed',
+                        useCallback: 'called',
+                    };
+                    const icon = hookIcon[rh.hookName] ?? '🪝';
+                    const verb = hookVerb[rh.hookName] ?? 'invoked';
+                    const label = ` ${icon} ${verb} ×${rh.invokeCount}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const tipByHook = {
+                            useEffect: 'Each invocation = effect ran (deps changed or first mount)',
+                            useMemo: 'Each invocation = cache miss (expensive value recomputed)',
+                            useCallback: 'Each invocation = callback was actually called by user code',
+                        };
+                        const md = new vscode.MarkdownString(`### ${icon} \`${rh.hookName}\` Hook Invocations\n\n` +
+                            `**${verb.charAt(0).toUpperCase() + verb.slice(1)}:** \`${rh.invokeCount}×\`\n\n` +
+                            `${tipByHook[rh.hookName] ?? ''}\n\n` +
+                            `*Tracked by trickle (cumulative since dev server start)*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
         // Add React component render count inlay hints
         if (document.uri.scheme === 'file') {
             const filePath = document.uri.fsPath;
@@ -1551,16 +1612,44 @@ class TrickleInlayHintsProvider {
                 for (const [lineNo, rr] of rrLines) {
                     if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
                         continue;
-                    const label = ` 🔄 ×${rr.renderCount} renders`;
+                    // Build compact prop summary for label
+                    let propSummary = '';
+                    if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
+                        const MAX_PROPS = 3;
+                        const shown = rr.propKeys.slice(0, MAX_PROPS).map(k => {
+                            const v = rr.props[k];
+                            if (typeof v === 'string')
+                                return `${k}="${v.length > 12 ? v.slice(0, 12) + '…' : v}"`;
+                            if (typeof v === 'number' || typeof v === 'boolean')
+                                return `${k}=${v}`;
+                            if (v === null || v === undefined)
+                                return `${k}=${v}`;
+                            return `${k}=…`;
+                        });
+                        propSummary = ` | ${shown.join(' ')}`;
+                        if (rr.propKeys.length > MAX_PROPS)
+                            propSummary += ` +${rr.propKeys.length - MAX_PROPS}`;
+                    }
+                    const label = ` 🔄 ×${rr.renderCount}${propSummary}`;
                     try {
                         const line = document.lineAt(lineNo - 1);
                         const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
                         const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
                         hint.paddingLeft = true;
-                        const md = new vscode.MarkdownString(`### 🔄 React Component Renders\n\n` +
-                            `**Component:** \`${rr.component}\`\n\n` +
-                            `**Render count:** \`${rr.renderCount}\`\n\n` +
-                            `*Tracked by trickle (cumulative since dev server start)*`);
+                        const tooltipLines = [
+                            `**Component:** \`${rr.component}\``,
+                            `**Render count:** \`${rr.renderCount}\``,
+                        ];
+                        if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
+                            const propRows = rr.propKeys.map(k => {
+                                const v = rr.props[k];
+                                const display = typeof v === 'string' ? `"${v}"` : String(v);
+                                return `- **\`${k}\`**: \`${display}\``;
+                            });
+                            tooltipLines.push(`**Props (last render):**\n${propRows.join('\n')}`);
+                        }
+                        tooltipLines.push('*Tracked by trickle (cumulative since dev server start)*');
+                        const md = new vscode.MarkdownString(`### 🔄 React Component Renders\n\n` + tooltipLines.join('\n\n'));
                         md.isTrusted = true;
                         hint.tooltip = md;
                         hints.push(hint);

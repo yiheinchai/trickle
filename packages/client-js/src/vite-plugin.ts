@@ -607,13 +607,87 @@ function transformEsmSource(
 
 
 
+  // React hook tracking — wrap the callback arg of useEffect/useMemo/useCallback
+  // to count how many times each hook fires (effect ran, memo recomputed, callback invoked).
+  // Each hook produces TWO insertions: wrapStart (before callback) and wrapEnd (after callback `}`).
+  interface HookInsertion { wrapStart: number; wrapEnd: number; hookName: string; lineNo: number }
+  const hookInsertions: HookInsertion[] = [];
+
+  if (isReactFile) {
+    // Match useEffect(, useMemo(, useCallback( — also handles React.useEffect(, etc.
+    const hookCallRegex = /\b(useEffect|useMemo|useCallback)\s*\(/g;
+    let hookMatch;
+    while ((hookMatch = hookCallRegex.exec(source)) !== null) {
+      const hookName = hookMatch[1];
+      const afterParen = hookMatch.index + hookMatch[0].length;
+
+      // Skip past optional 'async '
+      let pos = afterParen;
+      while (pos < source.length && (source[pos] === ' ' || source[pos] === '\t' || source[pos] === '\n')) pos++;
+      if (source.slice(pos, pos + 6) === 'async ') {
+        pos += 6;
+        while (pos < source.length && (source[pos] === ' ' || source[pos] === '\t')) pos++;
+      }
+
+      // Expect a callback: arrow fn `(` or `identifier =>` or `function`
+      if (source[pos] !== '(' && !/^[a-zA-Z_$]/.test(source[pos]) && source.slice(pos, pos + 8) !== 'function') continue;
+
+      // Find the opening `{` of the callback body depending on callback form:
+      // 1. Arrow with parens: (x, y) => {  — call findFunctionBodyBrace from inside the (
+      // 2. Named/anon function: function() {  — find the ( first
+      // 3. Single identifier: props => {  — skip identifier, find =>, find {
+      let callbackBodyBrace = -1;
+      if (source[pos] === '(') {
+        // Arrow function with param list: () => { ... } or (x) => { ... }
+        callbackBodyBrace = findFunctionBodyBrace(source, pos + 1);
+      } else if (source.slice(pos, pos + 8) === 'function') {
+        // function() {} or function name() {}
+        let funcPos = pos + 8;
+        while (funcPos < source.length && /\s/.test(source[funcPos])) funcPos++;
+        if (/[a-zA-Z_$]/.test(source[funcPos])) {
+          while (funcPos < source.length && /[a-zA-Z0-9_$]/.test(source[funcPos])) funcPos++;
+        }
+        while (funcPos < source.length && source[funcPos] !== '(') funcPos++;
+        if (funcPos < source.length) {
+          callbackBodyBrace = findFunctionBodyBrace(source, funcPos + 1);
+        }
+      } else {
+        // Single identifier param: props => { ... }
+        let idEnd = pos;
+        while (idEnd < source.length && /[a-zA-Z0-9_$]/.test(source[idEnd])) idEnd++;
+        let arrowPos = idEnd;
+        while (arrowPos < source.length && (source[arrowPos] === ' ' || source[arrowPos] === '\t')) arrowPos++;
+        if (source.slice(arrowPos, arrowPos + 2) === '=>') {
+          arrowPos += 2;
+          while (arrowPos < source.length && (source[arrowPos] === ' ' || source[arrowPos] === '\t' || source[arrowPos] === '\n')) arrowPos++;
+          if (source[arrowPos] === '{') callbackBodyBrace = arrowPos;
+        }
+      }
+      if (callbackBodyBrace === -1) continue;
+
+      // Verify nothing suspicious between pos and the `{` (no semicolons, no other hook calls)
+      const between = source.slice(pos, callbackBodyBrace);
+      if (between.includes(';') || /\buseEffect\b|\buseMemo\b|\buseCallback\b/.test(between)) continue;
+
+      const closeBrace = findClosingBrace(source, callbackBodyBrace);
+      if (closeBrace === -1) continue;
+
+      let lineNo = 1;
+      for (let i = 0; i < hookMatch.index; i++) {
+        if (source[i] === '\n') lineNo++;
+      }
+
+      hookInsertions.push({ wrapStart: afterParen, wrapEnd: closeBrace + 1, hookName, lineNo });
+    }
+  }
+
   // Find variable declarations for tracing
   const varInsertions = traceVars ? findVarDeclarations(source) : [];
 
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -638,7 +712,7 @@ function transformEsmSource(
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0) {
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -758,6 +832,27 @@ function transformEsmSource(
     );
   }
 
+  // Add React hook tracker if needed
+  if (hookInsertions.length > 0) {
+    prefixLines.push(
+      `if (!globalThis.__trickle_hook_counts) { globalThis.__trickle_hook_counts = new Map(); }`,
+      `function __trickle_hw(hookName, line, cb) {`,
+      `  return function(...args) {`,
+      `    try {`,
+      `      const key = ${JSON.stringify(filename)} + ':' + line + ':' + hookName;`,
+      `      const n = (globalThis.__trickle_hook_counts.get(key) || 0) + 1;`,
+      `      globalThis.__trickle_hook_counts.set(key, n);`,
+      `      const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
+      `      try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e2) {}`,
+      `      __trickle_appendFileSync(__trickle_join(dir, 'variables.jsonl'),`,
+      `        JSON.stringify({ kind: 'react_hook', hookName, file: ${JSON.stringify(filename)}, line, invokeCount: n, timestamp: Date.now() / 1000 }) + '\\n');`,
+      `    } catch(e) {}`,
+      `    return cb(...args);`,
+      `  };`,
+      `}`,
+    );
+  }
+
   prefixLines.push('');
   const prefix = prefixLines.join('\n');
 
@@ -793,6 +888,12 @@ function transformEsmSource(
       position,
       code: `\ntry{__trickle_rc(${JSON.stringify(name)},${lineNo},${propsExpr})}catch(__e){}\n`,
     });
+  }
+
+  // Hook insertions: each hook needs TWO insertions (wrapper start before callback, `)` after)
+  for (const { wrapStart, wrapEnd, hookName, lineNo } of hookInsertions) {
+    allInsertions.push({ position: wrapStart, code: `__trickle_hw(${JSON.stringify(hookName)},${lineNo},` });
+    allInsertions.push({ position: wrapEnd, code: `)` });
   }
 
   // Sort by position descending (insert from end to preserve earlier positions)
