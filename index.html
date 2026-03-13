@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>trickle - Runtime Type Observability for JS &amp; Python</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --green: #3fb950;
+      --purple: #bc8cff;
+      --orange: #d29922;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+    .hero {
+      text-align: center;
+      padding: 80px 20px 60px;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .hero h1 {
+      font-size: 3rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 32px;
+    }
+    .hero-code {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.95rem;
+      text-align: left;
+      max-width: 500px;
+      margin: 0 auto 32px;
+      color: var(--text-muted);
+    }
+    .hero-code .cmd { color: var(--green); }
+    .hero-code .comment { color: var(--text-muted); }
+    .cta-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .cta {
+      display: inline-block;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: all 0.15s;
+    }
+    .cta-primary {
+      background: var(--accent);
+      color: var(--bg);
+    }
+    .cta-primary:hover { background: var(--accent-hover); text-decoration: none; }
+    .cta-secondary {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .cta-secondary:hover { border-color: var(--text-muted); text-decoration: none; }
+
+    .roles {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+    .roles h2 {
+      text-align: center;
+      font-size: 1.75rem;
+      margin-bottom: 40px;
+      color: var(--text);
+    }
+    .role-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
+    }
+    .role-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      transition: border-color 0.15s;
+    }
+    .role-card:hover { border-color: var(--accent); }
+    .role-card h3 {
+      font-size: 1.1rem;
+      margin-bottom: 8px;
+    }
+    .role-card .pain {
+      color: var(--text-muted);
+      font-style: italic;
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+    }
+    .role-card .solution {
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+    }
+    .role-card code {
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 0.85rem;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    }
+    .role-card .link {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+
+    .install {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 0 20px 80px;
+      text-align: center;
+    }
+    .install h2 {
+      font-size: 1.75rem;
+      margin-bottom: 24px;
+    }
+    .install-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      text-align: left;
+    }
+    .install-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+    }
+    .install-box h4 {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .install-box code {
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.9rem;
+      color: var(--green);
+    }
+
+    footer {
+      text-align: center;
+      padding: 40px 20px;
+      border-top: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+
+<section class="hero">
+  <h1><span>trickle</span></h1>
+  <p>Runtime type observability for JavaScript and Python. Run your code, get types in your IDE automatically.</p>
+  <div class="hero-code">
+    <span class="comment"># One command. Types appear in VSCode.</span><br>
+    <span class="cmd">trickle run python app.py</span>
+  </div>
+  <div class="cta-row">
+    <a href="https://github.com/yiheinchai/trickle" class="cta cta-primary">View on GitHub</a>
+    <a href="https://pypi.org/project/trickle-observe/" class="cta cta-secondary">pip install trickle-observe</a>
+    <a href="https://www.npmjs.com/package/trickle-observe" class="cta cta-secondary">npm i trickle-observe</a>
+  </div>
+</section>
+
+<section class="roles">
+  <h2>Find your use case</h2>
+  <div class="role-grid">
+    <div class="role-card">
+      <h3>ML Engineers</h3>
+      <div class="pain">"I'm tired of printing tensor shapes everywhere."</div>
+      <div class="solution">
+        <code>%load_ext trickle</code> in Jupyter. See tensor shapes, model params, loss trends inline. No more <code>print(x.shape)</code>.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/ml-engineer.md" class="link">ML Engineer Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>Python Developers</h3>
+      <div class="pain">"I have untyped Python code and don't want to annotate it manually."</div>
+      <div class="solution">
+        <code>import trickle.auto</code> &mdash; run your code, get <code>.pyi</code> stubs with full type signatures. IDE autocomplete works immediately.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/python-developer.md" class="link">Python Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>Frontend Developers</h3>
+      <div class="pain">"The backend ships endpoints faster than docs."</div>
+      <div class="solution">
+        Generate typed API clients, React Query hooks, and SWR hooks from real API traffic. Always in sync.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/frontend-developer.md" class="link">Frontend Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>Backend / API Developers</h3>
+      <div class="pain">"I want OpenAPI specs without maintaining them by hand."</div>
+      <div class="solution">
+        <code>trickle run node app.js</code> &mdash; types, OpenAPI specs, and validation schemas generated from real traffic.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/backend-api-developer.md" class="link">Backend Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>Full-Stack Developers</h3>
+      <div class="pain">"I maintain types in two places and they drift."</div>
+      <div class="solution">
+        <code>trickle dev</code> &mdash; end-to-end type safety. Backend response changes automatically update frontend types.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/fullstack-developer.md" class="link">Full-Stack Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>DevOps / CI Engineers</h3>
+      <div class="pain">"Breaking API changes reach prod before we catch them."</div>
+      <div class="solution">
+        <code>trickle check --against baseline.json</code> in CI. Exits non-zero on breaking type changes.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/devops-ci.md" class="link">DevOps Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>QA / Test Engineers</h3>
+      <div class="pain">"I'm hand-writing contract tests for every API change."</div>
+      <div class="solution">
+        Automatic regression detection and test generation from real API types. No manual contract tests.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/qa-engineer.md" class="link">QA Guide &rarr;</a>
+    </div>
+    <div class="role-card">
+      <h3>Legacy Codebase</h3>
+      <div class="pain">"I inherited code with no docs, no types, no tests."</div>
+      <div class="solution">
+        Run the app through trickle. Discover all endpoints, data shapes, and dependencies from runtime behavior.
+      </div>
+      <a href="https://github.com/yiheinchai/trickle/blob/main/usecases/legacy-codebase.md" class="link">Legacy Guide &rarr;</a>
+    </div>
+  </div>
+</section>
+
+<section class="install">
+  <h2>Get Started</h2>
+  <div class="install-grid">
+    <div class="install-box">
+      <h4>Python</h4>
+      <code>pip install trickle-observe</code>
+    </div>
+    <div class="install-box">
+      <h4>JavaScript / TypeScript</h4>
+      <code>npm i trickle-observe</code>
+    </div>
+    <div class="install-box">
+      <h4>CLI Tools</h4>
+      <code>npm i -g trickle-cli</code>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>MIT License &middot; <a href="https://github.com/yiheinchai/trickle">GitHub</a> &middot; <a href="https://pypi.org/project/trickle-observe/">PyPI</a> &middot; <a href="https://www.npmjs.com/package/trickle-observe">npm</a></p>
+</footer>
+
+</body>
+</html>
