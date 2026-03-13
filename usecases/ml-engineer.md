@@ -301,3 +301,67 @@ All three work with just `pip install trickle-observe`.
 - **Re-run cells freely**: The extension matches cells by content, so editing and re-running a cell updates hints correctly without restarting the kernel.
 - **Exclude noisy modules**: `TRICKLE_OBSERVE_EXCLUDE=data_utils,logging trickle run train.py`
 - **Check the status bar**: You should see "Trickle: N vars" in VSCode. If not, the extension isn't finding `.trickle/variables.jsonl` — make sure VSCode's workspace folder matches where you ran the code.
+
+---
+
+## Use Case 7: pytest — See Types While Writing Model Tests
+
+When you install `trickle-observe`, the pytest plugin activates automatically for every `pytest` run. No configuration needed — just write your tests and run them.
+
+```bash
+pip install trickle-observe
+pytest tests/test_model.py -v
+```
+
+Open any test file in VSCode — variable types appear inline as you write tests:
+
+```python
+# tests/test_model.py
+import pytest
+import torch
+from model import GPTConfig, GPT
+
+@pytest.fixture
+def small_config():
+    return GPTConfig(block_size=32, vocab_size=128, n_layer=2, n_head=2, n_embd=64)
+
+def test_model_init(small_config):
+    model = GPT(small_config)
+    # → model: GPT{training, params, memory}
+
+    n_params = model.get_num_params()
+    # → n_params: 106816
+
+    param_list = list(model.parameters())
+    # → param_list: Parameter[]
+
+def test_forward_pass(small_config):
+    model = GPT(small_config)
+    idx = torch.randint(0, small_config.vocab_size, (2, 16))
+    # → idx: Tensor[2, 16] int64
+
+    logits, loss = model(idx, idx)
+    # → logits: Tensor[2, 16, 128] float32
+    # → loss: Tensor[] float32
+
+    loss_val = loss.item()
+    # → loss_val: 4.8732
+
+def test_generate(small_config):
+    model = GPT(small_config)
+    model.eval()
+    prompt = torch.zeros((1, 4), dtype=torch.long)
+    generated = model.generate(prompt, max_new_tokens=8)
+    # → generated: Tensor[1, 12] int64
+
+    gen_shape = generated.shape
+    # → gen_shape: (1, 12)
+```
+
+**What gets traced automatically:**
+- All `const`/`let`-style local variable assignments in test functions
+- Function parameters (e.g., `small_config` from the fixture)
+- Tensor shapes, dtypes, and actual scalar values
+- Model objects showing their class and key attributes
+
+**Opt out** if needed: `TRICKLE_TRACE_VARS=0 pytest` or add `-p no:trickle` to your pytest invocation.

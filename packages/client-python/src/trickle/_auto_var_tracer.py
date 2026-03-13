@@ -436,3 +436,48 @@ def install() -> None:
     debug = os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
     if debug:
         print(f"[trickle.auto] Variable tracer installed: {len(assignments)} assignment lines in {os.path.basename(_entry_file)}")
+
+
+def _activate() -> None:
+    """Activate sys.settrace without entry-file discovery (used by pytest plugin)."""
+    global _installed, _old_trace, _infer_type
+
+    if _installed:
+        return
+    _installed = True
+
+    if _infer_type is None:
+        from trickle.type_inference import infer_type
+        _infer_type = infer_type
+
+    _old_trace = sys.gettrace()
+    sys.settrace(_global_trace)
+
+
+def install_files(file_paths: List[str]) -> None:
+    """Register additional source files for variable tracing.
+
+    Parses each file's AST to find assignment lines, then activates
+    sys.settrace if not already running. Designed for use by the pytest plugin.
+    """
+    for fpath in file_paths:
+        if fpath in _assignment_map:
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                source = f.read()
+        except Exception:
+            continue
+
+        assignments, func_ctx = _parse_assignments(source, fpath)
+        if assignments:
+            _assignment_map[fpath] = assignments
+            _func_context[fpath] = func_ctx
+
+    if file_paths:
+        _activate()
+
+    debug = os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
+    if debug:
+        registered = [p for p in file_paths if p in _assignment_map]
+        print(f"[trickle] install_files: registered {len(registered)}/{len(file_paths)} files")
