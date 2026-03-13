@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Zero-config VSCode inline hints for arbitrary Python scripts** — Test on diverse real-world Python repos (Django apps, FastAPI, data processing scripts, Karpathy's GPT-2, etc.). Verify the full loop: `import trickle.auto` → run → open file in VSCode → see inline hints. Fix any gaps (data not flushed, hints not appearing, edge cases with generators/properties/class methods/decorators).
+1. **Type hints in terminal output** — For scripts run via `trickle run python script.py` or with `TRICKLE_SUMMARY=1`, print a summary of inferred types and variable values to stdout after the script finishes. Make it instant: no VSCode needed, just run your script and see what types were observed.
 
-2. **`trickle python setup` CLI command** — Similar to `trickle rn setup` and `trickle next setup`: print step-by-step setup instructions for the Python experience (install, choose approach A/B/C, open VSCode, see hints).
+2. **Test on more real-world Python repos** — Test on Django views, SQLAlchemy models, numpy/pandas data pipelines, async code (asyncio/aiohttp). Verify edge cases: generators, properties, class methods with decorators, context managers, unpacking assignments (`a, b = func()`).
 
-3. **Type hints in terminal output** — For scripts run via `trickle run python script.py`, print a summary of inferred types to stdout after the script finishes (similar to `printObservations()` for Lambda). This makes the experience "instant" without needing VSCode at all.
+3. **Improve type hint quality** — The `.pyi` stubs currently show spurious zero-arg functions from dataclass `__init__` observations. Filter these out. Also improve: multi-call overload merging (show the union type when a function is called with different arg types), better `List[dataclass]` types instead of `List[Dict[str, Any]]`.
 
 </focus point>
 
