@@ -768,3 +768,31 @@ max: 5.30e+00 · min: 6.60e-07
 ```
 
 **How it works:** `trickle.auto` patches `torch.Tensor.backward()`. After each backward pass it walks the caller's frame locals to find `nn.Module` instances, calls `model.named_parameters()` to compute per-parameter gradient norms, groups by module path (e.g. `layers.0`), then writes a `kind: "gradient"` record to `.trickle/variables.jsonl`. The VSCode extension reads this and shows it as an inlay hint at the exact `backward()` call line.
+
+---
+
+## Use Case 18: Multi-File Variable Tracing
+
+**User:** ML engineer with a modular codebase: `train.py` (entry), `model.py` (architecture), `data.py` (dataloader).
+
+**Before trickle:** Inline hints only appeared in `train.py`. Variables defined inside `model.py` (like `self.n_embd`, `hidden_states`, `attention_weights`) showed no hints even with `trickle.auto`.
+
+**With trickle:**
+```python
+# train.py
+import trickle.auto  # one line
+from model import GPT  # <-- model.py now ALSO gets inline hints
+
+model = GPT(vocab_size=50257, n_embd=768, n_layer=12)
+```
+
+```python
+# model.py (no trickle import needed)
+class GPT(nn.Module):
+    def __init__(self, vocab_size, n_embd, n_layer):
+        self.vocab_size = vocab_size  # ← inline hint: integer = 50257
+        self.n_embd = n_embd          # ← inline hint: integer = 768
+        self.n_layer = n_layer        # ← inline hint: integer = 12
+```
+
+**How it works:** The import hook in `trickle.auto` already wraps function calls in imported user modules for type inference. Multi-file tracing adds one more step: when a user module is imported, its source file is parsed by the AST variable tracer and registered in the assignment map. The existing `sys.settrace`-based global trace then picks it up automatically — no changes to `model.py` or any imported file required.
