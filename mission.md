@@ -2,8 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-the typescript/javascript developer experience, thinking through the React developer customer journey and usecases, for both react frontned, nextjs, vite, react native, AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+Focus on the typescript/javascript developer experience, thinking through the React developer customer journey and usecases, for both React frontend, Next.js, Vite, and React Native. Python ML observability (type hints, training loop, gradients, activations, loss probing, attention stats, etc.) is already well-covered. Next priorities:
 
+1. React component observability: show prop types, state shapes, and re-render counts as inline hints on component definitions — zero instrumentation required.
+
+2. Next.js API route observability: capture request/response shapes, latency, and error rates for API routes, showing them as inlay hints on route handler lines.
+
+3. React Native performance: track component render times, JS thread FPS, and bridge call counts as inlay hints during development.
+
+4. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
 </focus point>
 

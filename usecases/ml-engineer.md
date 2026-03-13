@@ -1102,3 +1102,45 @@ Tracked by trickle (20-step rolling window)
 - **increasing**: positive linear trend slope
 - **diverging**: NaN/inf detected
 - **decreasing**: healthy negative trend
+
+---
+
+## Use Case 27: Attention Pattern Visualization
+
+**User:** ML engineer training a transformer who suspects some attention heads have collapsed to uniform distributions (dead heads) or are over-focusing on single tokens (sharp heads), but doesn't want to add custom attention visualization code.
+
+**Before trickle:** Must add `print(att.mean(0).mean(0))` inside the attention module, or write a separate script to plot attention heatmaps with matplotlib.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+class CausalSelfAttention(nn.Module):
+    def forward(self, x):
+        ...
+        att = F.softmax(att, dim=-1)  # 🎯 H=2.50/3.47 | sharp:2 | dead:1
+        y = att @ v
+        return self.c_proj(y)
+```
+
+Hover tooltip shows full per-head breakdown:
+```
+🎯 Attention Pattern Stats
+
+Heads: 8  ·  Seq len: 512
+Mean entropy: 2.5021 / 3.4657 (72% of max)
+Sharp heads (< 10% entropy): 2
+Dead heads (> 95% entropy): 1
+Mean max-attended position: 128.3
+Diagonal attention (self): 12.5%
+
+Per-head entropy:
+head 0: 0.234 (7%) ⚡ sharp
+head 1: 3.412 (98%) 💤 dead
+head 2: 2.891 (83%)
+...
+
+Sampled at call #20 by trickle
+```
+
+**How it works:** `trickle.auto` patches `torch.nn.functional.softmax`. When softmax is called on a 4-D tensor with shape `(B, H, T, T)` — the signature of self-attention weights — the hook captures the result. It computes per-head entropy (`H = -Σ p·log(p)`), classifies heads as dead (entropy > 95% of log(T)) or sharp (entropy < 10% of log(T)), and records mean max-attended position and diagonal attention fraction. Rate-limited to every 20 calls per line (`TRICKLE_ATT_EVERY` to tune). Works with any attention implementation that uses `F.softmax`: nanoGPT, custom transformers, nn.MultiheadAttention.
