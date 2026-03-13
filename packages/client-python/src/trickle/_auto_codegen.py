@@ -563,6 +563,8 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     # Generate overloads if we have multiple distinct type patterns
     variants = fn.get("variants")
     if variants and len(variants) >= 2:
+        seen_sigs: Set[str] = set()
+        overload_lines: List[str] = []
         for variant in variants:
             v_args = variant["argsType"]
             v_ret = variant["returnType"]
@@ -580,8 +582,14 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
                     pname = v_names[idx] if idx < len(v_names) else f"arg{idx}"
                     py_type = _type_to_python(el, v_ext, base_name, pname)
                     v_params.append(f"{pname}: {py_type}")
-            result.append("@overload")
-            result.append(f"{v_def} {func_name}({', '.join(v_params)}) -> {v_ret_str}: ...")
+            sig = f"{v_def} {func_name}({', '.join(v_params)}) -> {v_ret_str}: ..."
+            if sig not in seen_sigs:
+                seen_sigs.add(sig)
+                overload_lines.append("@overload")
+                overload_lines.append(sig)
+        # Only emit overloads if we have 2+ distinct rendered signatures
+        if len(seen_sigs) >= 2:
+            result.extend(overload_lines)
 
         # Implementation signature (merged types)
         if args_type.get("kind") == "tuple":

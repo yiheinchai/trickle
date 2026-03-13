@@ -297,6 +297,13 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _hf_dataset_dict_type is not None and isinstance(value, _hf_dataset_dict_type):
         return _infer_hf_dataset_dict(value)
 
+    # --- Generator / iterator objects ---
+    # These have gi_frame, gi_code (generators) or similar internals that
+    # should NOT be serialized.  Just represent as the class name.
+    import types as _types
+    if isinstance(value, (_types.GeneratorType, _types.AsyncGeneratorType)):
+        return {"kind": "primitive", "name": "Generator"}
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
