@@ -50,8 +50,20 @@ let gradientIndex = new Map();
 let checkpointIndex = new Map();
 /** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
 let lrScheduleIndex = new Map();
+/** Optimizer step records: filePath -> lineNo -> OptimizerStepRecord (latest) */
+let optimizerIndex = new Map();
 /** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
 let dataloaderIndex = new Map();
+/** Training throughput: filePath -> lineNo -> TrainingThroughputRecord (latest) */
+let throughputIndex = new Map();
+/** Activation statistics: filePath -> lineNo -> ActivationStatsRecord (latest) */
+let activationIndex = new Map();
+/** Loss probe records: filePath -> lineNo -> LossProbeRecord (latest) */
+let lossProbeIndex = new Map();
+/** Attention statistics: filePath -> lineNo -> AttentionStatsRecord (latest) */
+let attentionIndex = new Map();
+/** React render counts: filePath -> lineNo -> ReactRenderRecord (latest) */
+let reactRenderIndex = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex = new Map();
 let fileWatcher;
@@ -359,6 +371,12 @@ function loadAllVariables() {
     checkpointIndex.clear();
     lrScheduleIndex.clear();
     dataloaderIndex.clear();
+    optimizerIndex.clear();
+    throughputIndex.clear();
+    activationIndex.clear();
+    lossProbeIndex.clear();
+    attentionIndex.clear();
+    reactRenderIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -419,6 +437,19 @@ function loadAllVariables() {
                         }
                         continue;
                     }
+                    // Handle optimizer step records
+                    if (record.kind === 'optimizer_step') {
+                        const op = record;
+                        if (!optimizerIndex.has(op.file)) {
+                            optimizerIndex.set(op.file, new Map());
+                        }
+                        const lineMap = optimizerIndex.get(op.file);
+                        const existing = lineMap.get(op.line);
+                        if (!existing || op.timestamp > existing.timestamp) {
+                            lineMap.set(op.line, op);
+                        }
+                        continue;
+                    }
                     // Handle DataLoader batch shape records
                     if (record.kind === 'dataloader_batch') {
                         const dl = record;
@@ -429,6 +460,71 @@ function loadAllVariables() {
                         const existing = lineMap.get(dl.line);
                         if (!existing || dl.timestamp > existing.timestamp) {
                             lineMap.set(dl.line, dl);
+                        }
+                        continue;
+                    }
+                    // Handle attention statistics records
+                    if (record.kind === 'attention_stats') {
+                        const at = record;
+                        if (!attentionIndex.has(at.file)) {
+                            attentionIndex.set(at.file, new Map());
+                        }
+                        const lineMap = attentionIndex.get(at.file);
+                        const existing = lineMap.get(at.line);
+                        if (!existing || at.timestamp > existing.timestamp) {
+                            lineMap.set(at.line, at);
+                        }
+                        continue;
+                    }
+                    // Handle loss probe records
+                    if (record.kind === 'loss_probe') {
+                        const lp = record;
+                        if (!lossProbeIndex.has(lp.file)) {
+                            lossProbeIndex.set(lp.file, new Map());
+                        }
+                        const lineMap = lossProbeIndex.get(lp.file);
+                        const existing = lineMap.get(lp.line);
+                        if (!existing || lp.timestamp > existing.timestamp) {
+                            lineMap.set(lp.line, lp);
+                        }
+                        continue;
+                    }
+                    // Handle activation statistics records
+                    if (record.kind === 'activation_stats') {
+                        const ac = record;
+                        if (!activationIndex.has(ac.file)) {
+                            activationIndex.set(ac.file, new Map());
+                        }
+                        const lineMap = activationIndex.get(ac.file);
+                        const existing = lineMap.get(ac.line);
+                        if (!existing || ac.timestamp > existing.timestamp) {
+                            lineMap.set(ac.line, ac);
+                        }
+                        continue;
+                    }
+                    // Handle React render records
+                    if (record.kind === 'react_render') {
+                        const rr = record;
+                        if (!reactRenderIndex.has(rr.file)) {
+                            reactRenderIndex.set(rr.file, new Map());
+                        }
+                        const lineMap = reactRenderIndex.get(rr.file);
+                        const existing = lineMap.get(rr.line);
+                        if (!existing || rr.renderCount > existing.renderCount) {
+                            lineMap.set(rr.line, rr);
+                        }
+                        continue;
+                    }
+                    // Handle training throughput records
+                    if (record.kind === 'training_throughput') {
+                        const tp = record;
+                        if (!throughputIndex.has(tp.file)) {
+                            throughputIndex.set(tp.file, new Map());
+                        }
+                        const lineMap = throughputIndex.get(tp.file);
+                        const existing = lineMap.get(tp.line);
+                        if (!existing || tp.timestamp > existing.timestamp) {
+                            lineMap.set(tp.line, tp);
                         }
                         continue;
                     }
@@ -1111,6 +1207,51 @@ class TrickleInlayHintsProvider {
                 }
             }
         }
+        // Add optimizer step inlay hints at optimizer.step() lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const optLines = optimizerIndex.get(filePath);
+            if (optLines) {
+                for (const [lineNo, op] of optLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    // Build compact label
+                    const gradStr = op.grad_norm.toExponential(3);
+                    const healthIcon = op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙';
+                    const parts = [`grad=${gradStr}`];
+                    if (op.update_norm > 0) {
+                        parts.push(`Δθ=${op.update_norm.toExponential(3)}`);
+                    }
+                    if (op.param_stats.length > 0) {
+                        const s = op.param_stats[0];
+                        parts.push(`σ=${s.param_std.toExponential(2)}`);
+                    }
+                    const label = ` ${healthIcon} ${parts.join(' | ')}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Build detailed tooltip
+                        const groupRows = op.param_stats.map((s, i) => `| group ${i} | lr=\`${s.lr}\` | norm=\`${s.param_norm.toFixed(4)}\` | μ=\`${s.param_mean.toFixed(4)}\` | σ=\`${s.param_std.toFixed(4)}\` | params=\`${s.n_params.toLocaleString()}\` |`).join('\n');
+                        const ctxStr = Object.entries(op.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
+                        const md = new vscode.MarkdownString(`### ${op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙'} Optimizer: \`${op.optimizer_class}\`\n\n` +
+                            `**Gradient norm:** \`${op.grad_norm.toExponential(4)}\`` +
+                            (op.exploding ? ' — ⚡ **EXPLODING**' : op.vanishing ? ' — ↓ **VANISHING**' : '') + '\n\n' +
+                            (op.update_norm > 0 ? `**Weight update:** \`||Δθ|| = ${op.update_norm.toExponential(4)}\`\n\n` : '') +
+                            (groupRows ? `**Parameter groups:**\n\n| Group | LR | Norm | Mean | Std | #Params |\n|---|---|---|---|---|---|\n${groupRows}\n\n` : '') +
+                            (ctxStr ? `**Context:** ${ctxStr}\n\n` : '') +
+                            `Step #${op.step_num}`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
         // Add DataLoader batch shape inlay hints at for-loop lines
         if (document.uri.scheme === 'file') {
             const filePath = document.uri.fsPath;
@@ -1158,6 +1299,268 @@ class TrickleInlayHintsProvider {
                         const md = new vscode.MarkdownString(`### ⬛ DataLoader Batch Shapes\n\n` +
                             shapeRows.join('\n\n') +
                             `\n\n*Batch #${dl.batch_num} captured by trickle*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add training throughput inlay hints at DataLoader for-loop lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const tpLines = throughputIndex.get(filePath);
+            if (tpLines) {
+                for (const [lineNo, tp] of tpLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    // Format samples/sec compactly: 1234 → "1.23k", 45678 → "45.7k"
+                    const fmtRate = (n) => {
+                        if (n >= 1000)
+                            return `${(n / 1000).toFixed(n >= 10000 ? 1 : 2)}k`;
+                        return n.toFixed(1);
+                    };
+                    const fmtEta = (s) => {
+                        const h = Math.floor(s / 3600);
+                        const m = Math.floor((s % 3600) / 60);
+                        const sec = Math.floor(s % 60);
+                        if (h > 0)
+                            return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+                        return `${m}:${String(sec).padStart(2, '0')}`;
+                    };
+                    let label = ` ⚡ ${fmtRate(tp.samples_per_sec)} smp/s`;
+                    if (tp.eta_seconds !== undefined) {
+                        label += ` | ETA ${fmtEta(tp.eta_seconds)}`;
+                    }
+                    if (tp.total_batches !== undefined) {
+                        const pct = Math.round((tp.batch_count / tp.total_batches) * 100);
+                        label += ` (${pct}%)`;
+                    }
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const tooltipLines = [
+                            `**Samples/sec:** \`${tp.samples_per_sec.toFixed(1)}\``,
+                            `**Batches/sec:** \`${tp.batches_per_sec.toFixed(3)}\``,
+                            `**Batch size:** \`${tp.batch_size}\``,
+                            `**Batches done:** \`${tp.batch_count}${tp.total_batches ? ' / ' + tp.total_batches : ''}\``,
+                        ];
+                        if (tp.eta_seconds !== undefined) {
+                            tooltipLines.push(`**ETA:** \`${fmtEta(tp.eta_seconds)}\``);
+                        }
+                        const md = new vscode.MarkdownString(`### ⚡ Training Throughput\n\n` + tooltipLines.join('\n\n') +
+                            `\n\n*Tracked by trickle (rolling avg)*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add attention statistics inlay hints at F.softmax / attention call lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const atLines = attentionIndex.get(filePath);
+            if (atLines) {
+                for (const [lineNo, at] of atLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    const entropyPct = at.max_entropy > 0
+                        ? Math.round((at.mean_entropy / at.max_entropy) * 100)
+                        : 0;
+                    let label = ` 🎯 H=${at.mean_entropy.toFixed(2)}/${at.max_entropy.toFixed(2)}`;
+                    if (at.sharp_heads > 0)
+                        label += ` | sharp:${at.sharp_heads}`;
+                    if (at.dead_heads > 0)
+                        label += ` | dead:${at.dead_heads}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Per-head entropy breakdown
+                        const headRows = at.head_entropies.map((h, i) => {
+                            const pct = Math.round((h / at.max_entropy) * 100);
+                            const flag = h > 0.95 * at.max_entropy ? ' 💤 dead'
+                                : h < 0.10 * at.max_entropy ? ' ⚡ sharp' : '';
+                            return `head ${i}: \`${h.toFixed(3)}\` (${pct}%${flag})`;
+                        });
+                        const tooltipLines = [
+                            `**Heads:** \`${at.n_heads}\` · **Seq len:** \`${at.seq_len}\``,
+                            `**Mean entropy:** \`${at.mean_entropy.toFixed(4)}\` / \`${at.max_entropy.toFixed(4)}\` (${entropyPct}% of max)`,
+                            `**Sharp heads** (< 10% entropy): \`${at.sharp_heads}\``,
+                            `**Dead heads** (> 95% entropy): \`${at.dead_heads}\``,
+                            `**Mean max-attended position:** \`${at.mean_max_pos.toFixed(1)}\``,
+                            `**Diagonal attention (self):** \`${(at.diag_attn * 100).toFixed(1)}%\``,
+                            `\n**Per-head entropy:**\n${headRows.join('\n')}`,
+                            `\n*Sampled at call #${at.call_count} by trickle*`,
+                        ];
+                        const md = new vscode.MarkdownString(`### 🎯 Attention Pattern Stats\n\n` + tooltipLines.join('\n\n'));
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add loss probe inlay hints at loss.backward() call lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const lpLines = lossProbeIndex.get(filePath);
+            if (lpLines) {
+                for (const [lineNo, lp] of lpLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    const patternIcon = {
+                        decreasing: '↘', increasing: '↗', plateau: '—',
+                        oscillating: '〰', diverging: '⚠', stable: '→', unknown: '?',
+                    };
+                    const patternTip = {
+                        plateau: 'try raising LR or check gradient vanishing',
+                        oscillating: 'try lowering LR or add gradient clipping',
+                        increasing: 'check LR, data, or possible bug',
+                        diverging: 'NaN/Inf detected — lower LR or add gradient clipping',
+                        decreasing: 'training healthy',
+                        stable: '', unknown: '',
+                    };
+                    const icon = patternIcon[lp.pattern] ?? '?';
+                    const fmtLoss = (v) => {
+                        if (!isFinite(v))
+                            return String(v);
+                        if (Math.abs(v) >= 100)
+                            return v.toFixed(1);
+                        if (Math.abs(v) >= 10)
+                            return v.toFixed(2);
+                        return v.toFixed(4);
+                    };
+                    const deltaStr = lp.loss_delta !== 0
+                        ? ` Δ=${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta.toFixed(4)}/step`
+                        : '';
+                    const patternNote = ['plateau', 'oscillating', 'increasing', 'diverging'].includes(lp.pattern)
+                        ? ` [${lp.pattern}]` : '';
+                    let label = ` ${icon} loss=${fmtLoss(lp.loss)}${deltaStr}${patternNote}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const tip = patternTip[lp.pattern] ?? '';
+                        const tooltipLines = [
+                            `**Pattern:** \`${lp.pattern}\`${tip ? '  —  ' + tip : ''}`,
+                            `**Current loss:** \`${lp.loss}\``,
+                            `**Moving avg:** \`${lp.loss_avg}\``,
+                            `**Std (window):** \`${lp.loss_std}\``,
+                            `**Δ/step:** \`${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta}\``,
+                            `**Step:** \`${lp.step}\``,
+                        ];
+                        const md = new vscode.MarkdownString(`### ${icon} Loss Landscape\n\n` + tooltipLines.join('\n\n') +
+                            `\n\n*Tracked by trickle (20-step rolling window)*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add activation statistics inlay hints at nn.Module forward call lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const actLines = activationIndex.get(filePath);
+            if (actLines) {
+                for (const [lineNo, ac] of actLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    // Format a compact stats label
+                    const fmtNum = (n) => {
+                        const a = Math.abs(n);
+                        if (a >= 100)
+                            return n.toFixed(1);
+                        if (a >= 10)
+                            return n.toFixed(2);
+                        if (a >= 1)
+                            return n.toFixed(3);
+                        return n.toFixed(4);
+                    };
+                    let label = ` ◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)}`;
+                    // Anomaly flags
+                    if (ac.exploding) {
+                        label = ` ⚡◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [explode]`;
+                    }
+                    else if (ac.vanishing) {
+                        label = ` ↓◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [vanish]`;
+                    }
+                    else if (ac.zero_frac !== undefined && ac.zero_frac > 0.5) {
+                        label += ` [dead:${Math.round(ac.zero_frac * 100)}%]`;
+                    }
+                    else if (ac.sat_frac !== undefined && ac.sat_frac > 0.5) {
+                        label += ` [sat:${Math.round(ac.sat_frac * 100)}%]`;
+                    }
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const tooltipLines = [
+                            `**Module:** \`${ac.module_name}\``,
+                            `**Shape:** \`[${ac.shape.join(', ')}]\``,
+                            `**Mean:** \`${ac.mean}\``,
+                            `**Std:** \`${ac.std}\``,
+                            `**Min:** \`${ac.min}\` · **Max:** \`${ac.max}\``,
+                        ];
+                        if (ac.zero_frac !== undefined && ac.zero_frac > 0) {
+                            tooltipLines.push(`**Zero fraction:** \`${(ac.zero_frac * 100).toFixed(1)}%\` ${ac.zero_frac > 0.5 ? '⚠ dead neurons detected' : ''}`);
+                        }
+                        if (ac.sat_frac !== undefined) {
+                            tooltipLines.push(`**Saturation (|x|>0.9):** \`${(ac.sat_frac * 100).toFixed(1)}%\` ${ac.sat_frac > 0.5 ? '⚠ saturated' : ''}`);
+                        }
+                        if (ac.vanishing)
+                            tooltipLines.push('⚠ **Vanishing activations** (std < 1e-5)');
+                        if (ac.exploding)
+                            tooltipLines.push('⚠ **Exploding activations** (|max| > 1e3)');
+                        tooltipLines.push(`*Sampled at call #${ac.call_count} by trickle*`);
+                        const md = new vscode.MarkdownString(`### ◆ Activation Stats\n\n` + tooltipLines.join('\n\n'));
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add React component render count inlay hints
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const rrLines = reactRenderIndex.get(filePath);
+            if (rrLines) {
+                for (const [lineNo, rr] of rrLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    const label = ` 🔄 ×${rr.renderCount} renders`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const md = new vscode.MarkdownString(`### 🔄 React Component Renders\n\n` +
+                            `**Component:** \`${rr.component}\`\n\n` +
+                            `**Render count:** \`${rr.renderCount}\`\n\n` +
+                            `*Tracked by trickle (cumulative since dev server start)*`);
                         md.isTrusted = true;
                         hint.tooltip = md;
                         hints.push(hint);

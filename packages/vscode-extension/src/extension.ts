@@ -237,6 +237,16 @@ interface TrainingThroughputRecord {
   timestamp: number;
 }
 
+/** React component render tracking record emitted by the Vite plugin */
+interface ReactRenderRecord {
+  kind: 'react_render';
+  file: string;
+  line: number;
+  component: string;
+  renderCount: number;
+  timestamp: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -269,6 +279,8 @@ let activationIndex: Map<string, Map<number, ActivationStatsRecord>> = new Map()
 let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
 /** Attention statistics: filePath -> lineNo -> AttentionStatsRecord (latest) */
 let attentionIndex: Map<string, Map<number, AttentionStatsRecord>> = new Map();
+/** React render counts: filePath -> lineNo -> ReactRenderRecord (latest) */
+let reactRenderIndex: Map<string, Map<number, ReactRenderRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -613,6 +625,7 @@ function loadAllVariables() {
   activationIndex.clear();
   lossProbeIndex.clear();
   attentionIndex.clear();
+  reactRenderIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -746,6 +759,20 @@ function loadAllVariables() {
             const existing = lineMap.get(ac.line);
             if (!existing || ac.timestamp > existing.timestamp) {
               lineMap.set(ac.line, ac);
+            }
+            continue;
+          }
+
+          // Handle React render records
+          if (record.kind === 'react_render') {
+            const rr = record as ReactRenderRecord;
+            if (!reactRenderIndex.has(rr.file)) {
+              reactRenderIndex.set(rr.file, new Map());
+            }
+            const lineMap = reactRenderIndex.get(rr.file)!;
+            const existing = lineMap.get(rr.line);
+            if (!existing || rr.renderCount > existing.renderCount) {
+              lineMap.set(rr.line, rr);
             }
             continue;
           }
@@ -1849,6 +1876,38 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             md.isTrusted = true;
             hint.tooltip = md;
 
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add React component render count inlay hints
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const rrLines = reactRenderIndex.get(filePath);
+      if (rrLines) {
+        for (const [lineNo, rr] of rrLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          const label = ` 🔄 ×${rr.renderCount} renders`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const md = new vscode.MarkdownString(
+              `### 🔄 React Component Renders\n\n` +
+              `**Component:** \`${rr.component}\`\n\n` +
+              `**Render count:** \`${rr.renderCount}\`\n\n` +
+              `*Tracked by trickle (cumulative since dev server start)*`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
             hints.push(hint);
           } catch {
             // Skip if line is out of range

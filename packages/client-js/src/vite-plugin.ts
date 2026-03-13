@@ -105,6 +105,48 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
 }
 
 /**
+ * Find the opening brace of a function body, skipping the parameter list.
+ * Starting from the character right after the opening `(` of the parameter list,
+ * scans forward matching parens to find the closing `)`, then finds the `{` after it.
+ * Returns -1 if not found.
+ */
+function findFunctionBodyBrace(source: string, afterOpenParen: number): number {
+  let depth = 1;
+  let pos = afterOpenParen;
+  // Skip the parameter list (matching parens)
+  while (pos < source.length && depth > 0) {
+    const ch = source[pos];
+    if (ch === '(') depth++;
+    else if (ch === ')') { depth--; if (depth === 0) break; }
+    else if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      pos++;
+      while (pos < source.length && source[pos] !== quote) {
+        if (source[pos] === '\\') pos++;
+        pos++;
+      }
+    }
+    pos++;
+  }
+  // Now find the `{` after the closing `)`
+  while (pos < source.length) {
+    const ch = source[pos];
+    if (ch === '{') return pos;
+    if (ch !== ' ' && ch !== '\t' && ch !== '\n' && ch !== '\r' && ch !== ':') {
+      // Hit something unexpected (like '=>' for arrows, or type annotation chars)
+      if (ch === '=' && pos + 1 < source.length && source[pos + 1] === '>') {
+        // Arrow — find { after =>
+        pos += 2;
+        continue;
+      }
+      // Type annotation — keep going (`: ReturnType`)
+    }
+    pos++;
+  }
+  return -1;
+}
+
+/**
  * Find the closing brace position for a function body starting at `openBrace`.
  */
 function findClosingBrace(source: string, openBrace: number): number {
@@ -448,9 +490,14 @@ function transformEsmSource(
   traceVars: boolean,
   originalSource?: string | null,
 ): string {
+  // Detect React files for component render tracking
+  const isReactFile = /\.(tsx|jsx)$/.test(filename);
+
   // Match top-level and nested function declarations (including async, export)
   const funcRegex = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const funcInsertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
+  // Body insertions: insert at start of function body (for React render tracking)
+  const bodyInsertions: Array<{ position: number; name: string; lineNo: number }> = [];
   let match;
 
   while ((match = funcRegex.exec(source)) !== null) {
@@ -458,10 +505,11 @@ function transformEsmSource(
     if (name === 'require' || name === 'exports' || name === 'module') continue;
 
     const afterMatch = match.index + match[0].length;
-    const openBrace = source.indexOf('{', afterMatch);
+    // Use findFunctionBodyBrace to correctly skip destructured params like ({ a, b }) =>
+    const openBrace = findFunctionBodyBrace(source, afterMatch);
     if (openBrace === -1) continue;
 
-    // Extract parameter names
+    // Extract parameter names (between the opening ( and the body {)
     const paramStr = source.slice(afterMatch, openBrace).replace(/[()]/g, '').trim();
     const paramNames = paramStr
       ? paramStr.split(',').map(p => {
@@ -475,6 +523,15 @@ function transformEsmSource(
     if (closeBrace === -1) continue;
 
     funcInsertions.push({ position: closeBrace + 1, name, paramNames });
+
+    // React component render tracking: uppercase function name in .tsx/.jsx
+    if (isReactFile && /^[A-Z]/.test(name)) {
+      let lineNo = 1;
+      for (let i = 0; i < match.index; i++) {
+        if (source[i] === '\n') lineNo++;
+      }
+      bodyInsertions.push({ position: openBrace + 1, name, lineNo });
+    }
   }
 
   // Also match arrow functions assigned to const/let/var
@@ -503,7 +560,18 @@ function transformEsmSource(
     if (closeBrace === -1) continue;
 
     funcInsertions.push({ position: closeBrace + 1, name, paramNames });
+
+    // React component render tracking: uppercase arrow function in .tsx/.jsx
+    if (isReactFile && /^[A-Z]/.test(name)) {
+      let lineNo = 1;
+      for (let i = 0; i < match.index; i++) {
+        if (source[i] === '\n') lineNo++;
+      }
+      bodyInsertions.push({ position: openBrace + 1, name, lineNo });
+    }
   }
+
+
 
   // Find variable declarations for tracing
   const varInsertions = traceVars ? findVarDeclarations(source) : [];
@@ -511,7 +579,7 @@ function transformEsmSource(
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -536,7 +604,7 @@ function transformEsmSource(
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0 || destructInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0) {
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -619,6 +687,24 @@ function transformEsmSource(
     );
   }
 
+  // Add React component render tracker if needed
+  if (bodyInsertions.length > 0) {
+    prefixLines.push(
+      `if (!globalThis.__trickle_react_renders) { globalThis.__trickle_react_renders = new Map(); }`,
+      `function __trickle_rc(name, line) {`,
+      `  try {`,
+      `    const key = ${JSON.stringify(filename)} + ':' + line;`,
+      `    const count = (globalThis.__trickle_react_renders.get(key) || 0) + 1;`,
+      `    globalThis.__trickle_react_renders.set(key, count);`,
+      `    const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
+      `    try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
+      `    const f = __trickle_join(dir, 'variables.jsonl');`,
+      `    __trickle_appendFileSync(f, JSON.stringify({ kind: 'react_render', file: ${JSON.stringify(filename)}, line: line, component: name, renderCount: count, timestamp: Date.now() / 1000 }) + '\\n');`,
+      `  } catch(e) {}`,
+      `}`,
+    );
+  }
+
   prefixLines.push('');
   const prefix = prefixLines.join('\n');
 
@@ -646,6 +732,13 @@ function transformEsmSource(
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  for (const { position, name, lineNo } of bodyInsertions) {
+    allInsertions.push({
+      position,
+      code: `\ntry{__trickle_rc(${JSON.stringify(name)},${lineNo})}catch(__e){}\n`,
     });
   }
 
