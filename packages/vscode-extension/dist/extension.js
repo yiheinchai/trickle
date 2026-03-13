@@ -897,6 +897,31 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                     parts.push(freq);
                 return `DatetimeIndex(${parts.join(', ')})`;
             }
+            // Sklearn estimators: show key info compactly
+            if (node.properties && (node.properties['fitted'] || node.properties['steps'])) {
+                const fitted = node.properties['fitted']?.name === 'True';
+                const steps = node.properties['steps']?.name;
+                const features = node.properties['features']?.name;
+                const classes = node.properties['classes']?.name;
+                const skipKeys = new Set(['fitted', 'features', 'classes', 'n_estimators_actual', 'steps']);
+                const paramEntries = entries.filter(([k]) => !skipKeys.has(k));
+                const parts = [];
+                if (steps) {
+                    parts.push(steps);
+                }
+                else {
+                    parts.push(...paramEntries.slice(0, 4).map(([k, v]) => `${k}=${v.name ?? typeNodeToString(v, depth - 1)}`));
+                }
+                const badges = [];
+                if (fitted) {
+                    if (features)
+                        badges.push(`${features} features`);
+                    if (classes)
+                        badges.push(`${classes} classes`);
+                }
+                const badgeStr = badges.length > 0 ? ` [${badges.join(', ')}]` : fitted ? ' [fitted]' : '';
+                return `${node.class_name}(${parts.join(', ')})${badgeStr}`;
+            }
             // nn.Module types: show key params, omit 'params'/'training'/'memory' from inline props
             if (node.class_name && node.properties['params']) {
                 const paramCount = node.properties['params']?.name;

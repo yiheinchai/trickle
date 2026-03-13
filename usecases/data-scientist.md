@@ -77,6 +77,8 @@ You can see null counts drop as you clean, and memory change as you convert type
 | **Index / RangeIndex** | length, range, dtype |
 | **MultiIndex** | length, level names, nlevels |
 | **DatetimeIndex** | length, date range, frequency |
+| **Sklearn models** | type, hyperparams, fitted status, features/classes |
+| **Sklearn Pipeline** | step names, fitted status |
 | **NumPy arrays** | shape, dtype, memory |
 
 ## Use Case 2: Python Scripts
@@ -117,6 +119,27 @@ for col in df.columns[:5]:
 ```
 
 No need for `df.info()` or `df.describe()` — the type hints tell you what you're working with at a glance.
+
+## Use Case 4: Scikit-learn Model Training
+
+```python
+%load_ext trickle
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+model = RandomForestClassifier(n_estimators=100, max_depth=5)
+# → RandomForestClassifier(n_estimators=100, max_depth=5, criterion=gini)
+
+model.fit(X_train, y_train)
+# → RandomForestClassifier(n_estimators=100, max_depth=5, criterion=gini) [5 features, 2 classes]
+
+pipe = Pipeline([('scaler', StandardScaler()), ('clf', model)])
+pipe.fit(X_train, y_train)
+# → Pipeline(scaler → clf) [5 features, 2 classes]
+```
+
+Models show their key hyperparameters at a glance, and after fitting you see the number of features and classes. Pipelines show the step flow with `→` arrows.
 
 ## Quick Start
 

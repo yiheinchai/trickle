@@ -235,6 +235,11 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _index_type is not None and isinstance(value, _index_type):
         return _infer_index(value)
 
+    # --- Scikit-learn estimators ---
+    _estimator_type = _get_sklearn_estimator_type()
+    if _estimator_type is not None and isinstance(value, _estimator_type):
+        return _infer_sklearn_estimator(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -815,6 +820,142 @@ def _infer_series(value: Any) -> Dict[str, Any]:
         pass
 
     return {"kind": "object", "properties": props, "class_name": "Series"}
+
+
+_sklearn_estimator_type: Any = None
+_sklearn_estimator_checked = False
+
+
+def _get_sklearn_estimator_type() -> Any:
+    """Lazily resolve sklearn BaseEstimator."""
+    global _sklearn_estimator_type, _sklearn_estimator_checked
+    if _sklearn_estimator_checked:
+        return _sklearn_estimator_type
+    _sklearn_estimator_checked = True
+    try:
+        from sklearn.base import BaseEstimator
+        _sklearn_estimator_type = BaseEstimator
+    except ImportError:
+        pass
+    return _sklearn_estimator_type
+
+
+# Key hyperparameters for common sklearn estimators
+_SKLEARN_KEY_PARAMS: Dict[str, list] = {
+    "LogisticRegression": ["C", "penalty", "solver", "max_iter"],
+    "LinearRegression": ["fit_intercept"],
+    "Ridge": ["alpha", "fit_intercept"],
+    "Lasso": ["alpha", "fit_intercept"],
+    "ElasticNet": ["alpha", "l1_ratio"],
+    "SGDClassifier": ["loss", "penalty", "alpha"],
+    "SGDRegressor": ["loss", "penalty", "alpha"],
+    "RandomForestClassifier": ["n_estimators", "max_depth", "criterion"],
+    "RandomForestRegressor": ["n_estimators", "max_depth", "criterion"],
+    "GradientBoostingClassifier": ["n_estimators", "max_depth", "learning_rate"],
+    "GradientBoostingRegressor": ["n_estimators", "max_depth", "learning_rate"],
+    "AdaBoostClassifier": ["n_estimators", "learning_rate"],
+    "AdaBoostRegressor": ["n_estimators", "learning_rate"],
+    "DecisionTreeClassifier": ["max_depth", "criterion"],
+    "DecisionTreeRegressor": ["max_depth", "criterion"],
+    "SVC": ["C", "kernel", "gamma"],
+    "SVR": ["C", "kernel", "gamma"],
+    "KNeighborsClassifier": ["n_neighbors", "weights"],
+    "KNeighborsRegressor": ["n_neighbors", "weights"],
+    "XGBClassifier": ["n_estimators", "max_depth", "learning_rate"],
+    "XGBRegressor": ["n_estimators", "max_depth", "learning_rate"],
+    "LGBMClassifier": ["n_estimators", "max_depth", "learning_rate"],
+    "LGBMRegressor": ["n_estimators", "max_depth", "learning_rate"],
+    "StandardScaler": ["with_mean", "with_std"],
+    "MinMaxScaler": ["feature_range"],
+    "RobustScaler": ["with_centering", "with_scaling"],
+    "PCA": ["n_components"],
+    "KMeans": ["n_clusters", "n_init"],
+    "DBSCAN": ["eps", "min_samples"],
+}
+
+
+def _infer_sklearn_estimator(value: Any) -> Dict[str, Any]:
+    """Infer type for a scikit-learn estimator."""
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    # Check if fitted (sklearn convention: fitted attrs end with _)
+    is_fitted = any(
+        attr.endswith("_") and not attr.startswith("_")
+        for attr in vars(value)
+    )
+    # Fallback: try sklearn's check_is_fitted
+    if not is_fitted:
+        try:
+            from sklearn.utils.validation import check_is_fitted
+            check_is_fitted(value)
+            is_fitted = True
+        except Exception:
+            pass
+    if is_fitted:
+        props["fitted"] = {"kind": "primitive", "name": "True"}
+
+    # Key hyperparameters
+    key_params = _SKLEARN_KEY_PARAMS.get(class_name, [])
+    if key_params:
+        for param in key_params:
+            try:
+                val = getattr(value, param, None)
+                if val is not None:
+                    if isinstance(val, float):
+                        props[param] = {"kind": "primitive", "name": f"{val:.6g}"}
+                    else:
+                        props[param] = {"kind": "primitive", "name": str(val)}
+            except Exception:
+                continue
+    else:
+        # Unknown estimator: try get_params() for top params
+        try:
+            params = value.get_params(deep=False)
+            for k, v in list(params.items())[:6]:
+                if v is not None and not callable(v):
+                    if isinstance(v, float):
+                        props[k] = {"kind": "primitive", "name": f"{v:.6g}"}
+                    elif isinstance(v, (int, str, bool)):
+                        props[k] = {"kind": "primitive", "name": str(v)}
+        except Exception:
+            pass
+
+    # Fitted model info
+    if is_fitted:
+        try:
+            n_features = getattr(value, "n_features_in_", None)
+            if n_features is not None:
+                props["features"] = {"kind": "primitive", "name": str(n_features)}
+        except Exception:
+            pass
+
+        try:
+            classes = getattr(value, "classes_", None)
+            if classes is not None:
+                props["classes"] = {"kind": "primitive", "name": str(len(classes))}
+        except Exception:
+            pass
+
+        # Number of estimators for ensemble methods
+        try:
+            estimators = getattr(value, "estimators_", None)
+            if estimators is not None and hasattr(estimators, "__len__"):
+                props["n_estimators_actual"] = {"kind": "primitive", "name": str(len(estimators))}
+        except Exception:
+            pass
+
+    # Pipeline: show steps, remove noise params
+    if class_name == "Pipeline":
+        try:
+            steps = value.steps
+            step_names = [name for name, _ in steps]
+            props["steps"] = {"kind": "primitive", "name": " → ".join(step_names)}
+            props.pop("verbose", None)
+        except Exception:
+            pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
 
 
 _pandas_groupby_type: Any = None
