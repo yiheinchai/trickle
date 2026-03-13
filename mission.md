@@ -4,7 +4,7 @@ For now, i want you to specifically focus on:
 <focus point>
 Improving the developer experience of typescript / javascript developers (both frontend and backend).
 
-Lots of progress has been made for ML engineers and lots of very useful features like inline type hints. All these good features needs to be available to ts/js developers too. it should work like python, to be able to work on any arbituary line of code (no framework), and also in frameworks, eg. react, express.
+Lots of progress has been made for ML engineers and lots of very useful features like inline type hints. All these good features needs to be available to ts/js developers too. it should work like python, to be able to work on any arbituary line of code (no framework), and also in frameworks, eg. react, express, AWS lambda (impt!)
 
 the vision is that users working in any ts/js code will be able to have line by line type hints for a better devex to know what they data they manipulating, and removing the need for lots of console.logs
 
