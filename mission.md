@@ -2,6 +2,8 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <general directive>
+First do some comms, work clarify the difference between trickle generating pyi files vs the jsonl and generate inline hints via extension, and resolve the inconsistencies between these two across different usecases. the same for javascript/typescript (.d.ts vs jsonl + extension). probably the best approach is give user option for both?
+
 First pick a usecase, get a real world repo from online for that use case. Test trickle on that repo. 
 Find the pain points. Implement features to fix the pain point.
 </general directive>
