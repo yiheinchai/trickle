@@ -1055,3 +1055,50 @@ Sampled at call #20 by trickle
 ```
 
 **How it works:** `trickle.auto` registers a global forward hook via `nn.modules.module.register_module_forward_hook()`. After each module's forward pass, the hook walks the call stack to find the user's call site (skipping site-packages and trickle internals), computes mean/std/min/max of the output tensor, and checks for dead neurons (>50% zeros), saturation (>50% of |values| > 0.9), vanishing (std < 1e-5), and exploding (|max| > 1e3). Rate-limited to every 20 calls per call site (`TRICKLE_ACT_EVERY` to tune). Works for all nn.Module subclasses including custom modules.
+
+---
+
+## Use Case 26: Loss Landscape Probing
+
+**User:** ML engineer training a transformer who notices loss stagnation after a few epochs. Wants to know if the loss is plateauing, oscillating, or truly converging — without manually plotting loss curves.
+
+**Before trickle:** Must save loss to a list, plot with matplotlib after training, or add TensorBoard logging — all requiring extra code.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for epoch in range(epochs):
+    for batch in train_loader:
+        ...
+        loss.backward()   # ↘ loss=2.3412 Δ=-0.0041/step
+```
+
+Different patterns show automatically:
+```python
+loss.backward()   # — loss=1.2345 Δ=-0.0000/step [plateau — try raising LR]
+loss.backward()   # 〰 loss=1.8230 Δ=+0.0021/step [oscillating — try lowering LR]
+loss.backward()   # ↗ loss=4.2100 Δ=+0.1200/step [increasing — check LR/data]
+loss.backward()   # ⚠ loss=inf [diverging — NaN/Inf detected — lower LR or add gradient clipping]
+```
+
+Hover tooltip shows:
+```
+↘ Loss Landscape
+
+Pattern: decreasing  —  training healthy
+Current loss: 2.3412
+Moving avg: 2.4891
+Std (window): 0.1234
+Δ/step: -0.0041
+Step: 150
+
+Tracked by trickle (20-step rolling window)
+```
+
+**How it works:** `trickle.auto` patches `torch.Tensor.backward()`. When called on a scalar tensor (the loss), it captures the value and the call site. A rolling 20-step window is maintained per call site, and every 5 steps (configurable via `TRICKLE_LOSS_EVERY`) the pattern is classified:
+- **plateau**: coefficient of variation < 0.5%
+- **oscillating**: >55% of consecutive loss differences change sign
+- **increasing**: positive linear trend slope
+- **diverging**: NaN/inf detected
+- **decreasing**: healthy negative trend
