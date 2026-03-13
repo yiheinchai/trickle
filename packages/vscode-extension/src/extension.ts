@@ -29,6 +29,9 @@ interface VariableObservation {
   sample: unknown;
   funcName?: string;
   callFlow?: CallFlow;
+  gpu_memory_mb?: number;
+  gpu_reserved_mb?: number;
+  cpu_memory_mb?: number;
 }
 
 interface TypeNode {
@@ -1060,7 +1063,22 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         const driftKey = `${obs.file}:${obs.line}:${obs.varName}`;
         const hasDrift = changedVarKeys.has(driftKey);
 
-        const label = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
+        // Append memory info for tensors
+        let memSuffix = '';
+        if (obs.gpu_memory_mb !== undefined) {
+          const gpuMb = obs.gpu_memory_mb;
+          memSuffix = gpuMb >= 1024
+            ? ` 🔴 ${(gpuMb / 1024).toFixed(1)}GB GPU`
+            : ` 🟡 ${gpuMb.toFixed(0)}MB GPU`;
+        } else if (obs.cpu_memory_mb !== undefined) {
+          const cpuMb = obs.cpu_memory_mb;
+          memSuffix = cpuMb >= 1024
+            ? ` ${(cpuMb / 1024).toFixed(1)}GB RAM`
+            : ` ${cpuMb.toFixed(0)}MB RAM`;
+        }
+
+        const labelBase = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
+        const label = labelBase + memSuffix;
         const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
         hint.paddingLeft = false;
         hint.paddingRight = true;
@@ -1084,6 +1102,12 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
         const stats = formatTensorStats(obs.type);
         if (stats) tooltipParts.push(`**Stats:**${stats}`);
+        if (obs.gpu_memory_mb !== undefined) {
+          const reserved = obs.gpu_reserved_mb !== undefined ? ` (${obs.gpu_reserved_mb.toFixed(0)}MB reserved)` : '';
+          tooltipParts.push(`**GPU Memory:** \`${obs.gpu_memory_mb.toFixed(1)}MB allocated${reserved}\``);
+        } else if (obs.cpu_memory_mb !== undefined) {
+          tooltipParts.push(`**RAM:** \`${obs.cpu_memory_mb.toFixed(1)}MB\``);
+        }
         if (obs.callFlow) {
           tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
         }

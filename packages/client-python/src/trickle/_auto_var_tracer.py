@@ -541,6 +541,32 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
         if call_flow:
             record["callFlow"] = call_flow
 
+        # Memory profiling: capture GPU memory for CUDA tensors, CPU RSS for others
+        if hasattr(value, "shape") and hasattr(value, "dtype"):
+            try:
+                import torch
+                if hasattr(value, "is_cuda") and value.is_cuda:
+                    device = getattr(value, "device", None)
+                    alloc = torch.cuda.memory_allocated(device)
+                    reserved = torch.cuda.memory_reserved(device)
+                    record["gpu_memory_mb"] = round(alloc / (1024 * 1024), 1)
+                    record["gpu_reserved_mb"] = round(reserved / (1024 * 1024), 1)
+                else:
+                    # CPU tensor: show total process memory via resource module (no psutil needed)
+                    try:
+                        import resource
+                        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                        # On macOS ru_maxrss is bytes, on Linux it's KB
+                        import platform
+                        if platform.system() == "Darwin":
+                            record["cpu_memory_mb"] = round(rss / (1024 * 1024), 1)
+                        else:
+                            record["cpu_memory_mb"] = round(rss / 1024, 1)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         with open(_vars_file, "a") as f:
             f.write(json.dumps(record) + "\n")
     except Exception:
