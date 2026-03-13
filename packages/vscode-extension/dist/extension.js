@@ -66,6 +66,8 @@ let attentionIndex = new Map();
 let reactRenderIndex = new Map();
 /** React hook invocation counts: filePath -> lineNo -> ReactHookRecord (latest) */
 let reactHookIndex = new Map();
+/** React useState update counts: filePath -> lineNo -> ReactStateRecord (latest) */
+let reactStateIndex = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex = new Map();
 let fileWatcher;
@@ -380,6 +382,7 @@ function loadAllVariables() {
     attentionIndex.clear();
     reactRenderIndex.clear();
     reactHookIndex.clear();
+    reactStateIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -515,6 +518,19 @@ function loadAllVariables() {
                         const existing = lineMap.get(rh.line);
                         if (!existing || rh.invokeCount > existing.invokeCount) {
                             lineMap.set(rh.line, rh);
+                        }
+                        continue;
+                    }
+                    // Handle React useState update records
+                    if (record.kind === 'react_state') {
+                        const rs = record;
+                        if (!reactStateIndex.has(rs.file)) {
+                            reactStateIndex.set(rs.file, new Map());
+                        }
+                        const lineMap = reactStateIndex.get(rs.file);
+                        const existing = lineMap.get(rs.line);
+                        if (!existing || rs.updateCount > existing.updateCount) {
+                            lineMap.set(rs.line, rs);
                         }
                         continue;
                     }
@@ -1594,6 +1610,39 @@ class TrickleInlayHintsProvider {
                             `**${verb.charAt(0).toUpperCase() + verb.slice(1)}:** \`${rh.invokeCount}×\`\n\n` +
                             `${tipByHook[rh.hookName] ?? ''}\n\n` +
                             `*Tracked by trickle (cumulative since dev server start)*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add React useState update count inlay hints
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const rsLines = reactStateIndex.get(filePath);
+            if (rsLines) {
+                for (const [lineNo, rs] of rsLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    // Format value for display
+                    const valDisplay = rs.value === null ? 'null'
+                        : rs.value === undefined ? 'undefined'
+                            : typeof rs.value === 'string' ? `"${rs.value.length > 15 ? rs.value.slice(0, 15) + '…' : rs.value}"`
+                                : String(rs.value);
+                    const label = ` 📊 ×${rs.updateCount} → ${valDisplay}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const md = new vscode.MarkdownString(`### 📊 \`${rs.stateName}\` State Updates\n\n` +
+                            `**Updated:** \`${rs.updateCount}×\`\n\n` +
+                            `**Latest value:** \`${valDisplay}\`\n\n` +
+                            `*Tracked by trickle — each invocation of the setter is counted*`);
                         md.isTrusted = true;
                         hint.tooltip = md;
                         hints.push(hint);

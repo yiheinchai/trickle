@@ -202,6 +202,64 @@ describe('Correct function body brace detection', () => {
   });
 });
 
+// ── useState change tracking ──────────────────────────────────────────────────
+
+describe('useState change tracking', () => {
+  it('renames setter and injects __trickle_ss wrapper for simple useState', () => {
+    const code = `function App() {\n  const [count, setCount] = useState(0);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_ss'), 'should inject state setter wrapper');
+    assert.ok(out!.includes('__trickle_s_setCount'), 'should rename original setter');
+    assert.ok(out!.includes('const setCount=__trickle_ss'), 'should declare tracked setter');
+  });
+
+  it('tracks state name in the wrapper call', () => {
+    const code = `function App() {\n  const [isOpen, setIsOpen] = useState(false);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('"isOpen"'), 'should include state variable name');
+  });
+
+  it('handles TypeScript generic useState<T>', () => {
+    const code = `function App() {\n  const [name, setName] = useState<string>('');\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_ss'), 'should inject state setter wrapper for generic useState');
+    assert.ok(out!.includes('"name"'), 'should include state name');
+  });
+
+  it('tracks multiple useState calls in one component', () => {
+    const code = [
+      `function Dashboard() {`,
+      `  const [count, setCount] = useState(0);`,
+      `  const [name, setName] = useState('');`,
+      `  const [active, setActive] = useState(false);`,
+      `  return null;`,
+      `}`,
+    ].join('\n');
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    const ssCount = (out!.match(/const \w+=__trickle_ss/g) || []).length;
+    assert.equal(ssCount, 3, 'should wrap all 3 useState setters');
+  });
+
+  it('emits react_state kind in preamble code', () => {
+    const code = `function App() {\n  const [x, setX] = useState(0);\n  return null;\n}`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes("'react_state'"), 'emitted record should have kind react_state');
+  });
+
+  it('does NOT inject useState tracking in .ts files', () => {
+    const code = `function helper() {\n  const [x, setX] = useState(0);\n  return null;\n}`;
+    const out = transformTs(code);
+    if (out) {
+      assert.ok(!out.includes('__trickle_ss'), 'should NOT inject state tracking in .ts files');
+    }
+  });
+});
+
 // ── Re-render cause detection ─────────────────────────────────────────────────
 
 describe('Re-render cause detection', () => {

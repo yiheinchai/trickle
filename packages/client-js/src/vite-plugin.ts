@@ -681,13 +681,67 @@ function transformEsmSource(
     }
   }
 
+  // React useState tracking — rename setter to __trickle_s_X and declare tracked wrapper.
+  // Detects: const [stateVar, setter] = useState(...) or useState<T>(...)
+  interface StateInsertion {
+    renamePos: number;   // position in source to insert '__trickle_s_' before setter name
+    afterLine: number;   // position after end of useState statement to insert declaration
+    stateName: string;
+    setterName: string;
+    lineNo: number;
+  }
+  const stateInsertions: StateInsertion[] = [];
+
+  if (isReactFile) {
+    const useStateRegex = /const\s+\[([a-zA-Z_$][a-zA-Z0-9_$]*)\s*,\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\]\s*=\s*(?:React\.)?useState\s*(?:<[^(]*>)?\s*\(/gm;
+    let sm;
+    while ((sm = useStateRegex.exec(source)) !== null) {
+      const stateName = sm[1];
+      const setterName = sm[2];
+
+      // Find the position of setterName within the match (after the comma)
+      const matchStr = sm[0];
+      const commaIdx = matchStr.indexOf(',');
+      const setterInMatch = matchStr.indexOf(setterName, commaIdx);
+      if (setterInMatch === -1) continue;
+      const renamePos = sm.index + setterInMatch;
+
+      // Skip the useState(...) argument list to find the end of the statement
+      let pos = sm.index + sm[0].length;
+      let depth = 1;
+      while (pos < source.length && depth > 0) {
+        const ch = source[pos];
+        if (ch === '(') depth++;
+        else if (ch === ')') depth--;
+        else if (ch === '"' || ch === "'" || ch === '`') {
+          const q = ch; pos++;
+          while (pos < source.length && source[pos] !== q) {
+            if (source[pos] === '\\') pos++;
+            pos++;
+          }
+        }
+        pos++;
+      }
+      // Skip to end of line (past semicolon or newline)
+      while (pos < source.length && source[pos] !== ';' && source[pos] !== '\n') pos++;
+      const afterLine = pos + 1;
+
+      let lineNo = 1;
+      for (let i = 0; i < sm.index; i++) {
+        if (source[i] === '\n') lineNo++;
+      }
+
+      stateInsertions.push({ renamePos, afterLine, stateName, setterName, lineNo });
+    }
+  }
+
   // Find variable declarations for tracing
   const varInsertions = traceVars ? findVarDeclarations(source) : [];
 
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -712,7 +766,7 @@ function transformEsmSource(
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0) {
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -869,6 +923,35 @@ function transformEsmSource(
     );
   }
 
+  // Add useState setter tracker if needed
+  if (stateInsertions.length > 0) {
+    prefixLines.push(
+      `if (!globalThis.__trickle_state_counts) { globalThis.__trickle_state_counts = new Map(); }`,
+      `function __trickle_ss(stateName, line, origSetter) {`,
+      `  return function(newVal) {`,
+      `    try {`,
+      `      const key = ${JSON.stringify(filename)} + ':' + line + ':' + stateName;`,
+      `      const n = (globalThis.__trickle_state_counts.get(key) || 0) + 1;`,
+      `      globalThis.__trickle_state_counts.set(key, n);`,
+      `      const t = typeof newVal;`,
+      `      let sample;`,
+      `      if (t === 'function') sample = '[fn updater]';`,
+      `      else if (t === 'string') sample = newVal.length > 40 ? newVal.slice(0,40)+'...' : newVal;`,
+      `      else if (t === 'number' || t === 'boolean') sample = newVal;`,
+      `      else if (newVal === null || newVal === undefined) sample = newVal;`,
+      `      else if (Array.isArray(newVal)) sample = '[arr:'+newVal.length+']';`,
+      `      else sample = '[object]';`,
+      `      const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
+      `      try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e2) {}`,
+      `      __trickle_appendFileSync(__trickle_join(dir, 'variables.jsonl'),`,
+      `        JSON.stringify({ kind: 'react_state', file: ${JSON.stringify(filename)}, line, stateName, updateCount: n, value: sample, timestamp: Date.now()/1000 }) + '\\n');`,
+      `    } catch(e) {}`,
+      `    return origSetter(newVal);`,
+      `  };`,
+      `}`,
+    );
+  }
+
   prefixLines.push('');
   const prefix = prefixLines.join('\n');
 
@@ -910,6 +993,17 @@ function transformEsmSource(
   for (const { wrapStart, wrapEnd, hookName, lineNo } of hookInsertions) {
     allInsertions.push({ position: wrapStart, code: `__trickle_hw(${JSON.stringify(hookName)},${lineNo},` });
     allInsertions.push({ position: wrapEnd, code: `)` });
+  }
+
+  // useState insertions: TWO insertions per useState
+  // 1. Prefix setter name with '__trickle_s_' (rename in destructuring)
+  // 2. After statement end, declare tracked wrapper: const setter = __trickle_ss(...)
+  for (const { renamePos, afterLine, stateName, setterName, lineNo } of stateInsertions) {
+    allInsertions.push({ position: renamePos, code: `__trickle_s_` });
+    allInsertions.push({
+      position: afterLine,
+      code: `const ${setterName}=__trickle_ss(${JSON.stringify(stateName)},${lineNo},__trickle_s_${setterName});\n`,
+    });
   }
 
   // Sort by position descending (insert from end to preserve earlier positions)
