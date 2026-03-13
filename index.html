@@ -186,10 +186,10 @@
   <h1><span>trickle</span></h1>
   <p>Runtime type observability for JavaScript and Python. Run your code, get types in your IDE automatically.</p>
   <div class="hero-code">
-    <span class="comment"># In Jupyter or any Python script:</span><br>
-    <span class="cmd">%load_ext trickle</span><br><br>
+    <span class="comment"># One line. Types appear in VSCode.</span><br>
+    <span class="cmd">import trickle.auto</span><br><br>
     <span style="color: var(--text);">model = nn.Linear(784, 10)</span><span style="color: var(--text-muted);"> &nbsp;# → Linear(7850 params 30.7 KB)</span><br>
-    <span style="color: var(--text);">x = torch.randn(32, 784)</span><span style="color: var(--text-muted);"> &nbsp;&nbsp;&nbsp;# → Tensor[32, 784] float32</span><br>
+    <span style="color: var(--text);">x = torch.randn(32, 784)</span><span style="color: var(--text-muted);"> &nbsp;&nbsp;&nbsp;# → Tensor[32, 784] float32 98.0 KB</span><br>
     <span style="color: var(--text);">loss.backward()</span><span style="color: var(--text-muted);"> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# → model: |∇|=5.32</span>
   </div>
   <div class="cta-row">

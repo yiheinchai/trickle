@@ -70,6 +70,32 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                 return [f"{target.value.id}.{target.attr}"]
         return []
 
+    # Method calls that mutate the object and should trigger re-tracing
+    _MUTATING_METHODS = frozenset({
+        "fit", "fit_transform", "partial_fit",  # sklearn
+        "train", "eval",  # PyTorch nn.Module
+        "step",  # optimizer, scheduler
+        "backward",  # tensor (handled by backward hook but useful as fallback)
+        "load_state_dict",  # nn.Module
+        "compile",  # tf.keras / torch.compile
+    })
+
+    def _extract_method_call_obj(node: ast.AST) -> Optional[str]:
+        """If node is `obj.method(...)` where method is mutating, return 'obj'."""
+        if not isinstance(node, ast.Expr):
+            return None
+        call = node.value
+        if not isinstance(call, ast.Call):
+            return None
+        func = call.func
+        if not isinstance(func, ast.Attribute):
+            return None
+        if func.attr not in _MUTATING_METHODS:
+            return None
+        if isinstance(func.value, ast.Name):
+            return func.value.id
+        return None
+
     def _visit_body(body: list, func_name: Optional[str] = None) -> None:
         for node in body:
             if isinstance(node, ast.ClassDef):
@@ -130,6 +156,12 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                 if node.orelse:
                     _visit_body(node.orelse, func_name)
                 continue
+
+            # Detect mutating method calls: rf.fit(...), model.train(), etc.
+            if not names:
+                obj_name = _extract_method_call_obj(node)
+                if obj_name and not obj_name.startswith("_"):
+                    names.append(obj_name)
 
             # Filter and store
             names = [n for n in names if not n.startswith("_")]

@@ -85,23 +85,29 @@ You can see null counts drop as you clean, and memory change as you convert type
 
 ## Use Case 2: Python Scripts
 
-No code changes needed:
-
-```bash
-trickle run python etl_pipeline.py
-```
-
-Or add one import:
+Add one import at the top of your script:
 
 ```python
 import trickle.auto
 
-df = pd.read_csv("data.csv")       # DataFrame traced automatically
-result = df.groupby("category").agg({"value": ["mean", "sum"]})
-# Every intermediate DataFrame is captured
+df = pd.read_csv("data.csv")       # → DataFrame(10000 rows x 12 cols, 1.2 MB)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+# → X_train: DataFrame(8000 rows x 6 cols), y_test: Series(2000, int64)
+
+rf = RandomForestClassifier(n_estimators=100, max_depth=5)
+rf.fit(X_train, y_train)           # → RandomForestClassifier(...) [fitted, 6 features, 2 classes]
+
+acc = accuracy_score(y_test, rf.predict(X_test))
+# → acc: 0.9900
 ```
 
-After running, `.pyi` stubs are generated with full type signatures. Your IDE knows the types of every variable.
+All variables are traced automatically — DataFrames, Series, sklearn models (including fitted status after `.fit()`), accuracy scores, and more. Open the file in VSCode and inline hints appear everywhere.
+
+Or from the CLI without any code changes:
+
+```bash
+trickle run python etl_pipeline.py
+```
 
 ## Use Case 3: Exploring Unfamiliar Datasets
 

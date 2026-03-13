@@ -740,7 +740,21 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         const obsLabels = getDimLabels(obs);
-        const typeStr = typeNodeToString(obs.type, 3, obsLabels);
+        let typeStr = typeNodeToString(obs.type, 3, obsLabels);
+
+        // For primitive types, show actual value inline instead of just "number"/"integer"
+        if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+          if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+            typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+          } else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+            typeStr = String(obs.sample);
+          } else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+            typeStr = obs.sample ? 'True' : 'False';
+          } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+            typeStr = `"${obs.sample}"`;
+          }
+        }
+
         const position = new vscode.Position(lineNo - 1, varEnd);
 
         const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
