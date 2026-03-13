@@ -246,10 +246,17 @@ def _type_to_python(
         props = node.get("properties", {})
         cn = node.get("class_name", "")
         # Display-only types: their properties are metadata (shape, dtype,
-        # stats) not structural fields.  Render as just the class name.
-        if cn in ("ndarray", "Tensor", "DataFrame", "Series",
-                  "DatasetDict", "Dataset"):
-            return "Any"
+        # stats) not structural fields.  Render as the proper class name.
+        _DISPLAY_TYPE_NAMES = {
+            "ndarray": "ndarray",
+            "Tensor": "Tensor",
+            "DataFrame": "DataFrame",
+            "Series": "Series",
+            "DatasetDict": "DatasetDict",
+            "Dataset": "Dataset",
+        }
+        if cn in _DISPLAY_TYPE_NAMES:
+            return _DISPLAY_TYPE_NAMES[cn]
         if not props:
             return "Dict[str, Any]"
         if prop_name:
@@ -812,6 +819,32 @@ def generate_types() -> int:
             sections.append(_generate_py_for_function(fn))
             sections.append("")
             sections.append("")
+
+        # Detect display-type references and add conditional imports
+        body = "\n".join(sections)
+        _DISPLAY_IMPORTS = {
+            "ndarray": "from numpy import ndarray",
+            "Tensor": "from torch import Tensor",
+            "DataFrame": "from pandas import DataFrame",
+            "Series": "from pandas import Series",
+            "DatasetDict": "from datasets import DatasetDict",
+            "Dataset": "from datasets import Dataset",
+        }
+        import_lines: List[str] = []
+        for type_name, import_stmt in _DISPLAY_IMPORTS.items():
+            # Check if this type name appears as a standalone word in the body
+            # (not inside the header comments or the typing import line)
+            if type_name in body:
+                import_lines.append(import_stmt)
+        if import_lines:
+            # Insert a try/except block so the .pyi still works even if
+            # the library isn't installed
+            block = "try:\n"
+            for line in import_lines:
+                block += f"    {line}\n"
+            block += "except ImportError:\n    pass\n"
+            # Insert after the typing import line
+            sections.insert(6, block)
 
         stub_content = "\n".join(sections).rstrip() + "\n"
 
