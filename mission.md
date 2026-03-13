@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. Vitest+React integration is verified. Nested type hover tooltips render as structured, indented TypeScript-style type blocks. pytest plugin (`pytest11` entry point) auto-activates when `trickle-observe` is installed — no config needed, just run `pytest`. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest plugin auto-activates. Model instances with a `config` attribute now show constructor-call hints inline: `model: GPT(n_layer=12, n_head=12, n_embd=768, +2)` — config fields also appear in the hover type. Next priorities:
 
-1. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
+1. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`. Important for ML engineers using async data pipelines or FastAPI inference servers.
 
-2. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+3. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes from `[32, 768]` to `[32, 512]`), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
 
-4. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes unexpectedly), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
+4. HuggingFace integration: when using `transformers` models (e.g., `AutoModelForCausalLM.from_pretrained()`), surface the model config (vocab_size, hidden_size, num_layers, etc.) inline, including the model card name. Currently, HuggingFace models have `model.config` as a `PretrainedConfig` which may not be a dataclass — ensure the config extraction handles it.
 
 </focus point>
 
