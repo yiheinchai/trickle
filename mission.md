@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Test on more real-world Python repos** — Test on Django views, SQLAlchemy models, numpy/pandas data pipelines, async code (asyncio/aiohttp). Verify edge cases: generators, properties, class methods with decorators, context managers, unpacking assignments (`a, b = func()`). Fix any issues found.
+1. **Reduce observation JSONL bloat** — Functions called 100+ times (e.g. `load_recording` called per file) generate 100+ near-identical observation entries. Add deduplication or sampling to cap observations per function, reducing disk I/O and codegen time.
 
-2. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Show union types when a function is called with different arg types (multi-call overload merging). Improve terminal summary dict types to show `dict[str, int]` instead of just `dict` when value types are uniform.
+2. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Use proper import types (e.g. `numpy.ndarray` instead of `Any`) for ndarray/Tensor/DataFrame return types in .pyi stubs.
 
-3. **Suppress torch/sklearn stderr noise in trickle run path** — The `_entry_transform.py` path doesn't pre-warm optional imports, so torch/sklearn C-level stderr warnings appear when using `trickle run python`. Apply the same fd 2 suppression strategy used in `auto.py`'s `_prewarm_optional_imports`.
+3. **Test async code and more edge cases** — Test on async frameworks (asyncio/aiohttp), Django views, SQLAlchemy models. Verify generators-as-iterators (consuming yield values), properties, decorated class methods, and nested unpacking.
 
 </focus point>
 
