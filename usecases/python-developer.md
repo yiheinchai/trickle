@@ -153,7 +153,45 @@ class CreateUserRequest(BaseModel):
     role: Optional[str] = None
 ```
 
-## Use Case 4: Observe Specific Modules
+## Use Case 4: Pydantic / Dataclass / NamedTuple Inline Values
+
+When you use structured types for config or data models, trickle shows actual field **values** inline — not just the class name:
+
+```python
+from pydantic import BaseModel
+import dataclasses
+from typing import NamedTuple
+
+class AppConfig(BaseModel):
+    host: str = "localhost"
+    port: int = 8080
+    debug: bool = False
+    workers: int = 4
+
+@dataclasses.dataclass
+class DBConfig:
+    url: str = "postgresql://localhost/mydb"
+    pool_size: int = 10
+    timeout: float = 30.0
+
+class CacheConfig(NamedTuple):
+    backend: str
+    ttl: int
+    max_size: int
+
+app_cfg = AppConfig(port=9000, workers=8)
+# → AppConfig(host="localhost", port=9000, debug=False, workers=8)
+
+db_cfg = DBConfig(pool_size=20)
+# → DBConfig(url="postgresql://localhost...", pool_size=20, timeout=30.0)
+
+cache_cfg = CacheConfig(backend="redis", ttl=300, max_size=1000)
+# → CacheConfig(backend="redis", ttl=300, max_size=1000)
+```
+
+Works for all three: Pydantic v1/v2, `@dataclass`, and `NamedTuple`. Hover to see full field types and the complete value as JSON.
+
+## Use Case 5: Observe Specific Modules
 
 ```python
 from trickle import observe, observe_fn

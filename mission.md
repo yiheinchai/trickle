@@ -2,7 +2,7 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are working end-to-end. Python dataclasses and NamedTuples now show actual field values inline: `GPTConfig(block_size=1024, n_layer=6, n_head=6, n_embd=384, +3)` and `TrainConfig(lr=0.0003, batch_size=64, epochs=10)`. Next priorities:
+JS/TS and Python inline type hints are fully working. Pydantic v1/v2, dataclasses, and NamedTuples all show actual field values inline: `AppConfig(host="localhost", port=9000, debug=False, workers=8)`. Next priorities:
 
 1. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). JSX/TSX files aren't yet transformed by the ESM hooks. Approach: detect JSX syntax and strip it before regex-based variable finding, or integrate with a TSX/Babel transform.
 
@@ -10,7 +10,7 @@ JS/TS and Python inline type hints are working end-to-end. Python dataclasses an
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer.
 
-4. Python Pydantic v2 display: Pydantic models already use the dataclass path for samples (via pydantic_fields), but verify the `key=value` format works for pydantic v2 model instances. Test on a real FastAPI/pydantic project.
+4. Python: for nested structured types (e.g., `ExperimentConfig` with a `ModelConfig` sub-field), nested model fields currently show as `null` in the inline hint. Improve to show one level of nested compact values, e.g., `ExperimentConfig(model=ModelConfig(...), training=TrainingConfig(...), name="exp1", seed=42)`.
 
 5. Nested type compaction: when a compact type like `{id, name, +N}[]` is shown, hovering should show the full expanded object shape. Currently the hover tooltip shows the full TypeNode string but may be hard to read for deeply nested types — consider a structured hover card with collapsible sections.
 
