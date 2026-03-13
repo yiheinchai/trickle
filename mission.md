@@ -10,6 +10,8 @@ also make sure the index.html at root for github pages is good.
 
 while working on this focus point, and working through use cases, if there is an important use case that would provide value and get that type of customer to immediately start using trickle but we don't support it, just build it in full. Goal is to maximise value for customer
 
+To find out what would be of value, it would be helpful for each use case you go and find a real codebase and test trickle on it, see what pain points you experience and then improve trickle.
+
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
