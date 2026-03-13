@@ -190,12 +190,24 @@ def _trickle_tv(_val, _name, _line, _func=None):
             _s = {{f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}}
         else:
             import dataclasses as _dc
+            def _sv2(v):
+                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
+                if isinstance(v, str): return v[:40]
+                return None
             if _dc.is_dataclass(_val) and not isinstance(_val, type):
-                def _sv2(v):
-                    if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
-                    if isinstance(v, str): return v[:40]
-                    return None
                 _s = {{f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}}
+            elif hasattr(type(_val), 'model_fields') and hasattr(_val, 'model_dump'):
+                try:
+                    _d = _val.model_dump()
+                    _s = {{k: _sv2(v) for k, v in list(_d.items())[:8]}}
+                except Exception:
+                    _s = str(_val)[:100]
+            elif hasattr(type(_val), '__fields__') and hasattr(_val, 'dict'):
+                try:
+                    _d = _val.dict()
+                    _s = {{k: _sv2(v) for k, v in list(_d.items())[:8]}}
+                except Exception:
+                    _s = str(_val)[:100]
             else:
                 _s = str(_val)[:100]
         _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}

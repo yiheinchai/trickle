@@ -186,6 +186,20 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
         for field in list(dataclasses.fields(value))[:8]:
             r[field.name] = _sanitize(getattr(value, field.name, None), depth - 1)
         return r
+    # Pydantic v2
+    if hasattr(type(value), 'model_fields') and hasattr(value, 'model_dump'):
+        try:
+            d = value.model_dump()
+            return {k: _sanitize(v, depth - 1) for k, v in list(d.items())[:8]}
+        except Exception:
+            pass
+    # Pydantic v1
+    if hasattr(type(value), '__fields__') and hasattr(value, 'dict'):
+        try:
+            d = value.dict()
+            return {k: _sanitize(v, depth - 1) for k, v in list(d.items())[:8]}
+        except Exception:
+            pass
     return str(value)[:100]
 
 
@@ -310,12 +324,24 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            _s = {f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}",
             "        else:",
             "            import dataclasses as _dc",
+            "            def _sv2(v):",
+            "                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
+            "                if isinstance(v, str): return v[:40]",
+            "                return None",
             "            if _dc.is_dataclass(_val) and not isinstance(_val, type):",
-            "                def _sv2(v):",
-            "                    if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
-            "                    if isinstance(v, str): return v[:40]",
-            "                    return None",
             "                _s = {f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}",
+            "            elif hasattr(type(_val), 'model_fields') and hasattr(_val, 'model_dump'):",
+            "                try:",
+            "                    _d = _val.model_dump()",
+            "                    _s = {k: _sv2(v) for k, v in list(_d.items())[:8]}",
+            "                except Exception:",
+            "                    _s = str(_val)[:100]",
+            "            elif hasattr(type(_val), '__fields__') and hasattr(_val, 'dict'):",
+            "                try:",
+            "                    _d = _val.dict()",
+            "                    _s = {k: _sv2(v) for k, v in list(_d.items())[:8]}",
+            "                except Exception:",
+            "                    _s = str(_val)[:100]",
             "            else:",
             "                _s = str(_val)[:100]",
             f"        _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}",

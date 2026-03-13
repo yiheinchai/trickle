@@ -255,6 +255,20 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
             # Dataclass — emit field dict for structured display
             sample = {f.name: _simple_scalar(getattr(value, f.name, None))
                       for f in list(dataclasses.fields(value))[:8]}
+        elif hasattr(type(value), 'model_fields') and hasattr(value, 'model_dump'):
+            # Pydantic v2
+            try:
+                d = value.model_dump()
+                sample = {k: _simple_scalar(v) for k, v in list(d.items())[:8]}
+            except Exception:
+                sample = str(value)[:100]
+        elif hasattr(type(value), '__fields__') and hasattr(value, 'dict'):
+            # Pydantic v1
+            try:
+                d = value.dict()
+                sample = {k: _simple_scalar(v) for k, v in list(d.items())[:8]}
+            except Exception:
+                sample = str(value)[:100]
         else:
             sample = str(value)[:100]
 
