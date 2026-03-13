@@ -402,7 +402,7 @@ async function executeSingleRun(
   const localDir = env.TRICKLE_LOCAL_DIR || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle");
   const jsonlPath = path.join(localDir, "observations.jsonl");
 
-  const { generateLocalStubs, generateFromJsonl } = await import("../local-codegen");
+  const { generateLocalStubs, generateFromJsonl, readObservations } = await import("../local-codegen");
 
   // Start live type generation — types update while the process runs
   let liveTypesStop: (() => void) | null = null;
@@ -429,19 +429,41 @@ async function executeSingleRun(
     generateLocalStubs(singleFile, jsonlPath);
   }
 
-  // Show local summary
-  const stubs = generateFromJsonl(jsonlPath);
-  const allModules = Object.keys(stubs);
-  let totalFunctions = 0;
-  for (const mod of allModules) {
-    const lines = stubs[mod].ts.split("\n");
-    totalFunctions += lines.filter((l) => l.startsWith("export declare function")).length;
-  }
+  // Show local summary with function signatures
+  const observations = readObservations(jsonlPath);
+  const totalFunctions = observations.length;
 
   console.log("");
   console.log(chalk.bold("  Summary (local mode)"));
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log(`  Functions observed: ${chalk.bold(String(totalFunctions))}`);
+
+  if (totalFunctions > 0) {
+    console.log("");
+    // Group by module
+    const byModule = new Map<string, typeof observations>();
+    for (const fn of observations) {
+      const mod = fn.module || "_default";
+      if (!byModule.has(mod)) byModule.set(mod, []);
+      byModule.get(mod)!.push(fn);
+    }
+
+    for (const [mod, fns] of byModule) {
+      if (byModule.size > 1) {
+        console.log(`  ${chalk.bold(mod)}`);
+      }
+      const shown = fns.slice(0, 15);
+      for (const fn of shown) {
+        const sig = _formatLocalSignature(fn);
+        console.log(`    ${chalk.green("+")} ${sig}`);
+      }
+      if (fns.length > 15) {
+        console.log(chalk.gray(`    ... and ${fns.length - 15} more`));
+      }
+    }
+  }
+
+  console.log("");
   console.log(`  Data saved to: ${chalk.gray(jsonlPath)}`);
 
   if (singleFile) {
@@ -890,6 +912,69 @@ async function fetchTypeSignatures(
   } catch {
     return {};
   }
+}
+
+/**
+ * Format a compact type string from a TypeNode for terminal display.
+ */
+function _compactType(node: import("../local-codegen").TypeNode, depth: number = 0): string {
+  if (!node) return "any";
+  const kind = node.kind;
+  if (kind === "primitive") return node.name || "any";
+  if (kind === "unknown") return "any";
+  if (depth >= 3) return "...";
+  if (kind === "array") return `${_compactType(node.element!, depth + 1)}[]`;
+  if (kind === "tuple") {
+    const els = (node.elements || []).map((e) => _compactType(e, depth + 1));
+    return `[${els.join(", ")}]`;
+  }
+  if (kind === "union") {
+    const members = (node.members || []).map((m) => _compactType(m, depth + 1));
+    return members.join(" | ");
+  }
+  if (kind === "object") {
+    const props = node.properties || {};
+    const keys = Object.keys(props);
+    if (keys.length === 0) return "{}";
+    if (keys.length <= 3) {
+      const entries = keys.map((k) => `${k}: ${_compactType(props[k], depth + 1)}`);
+      return `{ ${entries.join(", ")} }`;
+    }
+    const first = keys.slice(0, 2).map((k) => `${k}: ${_compactType(props[k], depth + 1)}`);
+    return `{ ${first.join(", ")}, ... }`;
+  }
+  if (kind === "map") return `Map<${_compactType(node.key!, depth + 1)}, ${_compactType(node.value!, depth + 1)}>`;
+  if (kind === "set") return `Set<${_compactType(node.element!, depth + 1)}>`;
+  if (kind === "promise") return `Promise<${_compactType(node.resolved!, depth + 1)}>`;
+  if (kind === "iterator") {
+    const inner = _compactType(node.element!, depth + 1);
+    return `${node.name || "Iterator"}<${inner}>`;
+  }
+  if (kind === "function") return "Function";
+  return "any";
+}
+
+/**
+ * Format a function signature from local observations for terminal display.
+ */
+function _formatLocalSignature(fn: import("../local-codegen").FunctionTypeData, maxLen: number = 90): string {
+  const paramNames = fn.paramNames || [];
+  const params: string[] = [];
+
+  if (fn.argsType.kind === "tuple") {
+    for (let i = 0; i < (fn.argsType.elements || []).length; i++) {
+      const pname = paramNames[i] || `arg${i}`;
+      const ptype = _compactType(fn.argsType.elements![i]);
+      params.push(`${pname}: ${ptype}`);
+    }
+  }
+
+  const ret = _compactType(fn.returnType);
+  const sig = `${fn.name}(${params.join(", ")}) → ${ret}`;
+  if (sig.length > maxLen) {
+    return sig.substring(0, maxLen - 1) + "…";
+  }
+  return sig;
 }
 
 function formatSignature(

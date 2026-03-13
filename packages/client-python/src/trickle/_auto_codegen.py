@@ -235,6 +235,11 @@ def _type_to_python(
         inner = _type_to_python(node.get("element", {}), extracted, parent_name, prop_name)
         return f"Set[{inner}]"
 
+    if kind == "iterator":
+        inner = _type_to_python(node.get("element", {}), extracted, parent_name, prop_name)
+        name = node.get("name", "Iterator")
+        return f"{name}[{inner}]"
+
     if kind == "function":
         return "Callable[..., Any]"
 

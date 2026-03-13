@@ -8,7 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 
-interface TypeNode {
+export interface TypeNode {
   kind: string;
   name?: string;
   element?: TypeNode;
@@ -41,7 +41,7 @@ interface TypeVariant {
   paramNames?: string[];
 }
 
-interface FunctionTypeData {
+export interface FunctionTypeData {
   name: string;
   argsType: TypeNode;
   returnType: TypeNode;
@@ -220,7 +220,7 @@ function typeNodeKey(node: TypeNode): string {
 
 // ── Read and merge observations ──
 
-function readObservations(jsonlPath: string): FunctionTypeData[] {
+export function readObservations(jsonlPath: string): FunctionTypeData[] {
   if (!fs.existsSync(jsonlPath)) return [];
 
   const content = fs.readFileSync(jsonlPath, "utf-8");
@@ -355,6 +355,11 @@ function typeNodeToTS(
       return `Set<${typeNodeToTS(node.element!, extracted, parentName, propName, indent)}>`;
     case "promise":
       return `Promise<${typeNodeToTS(node.resolved!, extracted, parentName, propName, indent)}>`;
+    case "iterator": {
+      const inner = typeNodeToTS(node.element!, extracted, parentName, propName, indent);
+      const iterName = node.name === "AsyncIterator" ? "AsyncIterableIterator" : "IterableIterator";
+      return `${iterName}<${inner}>`;
+    }
     case "function": {
       const params = (node.params || []).map(
         (p, i) => `arg${i}: ${typeNodeToTS(p, extracted, parentName, `param${i}`, indent)}`,
@@ -594,6 +599,11 @@ function typeNodeToPython(
       return `Set[${typeNodeToPython(node.element!, extracted, parentName, propName)}]`;
     case "promise":
       return `Awaitable[${typeNodeToPython(node.resolved!, extracted, parentName, propName)}]`;
+    case "iterator": {
+      const inner = typeNodeToPython(node.element!, extracted, parentName, propName);
+      const iterName = node.name === "AsyncIterator" ? "AsyncIterator" : "Iterator";
+      return `${iterName}[${inner}]`;
+    }
     case "function": {
       const params = (node.params || []).map((p) =>
         typeNodeToPython(p, extracted, parentName, undefined),

@@ -308,6 +308,11 @@ def _compact_type(node: Dict[str, Any], depth: int = 0) -> str:
         inner = _compact_type(node.get("element", {}), depth + 1)
         return f"set[{inner}]"
 
+    if kind == "iterator":
+        elem = _compact_type(node.get("element", {}), depth + 1)
+        name = node.get("name", "Iterator")
+        return f"{name}[{elem}]"
+
     if kind == "function":
         return "Callable"
 
