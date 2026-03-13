@@ -369,7 +369,7 @@ def _get_torch_tensor_type() -> Any:
     try:
         import torch
         _torch_tensor_type = torch.Tensor
-    except ImportError:
+    except Exception:
         pass
     return _torch_tensor_type
 
@@ -387,7 +387,7 @@ def _get_torch_module_type() -> Any:
     try:
         import torch.nn
         _torch_module_type = torch.nn.Module
-    except ImportError:
+    except Exception:
         pass
     return _torch_module_type
 
@@ -554,7 +554,7 @@ def _get_torch_optimizer_type() -> Any:
     try:
         import torch.optim
         _torch_optimizer_type = torch.optim.Optimizer
-    except ImportError:
+    except Exception:
         pass
     return _torch_optimizer_type
 
@@ -606,7 +606,7 @@ def _get_torch_scheduler_type() -> Any:
             torch.optim.lr_scheduler, "LRScheduler",
             getattr(torch.optim.lr_scheduler, "_LRScheduler", None)
         )
-    except ImportError:
+    except Exception:
         pass
     return _torch_scheduler_type
 
@@ -657,7 +657,7 @@ def _get_torch_dataloader_type() -> Any:
     try:
         import torch.utils.data
         _torch_dataloader_type = torch.utils.data.DataLoader
-    except ImportError:
+    except Exception:
         pass
     return _torch_dataloader_type
 
@@ -722,7 +722,7 @@ def _get_torch_dataset_type() -> Any:
     try:
         import torch.utils.data
         _torch_dataset_type = torch.utils.data.Dataset
-    except ImportError:
+    except Exception:
         pass
     return _torch_dataset_type
 
@@ -775,7 +775,7 @@ def _get_pandas_dataframe_type() -> Any:
     try:
         import pandas
         _pandas_dataframe_type = pandas.DataFrame
-    except ImportError:
+    except Exception:
         pass
     return _pandas_dataframe_type
 
@@ -793,7 +793,7 @@ def _get_pandas_series_type() -> Any:
     try:
         import pandas
         _pandas_series_type = pandas.Series
-    except ImportError:
+    except Exception:
         pass
     return _pandas_series_type
 
@@ -910,7 +910,7 @@ def _get_sklearn_estimator_type() -> Any:
     try:
         from sklearn.base import BaseEstimator
         _sklearn_estimator_type = BaseEstimator
-    except ImportError:
+    except Exception:
         pass
     return _sklearn_estimator_type
 
@@ -1046,7 +1046,7 @@ def _get_pandas_groupby_type() -> Any:
     try:
         from pandas.core.groupby import GroupBy
         _pandas_groupby_type = GroupBy
-    except ImportError:
+    except Exception:
         pass
     return _pandas_groupby_type
 
@@ -1097,7 +1097,7 @@ def _get_pandas_index_type() -> Any:
     try:
         import pandas
         _pandas_index_type = pandas.Index
-    except ImportError:
+    except Exception:
         pass
     return _pandas_index_type
 
@@ -1168,7 +1168,7 @@ def _get_numpy_ndarray_type() -> Any:
     try:
         import numpy
         _numpy_ndarray_type = numpy.ndarray
-    except ImportError:
+    except Exception:
         pass
     return _numpy_ndarray_type
 
@@ -1188,7 +1188,7 @@ def _get_hf_dataset_type() -> Any:
     try:
         from datasets import Dataset
         _hf_dataset_type = Dataset
-    except ImportError:
+    except Exception:
         pass
     return _hf_dataset_type
 
@@ -1206,7 +1206,7 @@ def _get_hf_dataset_dict_type() -> Any:
     try:
         from datasets import DatasetDict
         _hf_dataset_dict_type = DatasetDict
-    except ImportError:
+    except Exception:
         pass
     return _hf_dataset_dict_type
 

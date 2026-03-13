@@ -32,6 +32,75 @@ os.environ["TRICKLE_LOCAL"] = "1"
 from trickle._observe_auto import install as _install_observe_hook  # noqa: E402
 _install_observe_hook()
 
+# Pre-warm optional type-checker imports (torch, sklearn, pandas, numpy, etc.)
+# before installing sys.settrace so that any C-level stderr output (e.g. numpy 2.x
+# / old-torch incompatibility warnings) happens once here, silently, rather than
+# inside the trace function on every variable assignment.
+def _prewarm_optional_imports() -> None:
+    import os as _os, sys as _sys
+    _old_stderr_fd: object = None
+    _devnull_fd: object = None
+    try:
+        # Redirect fd 2 at the OS level to suppress C-extension stderr output
+        _devnull_fd = _os.open(_os.devnull, _os.O_WRONLY)
+        _old_stderr_fd = _os.dup(2)
+        _os.dup2(_devnull_fd, 2)
+        # Also redirect Python-level sys.stderr
+        _old_pystderr = _sys.stderr
+        _sys.stderr = open(_os.devnull, "w")
+    except Exception:
+        _old_stderr_fd = None
+        _devnull_fd = None
+        _old_pystderr = None
+
+    try:
+        from trickle.type_inference import (  # noqa: F401
+            _get_torch_tensor_type, _get_torch_module_type,
+            _get_torch_optimizer_type, _get_torch_scheduler_type,
+            _get_torch_dataloader_type, _get_torch_dataset_type,
+            _get_pandas_dataframe_type, _get_pandas_series_type,
+            _get_pandas_groupby_type, _get_pandas_index_type,
+            _get_numpy_ndarray_type, _get_hf_dataset_type,
+            _get_hf_dataset_dict_type, _get_sklearn_estimator_type,
+        )
+        _get_torch_tensor_type()
+        _get_torch_module_type()
+        _get_torch_optimizer_type()
+        _get_torch_scheduler_type()
+        _get_torch_dataloader_type()
+        _get_torch_dataset_type()
+        _get_pandas_dataframe_type()
+        _get_pandas_series_type()
+        _get_pandas_groupby_type()
+        _get_pandas_index_type()
+        _get_numpy_ndarray_type()
+        _get_hf_dataset_type()
+        _get_hf_dataset_dict_type()
+        _get_sklearn_estimator_type()
+    except Exception:
+        pass
+    finally:
+        # Restore fd 2
+        if _old_stderr_fd is not None:
+            try:
+                _os.dup2(_old_stderr_fd, 2)
+                _os.close(_old_stderr_fd)
+            except Exception:
+                pass
+        if _devnull_fd is not None:
+            try:
+                _os.close(_devnull_fd)
+            except Exception:
+                pass
+        if _old_pystderr is not None:
+            try:
+                _sys.stderr.close()
+            except Exception:
+                pass
+            _sys.stderr = _old_pystderr
+
+_prewarm_optional_imports()
+
 # Install variable tracer for entry file (sys.settrace-based)
 try:
     from trickle._auto_var_tracer import install as _install_var_tracer  # noqa: E402

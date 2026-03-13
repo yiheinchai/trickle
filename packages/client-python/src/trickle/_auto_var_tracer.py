@@ -704,43 +704,47 @@ def _flush_pending_available(frame: Any) -> None:
 
 def _local_trace(frame: Any, event: str, arg: Any) -> Any:
     """Per-frame trace function — fires on line/return/exception events for traced frames."""
-    if event == "line":
-        # First, flush any pending assignment from the previous line
-        _flush_pending(frame)
-
-        # Check if current line is an assignment line
-        filename = frame.f_code.co_filename
-        line_map = _assignment_map.get(filename)
-        if line_map is not None:
-            lineno = frame.f_lineno
-            var_names = line_map.get(lineno)
-            if var_names is not None:
-                func_map = _func_context.get(filename, {})
-                func_name = func_map.get(lineno)
-                _pending[id(frame)] = (lineno, var_names, func_name)
-
-        return _local_trace
-
-    if event == "return":
-        # For coroutine frames (async def), a "return" event fires on suspension
-        # at each `await` point — NOT just on actual function return. At suspension
-        # the awaited variable is not yet assigned, so we only flush vars already
-        # in locals and keep the rest pending for the exception event that follows.
-        is_coro = bool(frame.f_code.co_flags & _CO_COROUTINE)
-        if is_coro:
-            _flush_pending_available(frame)
-        else:
+    try:
+        if event == "line":
+            # First, flush any pending assignment from the previous line
             _flush_pending(frame)
-        return None
 
-    if event == "exception":
-        # For coroutines, an "exception" event fires when the frame resumes after
-        # an `await` completes (Python uses StopIteration internally). However,
-        # the awaited variable is assigned AFTER this event and BEFORE the next
-        # `line` event. So we use _flush_pending_available here to only flush vars
-        # already in locals, keeping the rest pending for the upcoming `line` event.
-        _flush_pending_available(frame)
-        return _local_trace
+            # Check if current line is an assignment line
+            filename = frame.f_code.co_filename
+            line_map = _assignment_map.get(filename)
+            if line_map is not None:
+                lineno = frame.f_lineno
+                var_names = line_map.get(lineno)
+                if var_names is not None:
+                    func_map = _func_context.get(filename, {})
+                    func_name = func_map.get(lineno)
+                    _pending[id(frame)] = (lineno, var_names, func_name)
+
+            return _local_trace
+
+        if event == "return":
+            # For coroutine frames (async def), a "return" event fires on suspension
+            # at each `await` point — NOT just on actual function return. At suspension
+            # the awaited variable is not yet assigned, so we only flush vars already
+            # in locals and keep the rest pending for the exception event that follows.
+            is_coro = bool(frame.f_code.co_flags & _CO_COROUTINE)
+            if is_coro:
+                _flush_pending_available(frame)
+            else:
+                _flush_pending(frame)
+            return None
+
+        if event == "exception":
+            # For coroutines, an "exception" event fires when the frame resumes after
+            # an `await` completes (Python uses StopIteration internally). However,
+            # the awaited variable is assigned AFTER this event and BEFORE the next
+            # `line` event. So we use _flush_pending_available here to only flush vars
+            # already in locals, keeping the rest pending for the upcoming `line` event.
+            _flush_pending_available(frame)
+            return _local_trace
+
+    except Exception:
+        pass  # Never let trace function raise — Python would disable tracing and print error
 
     return _local_trace
 
