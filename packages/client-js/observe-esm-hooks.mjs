@@ -17,6 +17,7 @@ let config = {
   wrapperPath: '',
   transportPath: '',
   envDetectPath: '',
+  traceVarPath: '',
   backendUrl: 'http://localhost:4888',
   debug: false,
   includePatterns: [],
@@ -171,13 +172,233 @@ function lineOffset(source, lineIdx) {
   return off;
 }
 
+/**
+ * Find variable declarations in ESM source for tracing.
+ * Returns {varName, lineNo, insertAfterLine} for each declaration.
+ * insertAfterLine = the line number AFTER the full statement ends (for multi-line).
+ */
+function findVarDeclarationsESM(source) {
+  const results = [];
+  // Match const/let/var <name>[: Type] = <value>
+  // Also handles export const <name>[: Type] = <value>
+  const varRegex = /^([ \t]*)(?:export\s+)?(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:[^=]+?)?\s*=[^=]/gm;
+  let match;
+
+  while ((match = varRegex.exec(source)) !== null) {
+    const varName = match[3];
+    // Skip trickle-injected vars and transpiler-generated vars (start with __ or single _)
+    if (varName.startsWith('__') || varName === '_a' || varName === '_b') continue;
+
+    // Skip require() calls
+    const restOfLine = source.slice(match.index + match[0].length - 1, match.index + match[0].length + 200);
+    if (/^\s*require\s*\(/.test(restOfLine)) continue;
+
+    // Calculate line number where the declaration starts
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    // Find the end of the statement (semicolon at depth 0 or significant newline)
+    const startPos = match.index + match[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch; pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') pos++;
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+
+    // Calculate line number after the statement end
+    let insertAfterLine = 1;
+    for (let i = 0; i <= foundEnd && i < source.length; i++) {
+      if (source[i] === '\n') insertAfterLine++;
+    }
+
+    results.push({ varName, lineNo, insertAfterLine });
+  }
+
+  return results;
+}
+
+/**
+ * Find destructured variable declarations in ESM source.
+ */
+function findDestructuredDeclarationsESM(source) {
+  const results = [];
+  const destructRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\])\s*(?::\s*[^=]+?)?\s*=[^=]/gm;
+  let match;
+
+  while ((match = destructRegex.exec(source)) !== null) {
+    const pattern = match[1];
+    const varNames = extractDestructuredNamesESM(pattern).filter(n => !n.startsWith('__'));
+    if (varNames.length === 0) continue;
+
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    const startPos = match.index + match[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') depth++;
+      else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch; pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') pos++;
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+
+    let insertAfterLine = 1;
+    for (let i = 0; i <= foundEnd && i < source.length; i++) {
+      if (source[i] === '\n') insertAfterLine++;
+    }
+
+    results.push({ varNames, lineNo, insertAfterLine });
+  }
+
+  return results;
+}
+
+function extractDestructuredNamesESM(pattern) {
+  const names = [];
+  const inner = pattern.slice(1, -1).trim();
+  if (!inner) return names;
+
+  const parts = [];
+  let depth = 0, current = '';
+  for (const ch of inner) {
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) { parts.push(current.trim()); current = ''; continue; }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  for (const part of parts) {
+    if (part.startsWith('...')) {
+      const n = part.slice(3).trim().split(/[\s:]/)[0];
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(n)) names.push(n);
+      continue;
+    }
+    const colonIdx = part.indexOf(':');
+    if (colonIdx !== -1) {
+      const after = part.slice(colonIdx + 1).trim();
+      if (after.startsWith('{') || after.startsWith('[')) {
+        names.push(...extractDestructuredNamesESM(after));
+      } else {
+        const n = after.split(/[\s=]/)[0].trim();
+        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(n)) names.push(n);
+      }
+    } else {
+      const n = part.split(/[\s=]/)[0].trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(n)) names.push(n);
+    }
+  }
+  return names;
+}
+
 function transformSource(source, url) {
   const moduleName = moduleNameFromUrl(url);
+  let filePath = url;
+  try { filePath = fileURLToPath(url); } catch {}
+
   const lines = source.split('\n');
   const exportedFunctions = []; // { name, paramNames }
   const exportedDefaults = []; // { name, paramNames }
   const namedExports = []; // from `export { name }` statements
   const result = [];
+
+  // Find variable declarations for tracing
+  const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0' && config.traceVarPath;
+  const varDecls = varTraceEnabled ? findVarDeclarationsESM(source) : [];
+  const destructDecls = varTraceEnabled ? findDestructuredDeclarationsESM(source) : [];
+
+  // Build a map: line number → trace calls to insert AFTER that line
+  const traceAfterLine = new Map();
+  for (const { varName, lineNo, insertAfterLine } of varDecls) {
+    if (!traceAfterLine.has(insertAfterLine)) traceAfterLine.set(insertAfterLine, []);
+    traceAfterLine.get(insertAfterLine).push(
+      `try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}`
+    );
+  }
+  for (const { varNames, lineNo, insertAfterLine } of destructDecls) {
+    if (!traceAfterLine.has(insertAfterLine)) traceAfterLine.set(insertAfterLine, []);
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    traceAfterLine.get(insertAfterLine).push(`try{${calls}}catch(__e){}`);
+  }
+
+  const hasVarTracing = varDecls.length > 0 || destructDecls.length > 0;
+
+  // Prepend var tracer setup BEFORE user code.
+  // In ESM, import declarations are hoisted regardless of position, so
+  // `import { createRequire }` here runs before any user code even though
+  // it appears before user imports in the source text.
+  // The `const` declarations run in order, so they're available when
+  // the inline trace calls (injected after var declarations) execute.
+  if (hasVarTracing && config.traceVarPath) {
+    const tvPath = config.traceVarPath.replace(/\\/g, '\\\\');
+    const fpEscaped = filePath.replace(/\\/g, '\\\\');
+    result.push(`import { createRequire as __cr_tv } from 'node:module';`);
+    result.push(`const __require_tv = __cr_tv(import.meta.url);`);
+    result.push(`const __tv_mod = __require_tv('${tvPath}');`);
+    result.push(`if (typeof __tv_mod.initVarTracer === 'function') __tv_mod.initVarTracer({});`);
+    result.push(`const __trickle_tv = (v, n, l) => { try { __tv_mod.traceVar(v, n, l, ${JSON.stringify(moduleName)}, '${fpEscaped}'); } catch(__e) {} };`);
+  }
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -274,10 +495,18 @@ function transformSource(source, url) {
 
     // export class, export type, export interface — leave as-is
     result.push(line);
+
+    // Inject variable trace calls after this line (if any)
+    if (hasVarTracing) {
+      const calls = traceAfterLine.get(i + 1); // i+1 = 1-based line number
+      if (calls) {
+        for (const call of calls) result.push(call);
+      }
+    }
   }
 
-  // If nothing to wrap, return original
-  if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0) {
+  // If nothing to wrap or trace, return original
+  if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing) {
     return source;
   }
 
@@ -323,7 +552,8 @@ function transformSource(source, url) {
 
   if (config.debug) {
     const fnCount = exportedFunctions.length + exportedDefaults.length + namedExports.length;
-    console.log(`[trickle/esm] Transformed ${fnCount} exports from ${moduleName} (${fileURLToPath(url)})`);
+    const varCount = varDecls.length + destructDecls.length;
+    console.log(`[trickle/esm] Transformed ${fnCount} exports, ${varCount} vars from ${moduleName}`);
   }
 
   return transformed;
@@ -348,8 +578,10 @@ export async function load(url, context, nextLoad) {
     ? source
     : Buffer.from(source).toString('utf-8');
 
-  // Only transform if the module has exports
-  if (!sourceStr.includes('export ')) return result;
+  // Only transform if the module has exports or variable declarations to trace
+  const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0' && config.traceVarPath;
+  const hasVarDecls = varTraceEnabled && /^[ \t]*(?:export\s+)?(?:const|let|var)\s+[a-zA-Z_$]/m.test(sourceStr);
+  if (!sourceStr.includes('export ') && !hasVarDecls) return result;
 
   try {
     const transformed = transformSource(sourceStr, url);
