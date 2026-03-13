@@ -50,7 +50,10 @@ export interface VariableObservation {
  */
 export function initVarTracer(opts: { debug?: boolean } = {}): void {
   debugMode = opts.debug === true;
-  const dir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  // Auto-detect Lambda: use /tmp/.trickle (writable) instead of cwd (read-only in Lambda)
+  const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+  const defaultDir = isLambda ? '/tmp/.trickle' : path.join(process.cwd(), '.trickle');
+  const dir = process.env.TRICKLE_LOCAL_DIR || defaultDir;
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   varsFilePath = path.join(dir, 'variables.jsonl');
 

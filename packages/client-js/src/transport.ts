@@ -32,7 +32,10 @@ export function configure(opts: GlobalOpts): void {
   // Check for local/file-based mode
   if (process.env.TRICKLE_LOCAL === '1') {
     localMode = true;
-    const dir = process.env.TRICKLE_LOCAL_DIR || pathMod.join(process.cwd(), '.trickle');
+    // Auto-detect Lambda: use /tmp/.trickle (writable) instead of cwd (read-only in Lambda)
+    const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const defaultDir = isLambda ? '/tmp/.trickle' : pathMod.join(process.cwd(), '.trickle');
+    const dir = process.env.TRICKLE_LOCAL_DIR || defaultDir;
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
     localFilePath = pathMod.join(dir, 'observations.jsonl');
     if (debug) {

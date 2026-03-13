@@ -36,6 +36,7 @@ import { runCommand } from "./commands/run";
 import { annotateCommand } from "./commands/annotate";
 import { stubsCommand } from "./commands/stubs";
 import { varsCommand } from "./commands/vars";
+import { lambdaCommand } from "./commands/lambda";
 
 const program = new Command();
 
@@ -430,6 +431,9 @@ program
   .action(async (opts) => {
     await varsCommand(opts);
   });
+
+// trickle lambda [setup|layer|pull]
+lambdaCommand(program);
 
 // trickle annotate <file>
 program
