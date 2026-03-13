@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest plugin auto-activates. Model instances with a `config` attribute now show constructor-call hints inline: `model: GPT(n_layer=12, n_head=12, n_embd=768, +2)` — config fields also appear in the hover type. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest plugin auto-activates. Model config fields shown inline. Python async support is complete: variables assigned via `await` (including `asyncio.gather()` results) are now correctly traced by fixing the CO_COROUTINE flag detection and using partial pending flush on coroutine suspension events. Next priorities:
 
-1. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`. Important for ML engineers using async data pipelines or FastAPI inference servers.
+1. HuggingFace integration: when using `transformers` models (e.g., `AutoModelForCausalLM.from_pretrained()`), surface the model config (vocab_size, hidden_size, num_layers, etc.) inline. HuggingFace `PretrainedConfig` is not a dataclass — need to handle `config.to_dict()` or `vars(config)` to extract primitive fields for the constructor-call hint.
 
-2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+2. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes from `[32, 768]` to `[32, 512]`), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
 
-3. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes from `[32, 768]` to `[32, 512]`), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
+3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. HuggingFace integration: when using `transformers` models (e.g., `AutoModelForCausalLM.from_pretrained()`), surface the model config (vocab_size, hidden_size, num_layers, etc.) inline, including the model card name. Currently, HuggingFace models have `model.config` as a `PretrainedConfig` which may not be a dataclass — ensure the config extraction handles it.
+4. Improve `asyncio.gather()` result typing: currently shown as `array[][]` (list of lists). When the gather args are known, show more specific types like `[UserDict, PermsList]` for heterogeneous gather calls.
 
 </focus point>
 
