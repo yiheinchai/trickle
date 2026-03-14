@@ -2,22 +2,28 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <general directive>
-multifile inline type hints for python, currently, it seems that running train.py will have inline type hints. but model.py will not show inline type hints, even though model.py vars are captured in the jsonl
+test trickle on more real world codebases, key is to have diversity of codebases, find painpoints and fix them, maximise value to user
 
-next, focus on performance, no one will use trickle if running it hurts performance by too much
+my vision to have every single variable to be able to have inline type hints for any repo / codebase. the current usecases for js/ts does not follow this vision. you must realise this vision for python/ts/js
 </general directive>
 
 <focus point>
 
-Completed:
-- Fixed multifile hints: resolved symlinks (realpath) in Python tracers and extension so paths match VSCode's document.uri.fsPath. This was the likely cause of model.py not showing hints (macOS /tmp → /private/tmp mismatch).
-- Fixed loop value stacking: extension now deduplicates by (varName, line) using "last wins"
+Tested and fixed:
+- Async JS functions now correctly return Promise<T> in .d.ts stubs
+- detectSingleFile works for "node app.js", "npx ts-node app.ts" etc — enables .d.ts generation
+- CJS multifile variable tracing works (both entry file and imported modules get inline hints)
 
-Next for performance:
-1. **Measure current overhead** — benchmark trickle's AST transform + variable tracing vs bare Python execution to quantify the cost
-2. **Reduce I/O from variable tracing** — currently each variable write opens/appends/closes the file. Batch writes with a buffer (write every N entries or every Xms)
-3. **Skip tracing for hot loops** — detect variables inside tight loops and rate-limit observations (e.g. max 1 write per variable per 50ms)
-4. **Lazy type inference** — `infer_type()` walks the full object graph (max_depth=3) for every observation. For repeated types, cache the inference result
+Current status of "every variable gets inline hints":
+- **Python**: Full coverage — entry file + imported modules, all variable assignments traced
+- **JS CJS**: Good coverage — entry file + imported modules, const/let/var traced in function bodies
+- **JS ESM**: Broken — hooks load too late, no observations for top-level calls
+- **JS class methods**: Not observed — CJS observer only wraps top-level function declarations
+
+Priority gaps for the vision:
+1. **JS ESM variable tracing** — ESM loader hooks install after the entry module executes. Need AST transform approach (like Python) or use `--import` flag
+2. **JS class method observation** — class constructors and methods are invisible to the CJS observer
+3. **TypeScript with ts-node/tsx** — works via NODE_OPTIONS but needs testing with real TS projects
 
 </focus point>
 
