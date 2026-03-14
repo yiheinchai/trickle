@@ -523,7 +523,21 @@ function transformSource(source, url, originalSource) {
       const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
       // Remove 'export ' prefix, keep the function
       result.push(line.replace(/^(\s*)export\s+/, '$1'));
-      exportedFunctions.push({ name, paramNames });
+      exportedFunctions.push({ name, paramNames, wrapInPlace: true });
+      continue;
+    }
+
+    // Non-exported function declarations — wrap them too for entry module coverage
+    const plainFuncMatch = trimmed.match(/^(async\s+)?function\s+(\w+)\s*(?:<[^>]*>)?\s*\(/);
+    if (plainFuncMatch && !trimmed.startsWith('export')) {
+      const name = plainFuncMatch[2];
+      if (name !== 'require' && name !== 'exports' && name !== 'module' && !name.startsWith('__trickle')) {
+        const srcOffset = lineOffset(source, i) + (line.length - trimmed.length);
+        const parenPos = source.indexOf('(', srcOffset + plainFuncMatch[0].indexOf('('));
+        const paramNames = parenPos >= 0 ? extractParamNamesFromSource(source, parenPos) : [];
+        exportedFunctions.push({ name, paramNames, wrapInPlace: true, noExport: true });
+      }
+      result.push(line);
       continue;
     }
 
@@ -607,23 +621,58 @@ function transformSource(source, url, originalSource) {
     return source;
   }
 
-  // Add wrapper import and wrapping code at the bottom
+  // Add wrapper import and wrapping code
   const wrapperPathEscaped = config.wrapperPath.replace(/\\/g, '\\\\');
 
-  result.push('');
-  result.push('// [trickle] Auto-observation wrappers');
-  result.push(`import { createRequire as __cr } from 'node:module';`);
-  result.push(`const __require = __cr(import.meta.url);`);
-  result.push(`const { wrapFunction: __tw } = __require('${wrapperPathEscaped}');`);
-  result.push(`const __twOpts = (name, paramNames) => { const o = { functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true }; if (paramNames && paramNames.length) o.paramNames = paramNames; return o; };`);
+  // Insert wrapper setup at the top (after imports, before user code)
+  // Using import + createRequire to load CJS wrapper from ESM context
+  const wrapSetup = [
+    '',
+    '// [trickle] Auto-observation wrappers',
+    `import { createRequire as __cr } from 'node:module';`,
+    `const __require = __cr(import.meta.url);`,
+    `const { wrapFunction: __tw } = __require('${wrapperPathEscaped}');`,
+    `const __twOpts = (name, paramNames) => { const o = { functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true }; if (paramNames && paramNames.length) o.paramNames = paramNames; return o; };`,
+  ];
 
-  // Wrap and re-export named functions
+  // For in-place wrapping: insert wrapper calls right after each function declaration
+  // This ensures functions are wrapped BEFORE any top-level code calls them
+  const inPlaceWraps = [];
+  for (const fn of exportedFunctions) {
+    if (fn.wrapInPlace) {
+      const pn = fn.paramNames.length > 0 ? JSON.stringify(fn.paramNames) : 'null';
+      inPlaceWraps.push(`try{${fn.name}=__tw(${fn.name},__twOpts('${fn.name}',${pn}))}catch(__e){}`);
+    }
+  }
+
+  // Find the right position to insert the wrap setup + in-place wraps
+  // Insert after the last import/function-declaration block, before top-level code
+  let insertIdx = 0;
+  for (let j = 0; j < result.length; j++) {
+    const t = result[j].trimStart();
+    if (t.startsWith('import ') || t.startsWith('// [trickle]') || t === '' ||
+        t.startsWith('function ') || t.startsWith('async function ') ||
+        t.startsWith('const __trickle_tv') || t.startsWith('const __require_tv') ||
+        t.startsWith('const __tv_mod') || t.startsWith('if (typeof __tv_mod')) {
+      insertIdx = j + 1;
+    }
+  }
+  // But make sure we're after any function body closing braces too
+  // Simple heuristic: find the last line that's just '}' before any assignment/call
+  for (let j = insertIdx; j < result.length; j++) {
+    const t = result[j].trim();
+    if (t === '}') insertIdx = j + 1;
+    else if (t && !t.startsWith('//') && !t.startsWith('function') && !t.startsWith('async function')) break;
+  }
+
+  result.splice(insertIdx, 0, ...wrapSetup, ...inPlaceWraps, '');
+
+  // Re-export wrapped functions (for importers of this module)
   const reExports = [];
-  for (const { name, paramNames } of exportedFunctions) {
-    const wrappedName = `__trickle_${name}`;
-    const pn = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
-    result.push(`const ${wrappedName} = typeof ${name} === 'function' ? __tw(${name}, __twOpts('${name}', ${pn})) : ${name};`);
-    reExports.push(`${wrappedName} as ${name}`);
+  for (const fn of exportedFunctions) {
+    if (!fn.noExport) {
+      reExports.push(`${fn.name}`);
+    }
   }
 
   // Handle named exports from export { } statements
@@ -703,10 +752,11 @@ export async function load(url, context, nextLoad) {
     ? source
     : Buffer.from(source).toString('utf-8');
 
-  // Only transform if the module has exports or variable declarations to trace
+  // Only transform if the module has exports, function declarations, or variable declarations to trace
   const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0' && config.traceVarPath;
   const hasVarDecls = varTraceEnabled && /^[ \t]*(?:export\s+)?(?:const|let|var)\s+[a-zA-Z_$]/m.test(sourceStr);
-  if (!sourceStr.includes('export ') && !hasVarDecls) return result;
+  const hasFuncDecls = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+\w/m.test(sourceStr);
+  if (!sourceStr.includes('export ') && !hasVarDecls && !hasFuncDecls) return result;
 
   try {
     const transformed = transformSource(sourceStr, url);

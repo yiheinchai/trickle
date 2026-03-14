@@ -1048,6 +1048,19 @@ function isEsmFile(command: string): boolean {
 /**
  * Detect the language and inject the appropriate auto-observation mechanism.
  */
+function extractFileFromCommand(command: string, runner: string): string | null {
+  const rest = command.slice(runner.length).trim();
+  const tokens = rest.split(/\s+/);
+  const exts = [".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts"];
+  for (const t of tokens) {
+    if (t.startsWith("-")) continue;
+    if (exts.some(e => t.endsWith(e))) {
+      return path.resolve(t);
+    }
+  }
+  return null;
+}
+
 function injectObservation(
   command: string,
   backendUrl: string,
@@ -1077,7 +1090,22 @@ function injectObservation(
     const useEsm = isEsmFile(command) && observeEsmPath;
 
     if (useEsm) {
-      // Use both ESM hooks (for exported functions) and CJS hook (for Express auto-detection)
+      // ESM entry files: create a temp wrapper that registers hooks THEN imports the entry.
+      // This ensures the ESM loader hooks transform the entry module.
+      const esmFile = extractFileFromCommand(command, runner);
+      if (esmFile) {
+        const tmpDir = require("os").tmpdir();
+        const tmpWrapper = path.join(tmpDir, `.trickle_esm_${Date.now()}.mjs`);
+        const esmUrl = `file://${esmFile}`;
+        const wrapperContent = `await import('${esmUrl}');\n`;
+        fs.writeFileSync(tmpWrapper, wrapperContent);
+        // --import registers ESM hooks before the wrapper loads the entry module
+        const modified = `${runner} -r ${observePath} --import ${observeEsmPath} ${tmpWrapper}`;
+        // Clean up temp file after process exits
+        env.TRICKLE_ESM_WRAPPER = tmpWrapper;
+        return { instrumentedCommand: modified, env };
+      }
+      // Fallback
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
         `${runner} -r ${observePath} --import ${observeEsmPath} `,
