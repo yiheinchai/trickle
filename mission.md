@@ -40,9 +40,9 @@ Fixed: Imported module function observations now work (model.py methods captured
 
 Remaining gaps:
 
-1. **TrackedObject in type output** — list elements sometimes show as TrackedObject instead of the actual class name
-2. **ESM function-level observations** — ESM variable tracing works, but function signatures not yet written
-3. **Flask/decorator route handlers** — function signatures not captured for framework-called handlers
+1. **ESM function-level observations** — ESM variable tracing works, but function signatures not yet written to observations.jsonl
+2. **Flask/decorator route handlers** — function signatures not captured for framework-called handlers
+3. **TrackedObject in loop variables** — loop iteration variables inside functions still occasionally show TrackedObject (the list-level unwrap works but per-element iteration doesn't always unwrap)
 
 </focus point>
 
