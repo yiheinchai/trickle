@@ -9,22 +9,16 @@ my vision to have every single variable to be able to have inline type hints for
 
 <focus point>
 
-Fixed this session:
-- Async JS functions return Promise<T> in .d.ts stubs
-- JS class methods now observed via prototype wrapping (instance + static)
-- detectSingleFile handles any command with a source file token
-- Fixed invalid Tuple[] syntax in .pyi for zero-arg functions
-- Fixed multifile symlink resolution for inline hints
+Current status of "every variable gets inline hints":
+- **Python**: Full coverage — entry file + imported modules, all assignments traced
+- **JS CJS**: Full coverage — entry file + imported modules, const/let/var + class methods
+- **JS ESM**: Now working — entry module transformed via wrapper + dynamic import approach
+- **TypeScript**: Works via NODE_OPTIONS for ts-node/tsx
 
-Real-world test results (Flask API, ETL pipeline, JS app):
-- **Python variable tracing**: Excellent — 89-173 vars captured per test, correct types
-- **JS CJS**: 13+ functions, 20+ vars, multifile works, classes now observed
-- **Flask route handlers**: NOT observed as functions (called by Flask internally, not user code). Variable tracing inside handlers works fine.
-
-Remaining gaps for "every variable inline hints":
-1. **JS ESM**: hooks load too late — no observations. Need `--import` or AST transform
-2. **Flask/decorator route handlers**: function signatures not captured because they're called by the framework. Consider detecting @app.route decorated functions.
-3. **.pyi missing def statements**: CLI generates Input/Output type aliases but no function signatures. Python-side _auto_codegen does generate them but has path resolution issues for entry files.
+Remaining gaps:
+1. **ESM function-level observations** — variable tracing works, but function signatures aren't written to observations.jsonl (transport config issue in wrapper process)
+2. **Flask/decorator route handlers** — function signatures not captured for framework-called handlers
+3. **.pyi missing def statements** — CLI generates type aliases but not function signatures for the local codegen path
 
 </focus point>
 
