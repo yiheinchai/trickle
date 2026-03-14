@@ -222,6 +222,8 @@ def _type_to_python(
 
     if kind == "tuple":
         els = [_type_to_python(e, extracted, parent_name, f"arg{i}") for i, e in enumerate(node.get("elements", []))]
+        if not els:
+            return "Tuple[()]"
         return f"Tuple[{', '.join(els)}]"
 
     if kind == "union":

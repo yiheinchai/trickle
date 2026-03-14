@@ -590,6 +590,7 @@ function typeNodeToPython(
       const els = (node.elements || []).map((el, i) =>
         typeNodeToPython(el, extracted, parentName, `el${i}`),
       );
+      if (els.length === 0) return "Tuple[()]";
       return `Tuple[${els.join(", ")}]`;
     }
     case "union": {
