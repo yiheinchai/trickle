@@ -41,6 +41,13 @@ def main() -> None:
     except OSError:
         pass
 
+    # Configure transport for local mode (writes observations to .trickle/observations.jsonl)
+    os.environ["TRICKLE_LOCAL"] = "1"
+    if not os.environ.get("TRICKLE_LOCAL_DIR"):
+        os.environ["TRICKLE_LOCAL_DIR"] = _local_dir
+    from trickle.transport import configure as _configure_transport
+    _configure_transport()
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")

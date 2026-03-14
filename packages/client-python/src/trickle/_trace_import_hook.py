@@ -125,13 +125,8 @@ def _transform_module_source(source: str, filename: str, module_name: str) -> st
     """
     tree = ast.parse(source, filename)
 
-    # Transform top-level body
+    # Transform top-level body (recurses into class bodies)
     tree.body = _transform_body(tree.body)
-
-    # Transform class bodies
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ClassDef):
-            node.body = _transform_body(node.body)
 
     # Transform function bodies with qualified names (Class.method)
     _transform_functions_with_context(tree, class_name=None)
@@ -152,9 +147,17 @@ def _generate_module_tracer(filename: str, module_name: str) -> str:
     avoid Python's name mangling inside class bodies.
     """
     return f"""
-# --- trickle variable tracer ---
+# --- trickle variable tracer + function wrapper ---
 import os as _trickle_os
 import json as _trickle_json
+import functools as _trickle_functools
+import inspect as _trickle_inspect
+def _trickle_wrap(__fn, __name):
+    try:
+        from trickle.decorator import _wrap
+        return _wrap(__fn, name=__name, module={module_name!r})
+    except Exception:
+        return __fn
 _trickle_tv_cache = set()
 _trickle_tv_file = None
 def _trickle_tv(_val, _name, _line, _func=None):
@@ -243,8 +246,8 @@ def _trickle_dl(_val, _names, _var, _line, _func=None):
 """
 
 
-def _transform_body(body: list) -> list:
-    """Insert trace calls after assignments in a module/class body.
+def _transform_body(body: list, class_name: str = "") -> list:
+    """Insert trace calls after assignments and wrap functions in a module/class body.
 
     Also recurses into compound statements (for, if, while, with, try) so that
     variable assignments and for-loop iteration variables are traced.
@@ -252,8 +255,38 @@ def _transform_body(body: list) -> list:
     new_body: list = []
     for node in body:
         new_body.append(node)
-        # Skip function/class defs — they're handled separately
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Skip private/dunder methods
+            if node.name.startswith("_"):
+                continue
+            # Skip @classmethod, @staticmethod, @property
+            _skip_decorators = {"classmethod", "staticmethod", "property"}
+            if any(
+                (isinstance(d, ast.Name) and d.id in _skip_decorators)
+                or (isinstance(d, ast.Attribute) and d.attr in _skip_decorators)
+                for d in node.decorator_list
+            ):
+                continue
+            # Wrap function: func = _trickle_wrap(func, 'ClassName.func' or 'func')
+            obs_name = f"{class_name}.{node.name}" if class_name else node.name
+            wrap_stmt = ast.Assign(
+                targets=[ast.Name(id=node.name, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
+                    args=[
+                        ast.Name(id=node.name, ctx=ast.Load()),
+                        ast.Constant(value=obs_name),
+                    ],
+                    keywords=[],
+                ),
+            )
+            new_body.append(wrap_stmt)
+            continue
+
+        if isinstance(node, ast.ClassDef):
+            # Recurse into class body to wrap its methods
+            node.body = _transform_body(node.body, class_name=node.name)
             continue
         if isinstance(node, (ast.For, ast.AsyncFor)):
             loop_var_traces = _make_for_target_traces(node)
