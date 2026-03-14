@@ -304,6 +304,16 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if isinstance(value, (_types.GeneratorType, _types.AsyncGeneratorType)):
         return {"kind": "primitive", "name": "Generator"}
 
+    # --- Context managers (contextlib._GeneratorContextManager etc.) ---
+    if hasattr(value, "__enter__") and hasattr(value, "__exit__") and not isinstance(value, type):
+        cls_name = type(value).__name__
+        # contextlib context managers — return ContextManager type
+        if cls_name in ("_GeneratorContextManager", "_AsyncGeneratorContextManager"):
+            return {"kind": "object", "class_name": "ContextManager"}
+        # Other context managers (file objects, locks, etc.) — use class name
+        if cls_name not in ("function", "method"):
+            return {"kind": "object", "class_name": cls_name}
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))

@@ -898,7 +898,15 @@ function loadAllVariables() {
           if (!lineMap.has(obs.line)) {
             lineMap.set(obs.line, []);
           }
-          lineMap.get(obs.line)!.push(obs);
+          // Deduplicate: replace existing observation with same varName (last wins)
+          // This prevents stacking multiple values from loops (e.g. "num: 5: 6")
+          const existingVars = lineMap.get(obs.line)!;
+          const existingVarIdx = existingVars.findIndex(o => o.varName === obs.varName);
+          if (existingVarIdx >= 0) {
+            existingVars[existingVarIdx] = obs;
+          } else {
+            existingVars.push(obs);
+          }
         } catch {
           // Skip malformed lines
         }

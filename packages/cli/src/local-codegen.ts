@@ -11,6 +11,7 @@ import * as path from "path";
 export interface TypeNode {
   kind: string;
   name?: string;
+  class_name?: string;
   element?: TypeNode;
   elements?: TypeNode[];
   properties?: Record<string, TypeNode>;
@@ -371,6 +372,10 @@ function typeNodeToTS(
       return `(${params.join(", ")}) => ${ret}`;
     }
     case "object": {
+      // User-defined classes — use class name directly
+      if (node.class_name && node.class_name !== "dict") {
+        return node.class_name;
+      }
       const keys = Object.keys(node.properties || {});
       if (keys.length === 0) return "Record<string, never>";
       if (keys.length > 2 && propName) {
@@ -616,6 +621,10 @@ function typeNodeToPython(
       return `Callable[[${params.join(", ")}], ${ret}]`;
     }
     case "object": {
+      // User-defined classes and known types — use class name directly
+      if (node.class_name && node.class_name !== "dict") {
+        return node.class_name;
+      }
       const keys = Object.keys(node.properties || {});
       if (keys.length === 0) return "Dict[str, Any]";
       // If any key is not a valid Python identifier, fall back to Dict
@@ -840,7 +849,7 @@ export function generateFromJsonl(jsonlPath: string): Record<string, { ts: strin
       `# Generated at ${new Date().toISOString()}`,
       "# Do not edit manually — re-run your code with trickle to update",
       "",
-      "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
+      "from typing import Any, Awaitable, Callable, ContextManager, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
       "",
       "",
     ];
@@ -939,7 +948,7 @@ export function generateLocalStubs(
           `# Generated at ${new Date().toISOString()}`,
           "# Do not edit manually — re-run your code with trickle to update",
           "",
-          "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
+          "from typing import Any, Awaitable, Callable, ContextManager, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
           "",
           "",
         ];

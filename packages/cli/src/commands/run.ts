@@ -939,6 +939,9 @@ function _compactType(node: import("../local-codegen").TypeNode, depth: number =
     return members.join(" | ");
   }
   if (kind === "object") {
+    if ((node as any).class_name && (node as any).class_name !== "dict") {
+      return (node as any).class_name;
+    }
     const props = node.properties || {};
     const keys = Object.keys(props);
     if (keys.length === 0) return "{}";
