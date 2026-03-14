@@ -9,21 +9,22 @@ my vision to have every single variable to be able to have inline type hints for
 
 <focus point>
 
-Tested and fixed:
-- Async JS functions now correctly return Promise<T> in .d.ts stubs
-- detectSingleFile works for "node app.js", "npx ts-node app.ts" etc — enables .d.ts generation
-- CJS multifile variable tracing works (both entry file and imported modules get inline hints)
+Fixed this session:
+- Async JS functions return Promise<T> in .d.ts stubs
+- JS class methods now observed via prototype wrapping (instance + static)
+- detectSingleFile handles any command with a source file token
+- Fixed invalid Tuple[] syntax in .pyi for zero-arg functions
+- Fixed multifile symlink resolution for inline hints
 
-Current status of "every variable gets inline hints":
-- **Python**: Full coverage — entry file + imported modules, all variable assignments traced
-- **JS CJS**: Good coverage — entry file + imported modules, const/let/var traced in function bodies
-- **JS ESM**: Broken — hooks load too late, no observations for top-level calls
-- **JS class methods**: Not observed — CJS observer only wraps top-level function declarations
+Real-world test results (Flask API, ETL pipeline, JS app):
+- **Python variable tracing**: Excellent — 89-173 vars captured per test, correct types
+- **JS CJS**: 13+ functions, 20+ vars, multifile works, classes now observed
+- **Flask route handlers**: NOT observed as functions (called by Flask internally, not user code). Variable tracing inside handlers works fine.
 
-Priority gaps for the vision:
-1. **JS ESM variable tracing** — ESM loader hooks install after the entry module executes. Need AST transform approach (like Python) or use `--import` flag
-2. **JS class method observation** — class constructors and methods are invisible to the CJS observer
-3. **TypeScript with ts-node/tsx** — works via NODE_OPTIONS but needs testing with real TS projects
+Remaining gaps for "every variable inline hints":
+1. **JS ESM**: hooks load too late — no observations. Need `--import` or AST transform
+2. **Flask/decorator route handlers**: function signatures not captured because they're called by the framework. Consider detecting @app.route decorated functions.
+3. **.pyi missing def statements**: CLI generates Input/Output type aliases but no function signatures. Python-side _auto_codegen does generate them but has path resolution issues for entry files.
 
 </focus point>
 
