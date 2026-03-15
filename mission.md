@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Added `--annotated` mode to trickle context — shows source code with runtime values as inline comments. Agents see both code AND values in one view: `const user = getUser(id);  // user = null`. Full agent stack: CLAUDE.md generation (trickle init), trickle context (plain/compact/annotated/json), trickle tool-schema (OpenAI/Anthropic/MCP). Continue expanding TAM — consider database/ORM query tracing, deeper agent hooks (auto-run on error), or expanding to new language ecosystems.
+Added auto error capture — when Node.js crashes with uncaught exception, trickle writes error context + nearby variable values to .trickle/errors.jsonl. Agents run `trickle context <file> --annotated` after a crash and immediately see source code with values showing what caused the error. Full agent stack: CLAUDE.md generation, trickle context (plain/compact/annotated/json), error capture, tool-schema. Continue expanding TAM — consider adding Python error capture, database/ORM query tracing, or new language support.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
