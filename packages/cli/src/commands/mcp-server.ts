@@ -507,6 +507,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_environment",
+    description: "Get the application's environment snapshot — Python version, env vars (secrets redacted), detected frameworks, working directory. Use to debug configuration issues.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_distributed_traces",
     description: "Get distributed traces showing request flow across microservices. Each trace has spans with service name, operation, timing, and parent-child relationships via trace IDs.",
     inputSchema: { type: "object", properties: {} },
@@ -588,6 +593,15 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           }
           case "get_websocket_events": result = getWebSocketEvents(); break;
           case "get_distributed_traces": result = getDistributedTraces(); break;
+          case "get_environment": {
+            const envFile = path.join(findTrickleDir(), "environment.json");
+            if (!fs.existsSync(envFile)) {
+              result = { environment: "No environment snapshot. Run the app with trickle first." };
+            } else {
+              try { result = JSON.parse(fs.readFileSync(envFile, "utf-8")); } catch { result = { environment: "Failed to read environment snapshot." }; }
+            }
+            break;
+          }
           case "get_performance_profile": result = getPerformanceProfile(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;

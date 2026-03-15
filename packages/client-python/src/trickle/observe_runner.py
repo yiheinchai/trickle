@@ -104,6 +104,13 @@ def main() -> None:
     except Exception:
         pass
 
+    # Capture environment snapshot for agent debugging
+    try:
+        from trickle.env_capture import capture_environment
+        capture_environment()
+    except Exception:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _production = _os2.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")
