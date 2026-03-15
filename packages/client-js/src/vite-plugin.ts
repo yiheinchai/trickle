@@ -1658,8 +1658,12 @@ export function transformEsmSource(
   // Find function parameter names for tracing
   const funcParamInsertions = traceVars ? findFunctionParams(source, isReactFile) : [];
 
-  // Find JSX text expressions for tracing (React files only)
-  const jsxExprInsertions = (traceVars && isReactFile) ? findJsxExpressions(source) : [];
+  // Find JSX text expressions for tracing (React files only).
+  // Skip if JSX has already been compiled to _jsxDEV/jsx/jsxs calls (e.g. by Vite's React plugin).
+  // In that case, the `{` characters in the source are plain JS (function bodies, object literals)
+  // and findJsxExpressions would corrupt them by injecting __trickle_tv() calls.
+  const jsxAlreadyCompiled = /\b_?jsxDEV\b|\bjsxs?\s*\(/.test(source);
+  const jsxExprInsertions = (traceVars && isReactFile && !jsxAlreadyCompiled) ? findJsxExpressions(source) : [];
 
   if (funcInsertions.length === 0 && importInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && jsxExprInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
