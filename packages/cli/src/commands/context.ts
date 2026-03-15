@@ -12,6 +12,7 @@
  *   trickle context --function createUser    # context for a function
  *   trickle context --errors                 # only error-related context
  *   trickle context --compact                # minimal output for small context windows
+ *   trickle context src/api.ts --annotated   # source code with inline runtime values
  */
 
 import * as fs from "fs";
@@ -23,6 +24,7 @@ export interface ContextOptions {
   errors?: boolean;
   compact?: boolean;
   json?: boolean;
+  annotated?: boolean;
 }
 
 interface VarObservation {
@@ -184,6 +186,63 @@ export async function contextCommand(
       console.log("No errors recorded.");
       return;
     }
+  }
+
+  // Annotated output: show source code with inline runtime values
+  if (opts.annotated && targetFile) {
+    const output: string[] = [];
+    // Find the actual source file
+    const candidates = filteredVars.map(v => v.file);
+    const uniqueFiles = [...new Set(candidates)];
+
+    for (const absFile of uniqueFiles) {
+      if (!fs.existsSync(absFile)) continue;
+      const relPath = path.relative(process.cwd(), absFile);
+      const sourceLines = fs.readFileSync(absFile, "utf-8").split("\n");
+
+      // Build line → observations map (deduped, last wins per varName)
+      const lineObs = new Map<number, Map<string, VarObservation>>();
+      for (const v of filteredVars) {
+        if (v.file !== absFile) continue;
+        if (!lineObs.has(v.line)) lineObs.set(v.line, new Map());
+        lineObs.get(v.line)!.set(v.varName, v);
+      }
+
+      // Determine line range to show
+      let startLine = 1;
+      let endLine = sourceLines.length;
+      if (targetLine) {
+        const radius = 15;
+        startLine = Math.max(1, targetLine - radius);
+        endLine = Math.min(sourceLines.length, targetLine + radius);
+      }
+
+      output.push(`## ${relPath}`);
+      output.push("```");
+      for (let i = startLine; i <= endLine; i++) {
+        const src = sourceLines[i - 1] || "";
+        const obs = lineObs.get(i);
+        if (obs && obs.size > 0) {
+          const annotations = Array.from(obs.values())
+            .map(v => `${v.varName} = ${formatSampleCompact(v.sample)}`)
+            .join(", ");
+          // Pad source line and add annotation as comment
+          const padded = src.padEnd(60);
+          output.push(`${String(i).padStart(4)} | ${padded} // ${annotations}`);
+        } else {
+          output.push(`${String(i).padStart(4)} | ${src}`);
+        }
+      }
+      output.push("```");
+      output.push("");
+    }
+
+    if (output.length === 0) {
+      console.log("No source files found for the specified target.");
+    } else {
+      console.log(output.join("\n"));
+    }
+    return;
   }
 
   // Output

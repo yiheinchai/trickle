@@ -164,6 +164,7 @@ program
   .option("--function <name>", "Filter by function name")
   .option("--errors", "Only show error-related context")
   .option("--compact", "Minimal output for small context windows")
+  .option("--annotated", "Show source code with inline runtime values")
   .option("--json", "Output as structured JSON")
   .action(async (fileOrLine: string | undefined, opts) => {
     await contextCommand(fileOrLine, opts);
