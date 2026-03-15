@@ -781,4 +781,24 @@ if (
   process.argv.splice(2, 0, "run");
 }
 
+// Custom help: show curated commands first, then full list
+program.addHelpText('before', `
+  ${chalk.bold('Quick Start')}
+    trickle init                Set up trickle in your project
+    trickle run <command>       Run with observability (zero code changes)
+    trickle test [command]      Run tests with structured results
+
+  ${chalk.bold('Analyze')}
+    trickle summary             Full overview: errors, queries, root causes
+    trickle explain <file>      Understand a file: functions, call graph, data flow
+    trickle flamegraph          Performance hotspots visualization
+    trickle doctor              Health check with recommended actions
+
+  ${chalk.bold('Fix & Verify')}
+    trickle verify --baseline   Save metrics before fixing
+    trickle verify              Compare after fixing
+
+  ${chalk.bold('All Commands')}
+`);
+
 program.parse();
