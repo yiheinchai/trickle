@@ -9,12 +9,10 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Complete observability platform: 12 data types, 18 MCP tools, 15+ auto-patched drivers. Full JS + Python parity. README updated.
+Complete observability platform: 12 data types, 18 MCP tools, 15+ drivers. Full JS + Python parity.
 
-Pipeline: run → monitor → heal → verify → cloud
-Data: variables, functions+timing, call trace, DB queries, HTTP, WebSocket, logs, console, errors, memory, traces, environment
-
-Done: `trickle ci` — CI/CD integration with GitHub Actions annotations. CLI 0.1.106.
+Commands: run, monitor, heal, verify, doctor, agent, ci, cloud, dashboard-local
+Added: trickle agent (autonomous debugging report), trickle ci (GitHub Actions), GitHub workflow template. CLI 0.1.107.
 
 Next: Build cloud.trickle.dev backend, Go/Rust language support
 </focus point>
