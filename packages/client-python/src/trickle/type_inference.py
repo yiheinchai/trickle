@@ -455,13 +455,13 @@ def _get_torch_tensor_type() -> Any:
     global _torch_tensor_type, _torch_checked
     if _torch_checked:
         return _torch_tensor_type
-    _torch_checked = True
     try:
         # Only resolve if torch is already imported — never trigger a cold import
         # (importing torch takes 3-10s and would cripple startup for non-ML apps)
         import sys
         if 'torch' in sys.modules:
             _torch_tensor_type = sys.modules['torch'].Tensor
+            _torch_checked = True  # Only cache positive result
     except Exception:
         pass
     return _torch_tensor_type
@@ -476,11 +476,11 @@ def _get_torch_module_type() -> Any:
     global _torch_module_type, _torch_module_checked
     if _torch_module_checked:
         return _torch_module_type
-    _torch_module_checked = True
     try:
         import sys
         if 'torch.nn' in sys.modules:
             _torch_module_type = sys.modules['torch.nn'].Module
+            _torch_module_checked = True
     except Exception:
         pass
     return _torch_module_type
@@ -644,11 +644,11 @@ def _get_torch_optimizer_type() -> Any:
     global _torch_optimizer_type, _torch_optimizer_checked
     if _torch_optimizer_checked:
         return _torch_optimizer_type
-    _torch_optimizer_checked = True
     try:
         import sys
         if 'torch.optim' in sys.modules:
             _torch_optimizer_type = sys.modules['torch.optim'].Optimizer
+            _torch_optimizer_checked = True
     except Exception:
         pass
     return _torch_optimizer_type
@@ -693,7 +693,6 @@ def _get_torch_scheduler_type() -> Any:
     global _torch_scheduler_type, _torch_scheduler_checked
     if _torch_scheduler_checked:
         return _torch_scheduler_type
-    _torch_scheduler_checked = True
     try:
         import sys
         mod = sys.modules.get('torch.optim.lr_scheduler')
@@ -702,6 +701,7 @@ def _get_torch_scheduler_type() -> Any:
                 mod, "LRScheduler",
                 getattr(mod, "_LRScheduler", None)
             )
+            _torch_scheduler_checked = True
     except Exception:
         pass
     return _torch_scheduler_type
@@ -749,12 +749,12 @@ def _get_torch_dataloader_type() -> Any:
     global _torch_dataloader_type, _torch_dataloader_checked
     if _torch_dataloader_checked:
         return _torch_dataloader_type
-    _torch_dataloader_checked = True
     try:
         import sys
         mod = sys.modules.get('torch.utils.data')
         if mod is not None:
             _torch_dataloader_type = mod.DataLoader
+            _torch_dataloader_checked = True
     except Exception:
         pass
     return _torch_dataloader_type
@@ -816,12 +816,12 @@ def _get_torch_dataset_type() -> Any:
     global _torch_dataset_type, _torch_dataset_checked
     if _torch_dataset_checked:
         return _torch_dataset_type
-    _torch_dataset_checked = True
     try:
         import sys
         mod = sys.modules.get('torch.utils.data')
         if mod is not None:
             _torch_dataset_type = mod.Dataset
+            _torch_dataset_checked = True
     except Exception:
         pass
     return _torch_dataset_type
@@ -871,11 +871,11 @@ def _get_pandas_dataframe_type() -> Any:
     global _pandas_dataframe_type, _pandas_dataframe_checked
     if _pandas_dataframe_checked:
         return _pandas_dataframe_type
-    _pandas_dataframe_checked = True
     try:
         import sys
         if 'pandas' in sys.modules:
             _pandas_dataframe_type = sys.modules['pandas'].DataFrame
+            _pandas_dataframe_checked = True
     except Exception:
         pass
     return _pandas_dataframe_type
@@ -890,11 +890,11 @@ def _get_pandas_series_type() -> Any:
     global _pandas_series_type, _pandas_series_checked
     if _pandas_series_checked:
         return _pandas_series_type
-    _pandas_series_checked = True
     try:
         import sys
         if 'pandas' in sys.modules:
             _pandas_series_type = sys.modules['pandas'].Series
+            _pandas_series_checked = True
     except Exception:
         pass
     return _pandas_series_type
@@ -1008,12 +1008,12 @@ def _get_sklearn_estimator_type() -> Any:
     global _sklearn_estimator_type, _sklearn_estimator_checked
     if _sklearn_estimator_checked:
         return _sklearn_estimator_type
-    _sklearn_estimator_checked = True
     try:
         import sys
         mod = sys.modules.get('sklearn.base')
         if mod is not None:
             _sklearn_estimator_type = mod.BaseEstimator
+            _sklearn_estimator_checked = True
     except Exception:
         pass
     return _sklearn_estimator_type
@@ -1146,12 +1146,12 @@ def _get_pandas_groupby_type() -> Any:
     global _pandas_groupby_type, _pandas_groupby_checked
     if _pandas_groupby_checked:
         return _pandas_groupby_type
-    _pandas_groupby_checked = True
     try:
         import sys
         mod = sys.modules.get('pandas.core.groupby')
         if mod is not None:
             _pandas_groupby_type = mod.GroupBy
+            _pandas_groupby_checked = True
     except Exception:
         pass
     return _pandas_groupby_type
@@ -1199,11 +1199,11 @@ def _get_pandas_index_type() -> Any:
     global _pandas_index_type, _pandas_index_checked
     if _pandas_index_checked:
         return _pandas_index_type
-    _pandas_index_checked = True
     try:
         import sys
         if 'pandas' in sys.modules:
             _pandas_index_type = sys.modules['pandas'].Index
+            _pandas_index_checked = True
     except Exception:
         pass
     return _pandas_index_type
@@ -1271,11 +1271,11 @@ def _get_numpy_ndarray_type() -> Any:
     global _numpy_ndarray_type, _numpy_checked
     if _numpy_checked:
         return _numpy_ndarray_type
-    _numpy_checked = True
     try:
         import sys
         if 'numpy' in sys.modules:
             _numpy_ndarray_type = sys.modules['numpy'].ndarray
+            _numpy_checked = True
     except Exception:
         pass
     return _numpy_ndarray_type
@@ -1292,12 +1292,12 @@ def _get_hf_dataset_type() -> Any:
     global _hf_dataset_type, _hf_dataset_checked
     if _hf_dataset_checked:
         return _hf_dataset_type
-    _hf_dataset_checked = True
     try:
         import sys
         mod = sys.modules.get('datasets')
         if mod is not None:
             _hf_dataset_type = mod.Dataset
+            _hf_dataset_checked = True
     except Exception:
         pass
     return _hf_dataset_type
@@ -1312,12 +1312,12 @@ def _get_hf_dataset_dict_type() -> Any:
     global _hf_dataset_dict_type, _hf_dataset_dict_checked
     if _hf_dataset_dict_checked:
         return _hf_dataset_dict_type
-    _hf_dataset_dict_checked = True
     try:
         import sys
         mod = sys.modules.get('datasets')
         if mod is not None:
             _hf_dataset_dict_type = mod.DatasetDict
+            _hf_dataset_dict_checked = True
     except Exception:
         pass
     return _hf_dataset_dict_type
