@@ -76,32 +76,87 @@ function decodeVLQ(encoded: string): number[] {
 interface SourceMapData {
   /** Map from compiled 1-based line → original 1-based line */
   lineMap: Map<number, number>;
-  /** Original source file path (resolved to absolute) */
+  /** Original source file path (resolved to absolute) — primary/first user source */
   originalFile: string;
   /** All source files listed in the source map */
   sources: string[];
+  /** Map from compiled line → resolved source file path (for multi-source bundles) */
+  lineSourceMap?: Map<number, string>;
+}
+
+/**
+ * Resolve a source map source path to a real filesystem path.
+ * Handles webpack:// URLs, file:// URLs, and relative paths.
+ */
+function resolveSourcePath(source: string, mapDir: string, sourceRoot: string, jsFilePath: string): string {
+  // Handle webpack:// URLs: webpack://package-name/./src/file.ts
+  if (source.startsWith('webpack://')) {
+    // Strip webpack://package-name/ prefix
+    const withoutProtocol = source.replace(/^webpack:\/\/[^/]*\//, '');
+    // Resolve relative to the project root (parent of dist/ or the JS file's directory)
+    const projectRoot = findProjectRoot(jsFilePath);
+    return path.resolve(projectRoot, withoutProtocol);
+  }
+  // Handle file:// URLs
+  if (source.startsWith('file://')) {
+    return source.replace(/^file:\/\//, '');
+  }
+  // Regular relative path
+  return path.resolve(mapDir, sourceRoot, source);
+}
+
+/**
+ * Find the project root by looking for package.json or tsconfig.json
+ * starting from the JS file's directory and walking up.
+ */
+function findProjectRoot(jsFilePath: string): string {
+  let dir = path.dirname(jsFilePath);
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, 'package.json')) || fs.existsSync(path.join(dir, 'tsconfig.json'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.dirname(jsFilePath);
 }
 
 /**
  * Parse a source map JSON and build a compiled→original line mapping.
- * Only handles single-source maps (most common for tsc output).
+ * Supports both single-source (tsc) and multi-source (webpack/rollup) maps.
  */
-function parseSourceMap(mapJson: string, mapFilePath: string): SourceMapData | null {
+function parseSourceMap(mapJson: string, mapFilePath: string, jsFilePath: string): SourceMapData | null {
   try {
     const map = JSON.parse(mapJson);
     if (!map.mappings || !map.sources || map.sources.length === 0) return null;
 
-    // Resolve original source path relative to the .map file location
     const mapDir = path.dirname(mapFilePath);
     const sourceRoot = map.sourceRoot || '';
-    const originalFile = path.resolve(mapDir, sourceRoot, map.sources[0]);
+
+    // Resolve all source paths, filtering out non-user sources (webpack internals)
+    const resolvedSources = map.sources.map((s: string) => resolveSourcePath(s, mapDir, sourceRoot, jsFilePath));
+
+    // Find the first user source file (skip webpack bootstrap/runtime)
+    let primarySourceIdx = 0;
+    for (let i = 0; i < resolvedSources.length; i++) {
+      const s = map.sources[i] as string;
+      if (!s.includes('webpack/bootstrap') && !s.includes('webpack/runtime') && fs.existsSync(resolvedSources[i])) {
+        primarySourceIdx = i;
+        break;
+      }
+    }
+    const originalFile = resolvedSources[primarySourceIdx];
 
     // Decode mappings: semicolons separate lines, commas separate segments
-    // VLQ values are cumulative across ALL segments (not just first per line),
-    // so we must process every segment to maintain correct state.
+    // VLQ values are cumulative across ALL segments (not just first per line).
+    // For multi-source maps, also track the source index to map lines to different files.
     const lineMap = new Map<number, number>();
+    /** Map from generated line → resolved source file path */
+    const lineSourceMap = new Map<number, string>();
     const lines = map.mappings.split(';');
-    let sourceLine = 0; // Cumulative source line (0-based, relative)
+    let sourceLine = 0;
+    let sourceIdx = 0;
 
     for (let genLine = 0; genLine < lines.length; genLine++) {
       const line = lines[genLine];
@@ -112,19 +167,22 @@ function parseSourceMap(mapJson: string, mapFilePath: string): SourceMapData | n
       for (const seg of segments) {
         if (!seg) continue;
         const decoded = decodeVLQ(seg);
-        // decoded: [genCol, sourceIdx, sourceLine, sourceCol, ...]
         if (decoded.length >= 3) {
-          sourceLine += decoded[2]; // Update cumulative source line
-          // Only record the first segment's mapping for this generated line
+          if (decoded.length >= 2) sourceIdx += decoded[1]; // Update source index
+          sourceLine += decoded[2];
           if (!firstSegmentMapped) {
-            lineMap.set(genLine + 1, sourceLine + 1); // Convert to 1-based
+            lineMap.set(genLine + 1, sourceLine + 1);
+            // Track which source file this line belongs to
+            if (sourceIdx >= 0 && sourceIdx < resolvedSources.length) {
+              lineSourceMap.set(genLine + 1, resolvedSources[sourceIdx]);
+            }
             firstSegmentMapped = true;
           }
         }
       }
     }
 
-    return { lineMap, originalFile, sources: map.sources };
+    return { lineMap, originalFile, sources: map.sources, lineSourceMap };
   } catch {
     return null;
   }
@@ -146,7 +204,7 @@ function loadSourceMap(jsFilePath: string, source: string): SourceMapData | null
       const mapPath = path.resolve(path.dirname(jsFilePath), url);
       if (fs.existsSync(mapPath)) {
         const mapJson = fs.readFileSync(mapPath, 'utf8');
-        return parseSourceMap(mapJson, mapPath);
+        return parseSourceMap(mapJson, mapPath, jsFilePath);
       }
     }
 
@@ -154,7 +212,7 @@ function loadSourceMap(jsFilePath: string, source: string): SourceMapData | null
     const mapPath = jsFilePath + '.map';
     if (fs.existsSync(mapPath)) {
       const mapJson = fs.readFileSync(mapPath, 'utf8');
-      return parseSourceMap(mapJson, mapPath);
+      return parseSourceMap(mapJson, mapPath, jsFilePath);
     }
 
     return null;
@@ -322,6 +380,9 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
     // Skip esbuild helpers
     if (varName === '__defProp' || varName === '__defNormalProp' || varName === '__publicField' || varName === '__getOwnPropNames') continue;
     if (varName === '__commonJS' || varName === '__toCommonJS' || varName === '__export' || varName === '__copyProps') continue;
+    // Skip webpack internals
+    if (varName.startsWith('__webpack_')) continue;
+    if (varName === '__unused_webpack_module') continue;
     // Skip React Refresh / HMR internals
     if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
     if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;
@@ -594,13 +655,22 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // are stripped from the compiled JS, shifting line numbers. The only accurate way to get correct
   // line numbers is to read the original .ts source file and parse it directly.
   // For plain JS files, we parse the source directly.
-  let varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
-  let destructInsertions: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
+  let varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number; sourceFile?: string }> = [];
+  let destructInsertions: Array<{ lineEnd: number; varNames: string[]; lineNo: number; sourceFile?: string }> = [];
 
   // Helper: remap line numbers using source map if available
   const remapLine = sourceMap
     ? (line: number) => mapLineToOriginal(sourceMap, line)
     : (line: number) => line;
+
+  // Helper: get source file for a compiled line (for multi-source bundles)
+  const hasMultiSource = sourceMap?.lineSourceMap && sourceMap.lineSourceMap.size > 0;
+  const getSourceFile = hasMultiSource
+    ? (compiledLine: number) => {
+        const file = sourceMap!.lineSourceMap!.get(compiledLine);
+        return file && !file.includes('webpack/bootstrap') && !file.includes('webpack/runtime') ? file : undefined;
+      }
+    : (_: number) => undefined as string | undefined;
 
   if (varTraceEnabled) {
     const isTsFile = /\.[mc]?tsx?$/.test(filename);
@@ -663,10 +733,12 @@ function transformCjsSource(source: string, filename: string, moduleName: string
       // Plain JS or source-map-assisted: parse compiled source, then remap lines
       varInsertions = findVarDeclarations(source).map(ins => ({
         ...ins,
+        sourceFile: getSourceFile(ins.lineNo),
         lineNo: remapLine(ins.lineNo),
       }));
       destructInsertions = findDestructuredDeclarations(source).map(ins => ({
         ...ins,
+        sourceFile: getSourceFile(ins.lineNo),
         lineNo: remapLine(ins.lineNo),
       }));
     }
@@ -678,14 +750,17 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // Apply source map remapping to these too.
   const reassignInsertions = findReassignments(source).map(ins => ({
     ...ins,
+    sourceFile: getSourceFile(ins.lineNo),
     lineNo: remapLine(ins.lineNo),
   }));
   const forLoopInsertions = findForLoopVars(source).map(ins => ({
     ...ins,
+    sourceFile: getSourceFile(ins.lineNo),
     lineNo: remapLine(ins.lineNo),
   }));
   const catchInsertions = findCatchVars(source).map(ins => ({
     ...ins,
+    sourceFile: getSourceFile(ins.lineNo),
     lineNo: remapLine(ins.lineNo),
   }));
 
@@ -726,9 +801,10 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     const traceModuleName = sourceMap
       ? path.basename(sourceMap.originalFile).replace(/\.[jt]sx?$/, '')
       : moduleName;
+
     prefixLines.push(
       `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
-      `var __trickle_tv = function(v, n, l) { try { __trickle_tv_mod.traceVar(v, n, l, ${JSON.stringify(traceModuleName)}, ${JSON.stringify(traceFilePath)}); } catch(e){} };`,
+      `var __trickle_tv = function(v, n, l, m, f) { try { __trickle_tv_mod.traceVar(v, n, l, m || ${JSON.stringify(traceModuleName)}, f || ${JSON.stringify(traceFilePath)}); } catch(e){} };`,
     );
   }
 
@@ -747,15 +823,23 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     });
   }
 
-  for (const { lineEnd, varName, lineNo } of varInsertions) {
+  // Helper to generate source file args for __trickle_tv calls (for multi-source bundles)
+  const sfArgs = (sourceFile?: string) => {
+    if (!sourceFile) return '';
+    const mod = path.basename(sourceFile).replace(/\.[jt]sx?$/, '');
+    return `,${JSON.stringify(mod)},${JSON.stringify(sourceFile)}`;
+  };
+
+  for (const { lineEnd, varName, lineNo, sourceFile } of varInsertions) {
     allInsertions.push({
       position: lineEnd,
-      code: `\ntry{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+      code: `\ntry{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo}${sfArgs(sourceFile)})}catch(__e){}\n`,
     });
   }
 
-  for (const { lineEnd, varNames, lineNo } of destructInsertions) {
-    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+  for (const { lineEnd, varNames, lineNo, sourceFile } of destructInsertions) {
+    const sf = sfArgs(sourceFile);
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo}${sf})`).join(';');
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
@@ -763,16 +847,17 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   }
 
   // Reassignment insertions
-  for (const { lineEnd, varName, lineNo } of reassignInsertions) {
+  for (const { lineEnd, varName, lineNo, sourceFile } of reassignInsertions) {
     allInsertions.push({
       position: lineEnd,
-      code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+      code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo}${sfArgs(sourceFile)})}catch(__e){}\n`,
     });
   }
 
   // For-loop variable insertions
-  for (const { bodyStart, varNames, lineNo } of forLoopInsertions) {
-    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+  for (const { bodyStart, varNames, lineNo, sourceFile } of forLoopInsertions) {
+    const sf = sfArgs(sourceFile);
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo}${sf})`).join(';');
     allInsertions.push({
       position: bodyStart,
       code: `\ntry{${calls}}catch(__e){}\n`,
@@ -780,8 +865,9 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   }
 
   // Catch clause insertions
-  for (const { bodyStart, varNames, lineNo } of catchInsertions) {
-    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+  for (const { bodyStart, varNames, lineNo, sourceFile } of catchInsertions) {
+    const sf = sfArgs(sourceFile);
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo}${sf})`).join(';');
     allInsertions.push({
       position: bodyStart,
       code: `\ntry{${calls}}catch(__e2){}\n`,
