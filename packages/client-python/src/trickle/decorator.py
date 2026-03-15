@@ -7,6 +7,7 @@ import functools
 import inspect
 import logging
 import threading
+import time
 from typing import Any, Callable, Dict, Optional, Set, overload
 
 from .attr_tracker import create_tracker
@@ -111,14 +112,17 @@ def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kw
 
         error_exc: Optional[Exception] = None
         result = None
+        start = time.perf_counter()
         try:
             result = fn(*tracked_args, **tracked_kwargs)
         except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
             error_exc = exc
-            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False)
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False, duration_ms=duration_ms)
             raise
         else:
-            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False)
+            duration_ms = (time.perf_counter() - start) * 1000
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False, duration_ms=duration_ms)
         return result
     finally:
         _call_depth.value = depth
@@ -134,14 +138,17 @@ async def _invoke_async(fn: Callable, func_name: str, func_module: str, args: tu
 
         error_exc: Optional[Exception] = None
         result = None
+        start = time.perf_counter()
         try:
             result = await fn(*tracked_args, **tracked_kwargs)
         except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
             error_exc = exc
-            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=True)
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=True, duration_ms=duration_ms)
             raise
         else:
-            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=True)
+            duration_ms = (time.perf_counter() - start) * 1000
+            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=True, duration_ms=duration_ms)
         return result
     finally:
         _call_depth.value = depth
@@ -422,6 +429,7 @@ def _emit(
     all_paths_fns: list,
     error_exc: Optional[Exception],
     is_async: bool = False,
+    duration_ms: Optional[float] = None,
 ) -> None:
     """Build and enqueue an ingest payload.  Never raises."""
     try:
@@ -477,6 +485,9 @@ def _emit(
             "sampleInput": sample_args,
             "sampleOutput": _sanitize_sample(result),
         }
+
+        if duration_ms is not None:
+            payload["durationMs"] = round(duration_ms, 2)
 
         if is_async:
             payload["isAsync"] = True
