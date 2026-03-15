@@ -6,7 +6,17 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-Just shipped: CLI 0.1.147 — inline issue summary after trickle run. Starting market research.
+Market research done. Key finding: Datadog launched MCP server (March 2026) — direct competitor.
+Trickle's advantages: free/self-hosted, 26 tools, zero code changes, root cause analysis.
+
+Shipped: GitHub PR comment posting in trickle ci (CLI 0.1.148). When GITHUB_TOKEN is set,
+automatically posts formatted analysis on PRs: status, metrics, root causes, N+1 patterns,
+function signatures. This makes trickle visible to the entire team on every PR.
+
+Next TAM opportunities:
+1. OpenTelemetry (OTLP) export — compatibility with Grafana/SigNoz/Jaeger ecosystem
+2. Slack/PagerDuty alerting integrations
+3. GitHub App (vs just Actions) for richer PR integration
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
