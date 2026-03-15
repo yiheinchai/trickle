@@ -6,14 +6,16 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.161. 30 MCP tools. Shipped trickle security — scans runtime data for secrets
-(AWS keys, GitHub tokens, passwords, connection strings, JWTs) and SQL injection patterns.
-Auto-redacts evidence in output. No other observability tool does this on runtime data.
+CLI 0.1.162. 30 MCP tools. Shipped trickle changelog — auto-generates API changelog from
+type diffs with Markdown output for PR comments. Detects added/removed/changed functions
+and flags breaking changes (return type changes, parameter removal).
 
-Also shipped this session: cost estimation, waterfall, deps graph, anomaly detection,
-per-request tracing, diff-runs, fix suggestions, OTLP, Prometheus, Slack/Discord, GitHub PR.
+This session shipped 20+ features: changelog, security scanning, cost estimation, waterfall,
+deps graph, anomaly detection, per-request tracing, diff-runs, fix suggestions, OTLP export,
+Prometheus metrics, Slack/Discord webhooks, GitHub PR comments, flamegraph, guided workflows,
+root cause analysis, error context, inline run summary, curated help, Django/unittest parsing.
 
-Next: SLO burn rate alerting, API changelog from type diffs, multi-service dependency map.
+Next: SLO burn rate, multi-service dependency map, changelog integration into trickle ci.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
