@@ -122,7 +122,35 @@ Opens a dark-themed HTML dashboard at `http://localhost:4321` showing:
 
 Also serves a JSON API at `/api/data` for custom integrations.
 
-## Use Case 5: Custom Alerting Rules
+## Use Case 5: APM Metrics (Like Datadog APM)
+
+```bash
+trickle run python app.py
+trickle metrics
+```
+
+Output:
+```
+  Summary
+    Functions: 14  |  Calls: 15  |  Queries: 40
+    Errors: 1 (6.7%)  |  Logs: 5  |  Traces: 14
+    Memory: 18MB → 247MB (+228MB)
+
+  Function Latency
+    Function                Calls   p50      p95      p99    Errors
+    list_orders                 1   23.6ms   23.6ms   23.6ms   0
+    create_product              4   17.4ms   17.4ms   17.4ms   0
+    get_product                 2    7.0ms    7.0ms    7.0ms   1
+
+  Query Performance
+    Query                           Calls   p50     p95     Total
+    INSERT INTO products ...            4   0.3ms   0.5ms   1.4ms
+    SELECT products.id ...             12   0.1ms   0.1ms   1.0ms
+```
+
+Also available as: `trickle metrics --json` (agent consumption) or `trickle metrics --html` (browser dashboard).
+
+## Use Case 6: Custom Alerting Rules
 
 ```bash
 # Create a rules file with default thresholds

@@ -316,6 +316,9 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle rules list` | Show active rules and thresholds |
 | `trickle heal` | Generate fix plans with context for agent auto-remediation |
 | `trickle verify --baseline` / `trickle verify` | Before/after metric comparison to verify fixes |
+| `trickle metrics` | APM-style latency percentiles (p50/p95/p99), error rates, query perf |
+| `trickle metrics --html` | Interactive APM dashboard in the browser |
+| `trickle metrics --json` | Structured metrics for agent consumption |
 | `trickle dashboard-local` | Self-contained HTML dashboard (no backend needed) |
 | **Debugging** | |
 | `trickle context <file>` | Runtime context for AI agent debugging |

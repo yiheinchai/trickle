@@ -28,10 +28,12 @@ Prisma+SQLite, Sequelize+SQLite, multi-file APIs, production-like apps with auth
 
 Log aggregation: winston, pino, bunyan (JS); loguru, structlog (Python) auto-patched to logs.jsonl.
 
+APM metrics: trickle metrics — p50/p95/p99 latency, error rates, query perf, HTML dashboard.
+
 Next priorities:
 1. Deploy cloud.trickle.dev to fly.io
 2. PostgreSQL migration for cloud scale
-3. Metrics/APM dashboards (latency percentiles, throughput, error rates over time)
+3. SLO monitoring (latency/error SLOs with budget tracking)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

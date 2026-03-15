@@ -627,6 +627,18 @@ teamCmd.command("add-project").description("Share a project with your team")
     await teamAddProject({ team: opts.team, project: opts.project });
   });
 
+// trickle metrics
+program
+  .command("metrics")
+  .description("APM-style metrics — latency percentiles (p50/p95/p99), throughput, error rates, query performance")
+  .option("--json", "Output structured JSON for agent consumption")
+  .option("--html", "Serve interactive APM dashboard in the browser")
+  .option("-p, --port <port>", "Port for HTML dashboard", "4322")
+  .action(async (opts) => {
+    const { runMetrics } = await import("./commands/metrics");
+    runMetrics({ json: opts.json, html: opts.html, port: parseInt(opts.port) });
+  });
+
 // trickle heal
 program
   .command("heal")
