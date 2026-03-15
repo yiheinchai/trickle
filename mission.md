@@ -13,11 +13,17 @@ Added `trickle monitor` — anomaly detection with actionable alerts. Detects sl
 
 Added memory profiling (profile.jsonl) — RSS + heap snapshots. Published Python 0.2.3, CLI 0.1.94.
 
-Building toward replacing Datadog: trickle now has observability data collection (9 data types), anomaly detection (monitor), and agent-accessible alerts (MCP). Next steps toward production observability:
-1. Continuous monitoring mode (watch .trickle/ for changes, re-analyze)
-2. Alert routing (webhook/Slack/email notifications)
-3. Agent auto-remediation (detect issue → apply fix → verify)
-4. Cloud dashboard for team-wide observability
+Building toward replacing Datadog:
+- Data collection: 9 data types (variables, functions, call trace, DB queries, HTTP, WebSocket, console, errors, memory)
+- Anomaly detection: `trickle monitor` with N+1, slow query, error, memory alerts
+- Agent access: 13 MCP tools with `get_alerts` as entry point
+- Dashboard: `trickle dashboard-local` — self-contained HTML dashboard with dark theme, no backend needed
+
+Next steps:
+1. Continuous monitoring mode (watch + re-analyze on file changes)
+2. Alert routing (webhook/Slack notifications)
+3. Cloud dashboard for team sharing
+4. Production deployment mode (low-overhead sampling)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
