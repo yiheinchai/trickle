@@ -19,11 +19,12 @@ Building toward replacing Datadog:
 - Agent access: 13 MCP tools with `get_alerts` as entry point
 - Dashboard: `trickle dashboard-local` — self-contained HTML dashboard with dark theme, no backend needed
 
+Done: Webhook alerts (--webhook for Slack/Discord/custom) and continuous watch mode (--watch). CLI 0.1.96.
+
 Next steps:
-1. Continuous monitoring mode (watch + re-analyze on file changes)
-2. Alert routing (webhook/Slack notifications)
-3. Cloud dashboard for team sharing
-4. Production deployment mode (low-overhead sampling)
+1. Cloud dashboard for team sharing (hosted version)
+2. Production deployment mode (low-overhead sampling)
+3. Agent auto-remediation loop (detect → fix → verify)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
