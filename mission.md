@@ -10,14 +10,17 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-26 MCP tools. `trickle init` now auto-creates .claude/settings.json with MCP server config
-and a modern CLAUDE.md with the full 26-tool workflow. Root cause analysis, error context,
-guided workflows, flamegraph, Python decorator fix all shipped.
+Full end-to-end agent workflow validated on Express+SQLite todo API:
+  init → run → summary → explain → flamegraph → MCP recommended_actions
+All 26 MCP tools working. Root cause analysis, error context, guided workflows,
+flamegraph, Python decorator capture, production monitoring all shipped.
+
+Current versions: CLI 0.1.137, JS client 0.2.113, Python 0.2.22, Backend 0.1.67
 
 Next priorities:
-1. Test on a real open-source Django project from GitHub
-2. Distributed tracing improvements (cross-service flamegraphs)
-3. Improve trickle run to auto-detect and suggest test commands
+1. Distributed tracing improvements (cross-service flamegraphs)
+2. Improve `trickle doctor` to include root causes and recommended actions
+3. Test on Django/FastAPI production-scale projects from GitHub
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
