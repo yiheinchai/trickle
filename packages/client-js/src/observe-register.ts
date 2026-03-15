@@ -1031,6 +1031,23 @@ if (enabled) {
     fs.writeFileSync(path.join(envDir, 'environment.json'), JSON.stringify(envSnapshot, null, 2));
   } catch {}
 
+  // ── Hook 0d: Memory profiling ──
+  try {
+    const profileDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+    fs.mkdirSync(profileDir, { recursive: true });
+    const profileFile = path.join(profileDir, 'profile.jsonl');
+    fs.writeFileSync(profileFile, '');
+    const mem = process.memoryUsage();
+    const startProfile = { kind: 'profile', event: 'start', rssKb: Math.round(mem.rss / 1024), heapKb: Math.round(mem.heapUsed / 1024), peakHeapKb: Math.round(mem.heapTotal / 1024), timestamp: Date.now() };
+    fs.appendFileSync(profileFile, JSON.stringify(startProfile) + '\n');
+    process.on('exit', () => {
+      try {
+        const endMem = process.memoryUsage();
+        const endProfile = { kind: 'profile', event: 'end', rssKb: Math.round(endMem.rss / 1024), heapKb: Math.round(endMem.heapUsed / 1024), peakHeapKb: Math.round(endMem.heapTotal / 1024), timestamp: Date.now() };
+        fs.appendFileSync(profileFile, JSON.stringify(endProfile) + '\n');
+      } catch {}
+    });
+  } catch {}
 
   // ── Hook 1: Module._compile — transform source to wrap function declarations ──
   // This catches ALL functions including entry file and non-exported helpers.
