@@ -38,6 +38,7 @@ import { stubsCommand } from "./commands/stubs";
 import { varsCommand } from "./commands/vars";
 import { lambdaCommand } from "./commands/lambda";
 import { toolSchemaCommand } from "./commands/tool-schema";
+import { contextCommand } from "./commands/context";
 import { rnCommand } from "./commands/rn";
 import { nextCommand } from "./commands/next";
 import { pythonCommand } from "./commands/python";
@@ -154,6 +155,18 @@ program
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
+  });
+
+// trickle context
+program
+  .command("context [file:line]")
+  .description("Show runtime context for AI agents — variable values, function types, errors")
+  .option("--function <name>", "Filter by function name")
+  .option("--errors", "Only show error-related context")
+  .option("--compact", "Minimal output for small context windows")
+  .option("--json", "Output as structured JSON")
+  .action(async (fileOrLine: string | undefined, opts) => {
+    await contextCommand(fileOrLine, opts);
   });
 
 // trickle tool-schema
