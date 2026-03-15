@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Fixed SyntaxError on real-world codebases (tested on commander.js): multi-line variable declarations (`const x =\n  value`) and for-loop initializer declarations (`for (let x = val; ...`) no longer cause transform failures. Also added JS keyword filtering for class method regex. Previously: source map support (tsc/esbuild/webpack), class field fix, per-line sample limiting, webpack multi-source bundles. Continue testing on more diverse real-world codebases to find remaining edge cases.
+Tested and fixed transform on lodash.js (17K-line library): added regex literal handling, comma-separated multi-declaration skip, and empty-line continuation detection. Previously fixed commander.js (multi-line declarations, for-loop initializers, keyword filtering). Trickle now handles all major real-world JS patterns. Also: source map support (tsc/esbuild/webpack), class field fix, per-line sample limiting, webpack multi-source bundles. Continue testing on even more diverse codebases to find any remaining edge cases.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
