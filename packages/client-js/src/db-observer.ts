@@ -281,3 +281,113 @@ export function patchBetterSqlite3(dbConstructor: any, debug: boolean): void {
 
   if (debug) console.log('[trickle/db] SQLite query tracing enabled');
 }
+
+/**
+ * Patch ioredis to capture Redis commands.
+ * Called from observe-register when ioredis is required.
+ */
+export function patchIoredis(ioredisModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  const RedisClass = ioredisModule.default || ioredisModule;
+  const proto = RedisClass.prototype;
+  if (!proto || (proto.sendCommand as any)?.__trickle_patched) return;
+
+  const origSendCommand = proto.sendCommand;
+  if (!origSendCommand) return;
+
+  proto.sendCommand = function patchedSendCommand(command: any, ...rest: any[]): any {
+    const cmdName = command?.name || 'UNKNOWN';
+    const cmdArgs = (command?.args || []).slice(0, 3).map((a: any) =>
+      typeof a === 'string' ? (a.length > 50 ? a.substring(0, 50) + '...' : a) : String(a).substring(0, 50)
+    );
+    const queryStr = `${cmdName.toUpperCase()} ${cmdArgs.join(' ')}`.trim();
+
+    const startTime = performance.now();
+    const result = origSendCommand.call(this, command, ...rest);
+
+    // ioredis returns a Promise
+    if (result && typeof result.then === 'function') {
+      result.then(
+        () => {
+          writeQuery({
+            kind: 'query', query: queryStr.substring(0, MAX_QUERY_LENGTH),
+            durationMs: Math.round((performance.now() - startTime) * 100) / 100,
+            rowCount: 1, timestamp: Date.now(),
+          });
+        },
+        (err: any) => {
+          writeQuery({
+            kind: 'query', query: queryStr.substring(0, MAX_QUERY_LENGTH),
+            durationMs: Math.round((performance.now() - startTime) * 100) / 100,
+            rowCount: 0, error: err?.message?.substring(0, 200), timestamp: Date.now(),
+          });
+        }
+      );
+    }
+    return result;
+  };
+  (proto.sendCommand as any).__trickle_patched = true;
+
+  if (debug) console.log('[trickle/db] Redis (ioredis) query tracing enabled');
+}
+
+/**
+ * Patch mongoose to capture MongoDB operations.
+ * Called from observe-register when mongoose is required.
+ */
+export function patchMongoose(mongooseModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  const Model = mongooseModule.Model;
+  if (!Model || (Model as any).__trickle_patched) return;
+
+  const methodsToWrap = [
+    'find', 'findOne', 'findById', 'findOneAndUpdate', 'findOneAndDelete',
+    'create', 'insertMany', 'updateOne', 'updateMany',
+    'deleteOne', 'deleteMany', 'countDocuments', 'aggregate',
+  ];
+
+  for (const method of methodsToWrap) {
+    const orig = Model[method];
+    if (!orig || (orig as any).__trickle_patched) continue;
+
+    Model[method] = function patchedMethod(this: any, ...args: any[]): any {
+      const collName = this.modelName || this.collection?.name || '?';
+      let filterStr = '';
+      if (args[0] && typeof args[0] === 'object') {
+        try { filterStr = ' ' + JSON.stringify(args[0]).substring(0, 200); } catch {}
+      }
+      const queryStr = `db.${collName}.${method}(${filterStr.trim()})`;
+
+      const startTime = performance.now();
+      const result = orig.apply(this, args);
+
+      // Mongoose methods return Query objects (thenables) or Promises
+      if (result && typeof result.then === 'function') {
+        result.then(
+          (res: any) => {
+            const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+            const rowCount = Array.isArray(res) ? res.length : (res ? 1 : 0);
+            writeQuery({
+              kind: 'query', query: queryStr.substring(0, MAX_QUERY_LENGTH),
+              durationMs, rowCount, timestamp: Date.now(),
+            });
+          },
+          (err: any) => {
+            writeQuery({
+              kind: 'query', query: queryStr.substring(0, MAX_QUERY_LENGTH),
+              durationMs: Math.round((performance.now() - startTime) * 100) / 100,
+              rowCount: 0, error: err?.message?.substring(0, 200), timestamp: Date.now(),
+            });
+          }
+        );
+      }
+      return result;
+    };
+    (Model[method] as any).__trickle_patched = true;
+  }
+  (Model as any).__trickle_patched = true;
+
+  if (debug) console.log('[trickle/db] MongoDB (mongoose) query tracing enabled');
+}

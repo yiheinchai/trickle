@@ -1136,6 +1136,24 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // Redis (ioredis)
+    if (request === 'ioredis' && !expressPatched.has('ioredis')) {
+      expressPatched.add('ioredis');
+      try {
+        const { patchIoredis } = require(path.join(__dirname, 'db-observer.js'));
+        patchIoredis(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // MongoDB (mongoose)
+    if (request === 'mongoose' && !expressPatched.has('mongoose')) {
+      expressPatched.add('mongoose');
+      try {
+        const { patchMongoose } = require(path.join(__dirname, 'db-observer.js'));
+        patchMongoose(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Resolve to absolute path for dedup — do this FIRST since bundlers like
     // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
     // with './' or '/'. We need the resolved path to decide if it's user code.
