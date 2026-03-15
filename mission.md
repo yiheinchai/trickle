@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-All JS/TS + Python tracer paths comprehensive with live-updating values. Fixed critical Node.js backend bug (default param braces broke function detection). Express API tested: 37 vars captured across routes/middleware. Next areas:
+All JS/TS + Python tracer paths comprehensive with live-updating values. React (Vite/Next.js/Remix), Node.js backend (Express), Python (scripts/notebooks/nanoGPT) all working. Use cases updated. Next areas:
 - Consider adding React DevTools-style component tree visualization using the captured render data
 - Explore tracing custom hook return values with richer type info
-- Add a backend-developer use case document showing Express/Fastify inline hints
+- Consider adding Svelte/Vue support for broader frontend coverage
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
