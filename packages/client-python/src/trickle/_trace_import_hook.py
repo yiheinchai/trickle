@@ -823,6 +823,19 @@ class _TrickleTraceLoader:
         finally:
             if finder and finder not in sys.meta_path:
                 sys.meta_path.insert(0, finder)
+        # Auto-patch database drivers when they're imported
+        _DB_DRIVERS = {
+            "psycopg2": "patch_psycopg2",
+            "pymysql": "patch_pymysql",
+            "mysql.connector": "patch_mysql_connector",
+        }
+        if fullname in _DB_DRIVERS:
+            try:
+                from trickle.db_observer import patch_psycopg2, patch_pymysql, patch_mysql_connector
+                patcher = {"patch_psycopg2": patch_psycopg2, "patch_pymysql": patch_pymysql, "patch_mysql_connector": patch_mysql_connector}
+                patcher[_DB_DRIVERS[fullname]](module)
+            except Exception:
+                pass
         return module
 
 

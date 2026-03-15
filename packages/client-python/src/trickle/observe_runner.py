@@ -111,6 +111,13 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
+    # Patch database drivers (sqlite3, psycopg2, pymysql, mysql.connector)
+    try:
+        from trickle.db_observer import patch_databases
+        patch_databases(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 
