@@ -3,17 +3,23 @@ import { listFunctions, listTypes, getTypeDiff } from "../api-client";
 import { formatType } from "../formatters/type-formatter";
 import { formatDiffs } from "../formatters/diff-formatter";
 import { envBadge, timeBadge } from "../ui/badges";
+import { isLocalMode, getLocalFunctions, getLocalTypes } from "../local-data";
 
 export interface TypesOptions {
   env?: string;
   diff?: boolean;
   env1?: string;
   env2?: string;
+  local?: boolean;
 }
 
 export async function typesCommand(functionName: string, opts: TypesOptions): Promise<void> {
+  const local = isLocalMode(opts);
+
   // Look up function by name (partial match)
-  const result = await listFunctions({ search: functionName });
+  const result = local
+    ? getLocalFunctions({ search: functionName })
+    : await listFunctions({ search: functionName });
   const { functions } = result;
 
   if (functions.length === 0) {
@@ -48,7 +54,9 @@ export async function typesCommand(functionName: string, opts: TypesOptions): Pr
   }
 
   // Normal mode: show type snapshots
-  const typesResult = await listTypes(fn.id, { env: opts.env });
+  const typesResult = local
+    ? getLocalTypes(fn.function_name, { env: opts.env })
+    : await listTypes(fn.id, { env: opts.env });
   const { snapshots } = typesResult;
 
   if (snapshots.length === 0) {

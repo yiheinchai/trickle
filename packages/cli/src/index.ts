@@ -96,6 +96,7 @@ program
   .option("--env <env>", "Filter by environment")
   .option("--lang <lang>", "Filter by language")
   .option("--search <query>", "Search by function name")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await functionsCommand(opts);
   });
@@ -108,6 +109,7 @@ program
   .option("--diff", "Show diff between latest two snapshots")
   .option("--env1 <env>", "First environment for cross-env diff")
   .option("--env2 <env>", "Second environment for cross-env diff")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (functionName: string, opts) => {
     await typesCommand(functionName, opts);
   });
@@ -120,6 +122,7 @@ program
   .option("--since <timeframe>", "Show errors since (e.g., 2d, 5m, 1h)")
   .option("--function <name>", "Filter by function name")
   .option("--limit <n>", "Limit number of results")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (id: string | undefined, opts) => {
     await errorsCommand(id, opts);
   });
@@ -212,6 +215,7 @@ program
   .option("--title <title>", "API title in the spec", "API")
   .option("--api-version <version>", "API version in the spec", "1.0.0")
   .option("--server <url>", "Server URL to include in the spec")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await openapiCommand(opts);
   });
@@ -233,6 +237,7 @@ program
   .description("Start a mock API server from runtime-observed routes and sample data")
   .option("-p, --port <port>", "Port to listen on", "3000")
   .option("--no-cors", "Disable CORS headers")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await mockCommand(opts);
   });
@@ -371,6 +376,7 @@ program
   .description("Search across all observed types — find functions by field names, types, or patterns")
   .option("--env <env>", "Filter by environment")
   .option("--json", "Output raw JSON")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (query: string, opts) => {
     await searchCommand(query, opts);
   });
@@ -426,6 +432,7 @@ program
   .description("Compact API overview — all routes with inline type signatures")
   .option("--env <env>", "Filter by environment")
   .option("--json", "Output raw JSON")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await overviewCommand(opts);
   });

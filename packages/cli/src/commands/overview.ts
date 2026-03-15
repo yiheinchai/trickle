@@ -2,10 +2,12 @@ import chalk from "chalk";
 import { listFunctions, listTypes, FunctionRow, TypeSnapshot } from "../api-client";
 import { getBackendUrl } from "../config";
 import { relativeTime } from "../ui/helpers";
+import { isLocalMode, getLocalFunctions, getLocalTypes } from "../local-data";
 
 export interface OverviewOptions {
   env?: string;
   json?: boolean;
+  local?: boolean;
 }
 
 interface TypeNode {
@@ -32,19 +34,24 @@ interface RouteInfo {
  * understand your entire API surface at a glance. Like `git log --oneline` for APIs.
  */
 export async function overviewCommand(opts: OverviewOptions): Promise<void> {
-  const backendUrl = getBackendUrl();
+  const local = isLocalMode(opts);
+  const backendUrl = local ? "(local)" : getBackendUrl();
 
-  // Check backend
-  try {
-    const res = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) throw new Error("not ok");
-  } catch {
-    console.error(chalk.red(`\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}\n`));
-    process.exit(1);
+  if (!local) {
+    // Check backend
+    try {
+      const res = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error("not ok");
+    } catch {
+      console.error(chalk.red(`\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}\n`));
+      process.exit(1);
+    }
   }
 
   // Fetch all functions
-  const result = await listFunctions({ env: opts.env, limit: 500 });
+  const result = local
+    ? getLocalFunctions({ env: opts.env, limit: 500 })
+    : await listFunctions({ env: opts.env, limit: 500 });
   const { functions } = result;
 
   if (functions.length === 0) {
@@ -57,7 +64,9 @@ export async function overviewCommand(opts: OverviewOptions): Promise<void> {
   const routes: RouteInfo[] = [];
   for (const fn of functions) {
     try {
-      const typesResult = await listTypes(fn.id, { env: opts.env, limit: 1 });
+      const typesResult = local
+        ? getLocalTypes(fn.function_name, { env: opts.env, limit: 1 })
+        : await listTypes(fn.id, { env: opts.env, limit: 1 });
       const snapshot = typesResult.snapshots[0];
 
       const returnType = snapshot

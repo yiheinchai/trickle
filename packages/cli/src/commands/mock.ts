@@ -1,10 +1,12 @@
 import * as http from "http";
 import chalk from "chalk";
 import { fetchMockConfig, MockRoute } from "../api-client";
+import { isLocalMode, getLocalMockRoutes } from "../local-data";
 
 export interface MockOptions {
   port?: string;
   cors?: boolean;
+  local?: boolean;
 }
 
 /**
@@ -102,11 +104,16 @@ export async function mockCommand(opts: MockOptions): Promise<void> {
   const port = parseInt(opts.port || "3000", 10);
   const enableCors = opts.cors !== false;
 
-  // Fetch mock configuration from the backend
+  // Fetch mock configuration from the backend (or local file)
   let routes: MockRoute[];
   try {
-    const config = await fetchMockConfig();
-    routes = config.routes;
+    if (isLocalMode(opts)) {
+      const config = getLocalMockRoutes();
+      routes = config.routes;
+    } else {
+      const config = await fetchMockConfig();
+      routes = config.routes;
+    }
   } catch (err: unknown) {
     if (err instanceof Error) {
       console.error(chalk.red(`\n  Error fetching mock config: ${err.message}\n`));

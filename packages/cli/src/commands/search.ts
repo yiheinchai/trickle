@@ -1,9 +1,11 @@
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
+import { isLocalMode, searchLocalObservations } from "../local-data";
 
 export interface SearchOptions {
   env?: string;
   json?: boolean;
+  local?: boolean;
 }
 
 interface FieldMatch {
@@ -30,29 +32,34 @@ export async function searchCommand(
   query: string,
   opts: SearchOptions,
 ): Promise<void> {
-  const backendUrl = getBackendUrl();
-  const url = new URL("/api/search", backendUrl);
-  url.searchParams.set("q", query);
-  if (opts.env) {
-    url.searchParams.set("env", opts.env);
-  }
-
   let data: SearchResponse;
-  try {
-    const res = await fetch(url.toString());
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`HTTP ${res.status}: ${body}`);
+
+  if (isLocalMode(opts)) {
+    data = searchLocalObservations(query, { env: opts.env });
+  } else {
+    const backendUrl = getBackendUrl();
+    const url = new URL("/api/search", backendUrl);
+    url.searchParams.set("q", query);
+    if (opts.env) {
+      url.searchParams.set("env", opts.env);
     }
-    data = await res.json() as SearchResponse;
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message.startsWith("HTTP ")) {
-      console.error(chalk.red(`\n  Error: ${err.message}\n`));
-    } else {
-      console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(backendUrl)}.`));
-      console.error(chalk.red("  Is the backend running?\n"));
+
+    try {
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body}`);
+      }
+      data = await res.json() as SearchResponse;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith("HTTP ")) {
+        console.error(chalk.red(`\n  Error: ${err.message}\n`));
+      } else {
+        console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(backendUrl)}.`));
+        console.error(chalk.red("  Is the backend running?\n"));
+      }
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   if (opts.json) {

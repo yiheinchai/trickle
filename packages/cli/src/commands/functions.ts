@@ -3,19 +3,27 @@ import Table from "cli-table3";
 import { listFunctions } from "../api-client";
 import { envBadge, langBadge, timeBadge } from "../ui/badges";
 import { relativeTime } from "../ui/helpers";
+import { isLocalMode, getLocalFunctions } from "../local-data";
 
 export interface FunctionsOptions {
   env?: string;
   lang?: string;
   search?: string;
+  local?: boolean;
 }
 
 export async function functionsCommand(opts: FunctionsOptions): Promise<void> {
-  const result = await listFunctions({
-    env: opts.env,
-    language: opts.lang,
-    search: opts.search,
-  });
+  const result = isLocalMode(opts)
+    ? getLocalFunctions({
+        env: opts.env,
+        language: opts.lang,
+        search: opts.search,
+      })
+    : await listFunctions({
+        env: opts.env,
+        language: opts.lang,
+        search: opts.search,
+      });
 
   const { functions } = result;
 

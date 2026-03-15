@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import { fetchOpenApiSpec } from "../api-client";
+import { isLocalMode, getLocalOpenApiSpec } from "../local-data";
 
 export interface OpenApiOptions {
   out?: string;
@@ -9,16 +10,24 @@ export interface OpenApiOptions {
   title?: string;
   apiVersion?: string;
   server?: string;
+  local?: boolean;
 }
 
 export async function openapiCommand(opts: OpenApiOptions): Promise<void> {
   try {
-    const spec = await fetchOpenApiSpec({
-      env: opts.env,
-      title: opts.title,
-      version: opts.apiVersion,
-      serverUrl: opts.server,
-    });
+    const spec = isLocalMode(opts)
+      ? getLocalOpenApiSpec({
+          env: opts.env,
+          title: opts.title,
+          version: opts.apiVersion,
+          serverUrl: opts.server,
+        })
+      : await fetchOpenApiSpec({
+          env: opts.env,
+          title: opts.title,
+          version: opts.apiVersion,
+          serverUrl: opts.server,
+        });
 
     const json = JSON.stringify(spec, null, 2) + "\n";
 

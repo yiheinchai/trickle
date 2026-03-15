@@ -4,12 +4,14 @@ import { listErrors, getError, listFunctions, listTypes } from "../api-client";
 import { envBadge, errorTypeBadge, timeBadge } from "../ui/badges";
 import { parseSince, truncate, relativeTime } from "../ui/helpers";
 import { formatType } from "../formatters/type-formatter";
+import { isLocalMode, getLocalErrors } from "../local-data";
 
 export interface ErrorsListOptions {
   env?: string;
   since?: string;
   function?: string;
   limit?: string;
+  local?: boolean;
 }
 
 export async function errorsCommand(idOrUndefined: string | undefined, opts: ErrorsListOptions): Promise<void> {
@@ -39,12 +41,18 @@ export async function errorsCommand(idOrUndefined: string | undefined, opts: Err
 
   const limit = opts.limit ? parseInt(opts.limit, 10) : undefined;
 
-  const result = await listErrors({
-    env: opts.env,
-    functionName: opts.function,
-    since: sinceIso,
-    limit,
-  });
+  const result = isLocalMode(opts)
+    ? getLocalErrors({
+        env: opts.env,
+        functionName: opts.function,
+        limit,
+      })
+    : await listErrors({
+        env: opts.env,
+        functionName: opts.function,
+        since: sinceIso,
+        limit,
+      });
 
   const { errors } = result;
 
