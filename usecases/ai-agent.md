@@ -194,7 +194,7 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 }
 ```
 
-**23 MCP tools available:**
+**24 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
@@ -217,6 +217,7 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 | `get_http_requests` | HTTP fetch calls with status + latency |
 | `explain_file` | Understand a file via runtime data — functions, call graph, queries, variables, errors |
 | `run_tests` | Run tests with observability — structured pass/fail with runtime context at failures |
+| `get_new_alerts` | Get only NEW alerts since last check — for polling-based production monitoring |
 | `save_baseline` | Save current metrics as baseline before making changes |
 | `compare_with_baseline` | Compare current metrics against baseline — shows improvements/regressions |
 | `check_data_freshness` | Check if runtime data exists and how old it is |

@@ -10,13 +10,14 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-Shipped: Data flow tracing in explain (sample I/O for each function) + call trace tree
-structure in MCP (N+1 patterns visible in call hierarchy). 23 MCP tools.
+Shipped: Production monitoring (get_new_alerts MCP tool + trickle watch-alerts CLI).
+24 MCP tools total. Full on-call agent loop complete:
+  monitor (get_new_alerts) → detect → understand (explain_file) → baseline → fix → verify
 
 Next priorities:
-1. Production monitoring: webhook alerts, continuous watch mode for on-call agents
+1. Test on large open-source projects (Django, Next.js repos from GitHub)
 2. Cross-process instrumentation for subprocess-based workers
-3. Test on large open-source projects (Django, Next.js repos from GitHub)
+3. Performance profiling improvements (flamegraph generation from call traces)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
