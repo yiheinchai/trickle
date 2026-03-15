@@ -141,14 +141,23 @@ export function explain(targetFile: string, opts?: { dir?: string }): ExplainRes
   const observations = readJsonl(path.join(trickleDir, 'observations.jsonl'));
   const fileFuncs = new Map<string, { obs: any; count: number }>();
 
+  // Check if the source file defines Express routes (app.get, router.post, etc.)
+  let hasExpressRoutes = false;
+  if (result.exists) {
+    const src = fs.readFileSync(absPath, 'utf-8');
+    hasExpressRoutes = /\.(get|post|put|delete|patch|all|use)\s*\(\s*['"`\/]/.test(src);
+  }
+
   for (const obs of observations) {
     if (!obs.functionName) continue;
-    if (moduleMatchesFile(obs.module, targetFile)) {
+    // Match by module name, OR include Express routes if file defines them
+    const isMatch = moduleMatchesFile(obs.module, targetFile) ||
+      (hasExpressRoutes && obs.module === 'express' && /^(GET|POST|PUT|DELETE|PATCH)\s/.test(obs.functionName));
+    if (isMatch) {
       const key = `${obs.module}.${obs.functionName}`;
       const existing = fileFuncs.get(key);
       if (existing) {
         existing.count++;
-        // Keep the observation with timing data
         if (obs.durationMs && (!existing.obs.durationMs || obs.durationMs > existing.obs.durationMs)) {
           existing.obs = obs;
         }

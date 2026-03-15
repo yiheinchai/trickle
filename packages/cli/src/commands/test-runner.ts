@@ -493,8 +493,18 @@ export async function runTestCommand(opts: TestOptions): Promise<TestReport> {
     console.log('');
   }
 
-  // Ensure .trickle dir exists
-  if (!fs.existsSync(trickleDir)) fs.mkdirSync(trickleDir, { recursive: true });
+  // Clear old data so observability reflects only the test run
+  if (fs.existsSync(trickleDir)) {
+    const dataFiles = ['observations.jsonl', 'variables.jsonl', 'queries.jsonl',
+      'errors.jsonl', 'calltrace.jsonl', 'console.jsonl', 'logs.jsonl',
+      'alerts.jsonl', 'traces.jsonl', 'profile.jsonl', 'summary.json'];
+    for (const f of dataFiles) {
+      const fp = path.join(trickleDir, f);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+  } else {
+    fs.mkdirSync(trickleDir, { recursive: true });
+  }
 
   // Run tests with trickle instrumentation
   const startTime = Date.now();
