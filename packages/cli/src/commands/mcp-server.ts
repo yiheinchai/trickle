@@ -643,6 +643,11 @@ const TOOLS = [
     },
   },
   {
+    name: "get_new_alerts",
+    description: "Get only NEW alerts since the last check. Designed for polling-based production monitoring — call this periodically to detect new issues without seeing duplicates. On first call, returns all current alerts. Subsequent calls return only alerts that appeared after the previous check.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "save_baseline",
     description: "Save current runtime metrics as a baseline for before/after comparison. Call this BEFORE making changes. Then after fixing the code and re-running, call compare_with_baseline to see what improved or regressed.",
     inputSchema: { type: "object", properties: {} },
@@ -769,6 +774,72 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "get_new_alerts": {
+            try {
+              // Run monitor silently for fresh alerts
+              const origLog3 = console.log;
+              const origErr3 = console.error;
+              try {
+                console.log = () => {};
+                console.error = () => {};
+                const { runMonitor } = require('./monitor');
+                runMonitor({ dir: findTrickleDir() });
+              } catch {} finally {
+                console.log = origLog3;
+                console.error = origErr3;
+              }
+
+              const dir = findTrickleDir();
+              const alertsFile = path.join(dir, 'alerts.jsonl');
+              const checkFile = path.join(dir, 'last-alert-check.json');
+
+              // Load all current alerts
+              const allAlerts: any[] = [];
+              if (fs.existsSync(alertsFile)) {
+                for (const line of fs.readFileSync(alertsFile, 'utf-8').split('\n').filter(Boolean)) {
+                  try { allAlerts.push(JSON.parse(line)); } catch {}
+                }
+              }
+
+              // Load last check state
+              let lastSeenHashes: string[] = [];
+              if (fs.existsSync(checkFile)) {
+                try {
+                  const state = JSON.parse(fs.readFileSync(checkFile, 'utf-8'));
+                  lastSeenHashes = state.hashes || [];
+                } catch {}
+              }
+
+              // Hash each alert for dedup
+              const hashAlert = (a: any) => `${a.severity}:${a.category}:${a.message}`;
+              const currentHashes = allAlerts.map(hashAlert);
+
+              // Find new alerts (not seen before)
+              const newAlerts = allAlerts.filter((a, i) => !lastSeenHashes.includes(currentHashes[i]));
+
+              // Save current state
+              fs.writeFileSync(checkFile, JSON.stringify({
+                hashes: currentHashes,
+                lastCheck: new Date().toISOString(),
+                totalAlerts: allAlerts.length,
+              }), 'utf-8');
+
+              result = {
+                newAlerts: newAlerts.map(a => ({
+                  severity: a.severity,
+                  category: a.category,
+                  message: a.message,
+                  suggestion: a.suggestion,
+                })),
+                totalAlerts: allAlerts.length,
+                newCount: newAlerts.length,
+                isFirstCheck: lastSeenHashes.length === 0,
+              };
+            } catch (e: any) {
+              result = { error: `Failed to check alerts: ${e.message}` };
             }
             break;
           }

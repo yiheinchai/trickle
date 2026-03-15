@@ -595,6 +595,18 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle watch-alerts — continuous monitoring
+program
+  .command("watch-alerts")
+  .description("Continuous monitoring — outputs structured JSON events for new alerts (agent-optimized)")
+  .option("--interval <seconds>", "Check interval in seconds (default: 3)")
+  .option("--webhook <url>", "Send new alerts to a webhook URL")
+  .option("--json", "Minimal output (only JSON events to stdout)")
+  .action(async (opts) => {
+    const { runWatch } = await import("./commands/watch-monitor");
+    await runWatch({ interval: opts.interval ? parseInt(opts.interval) : undefined, webhook: opts.webhook, json: opts.json });
+  });
+
 // trickle cloud
 const cloudCmd = program.command("cloud").description("Cloud sync — share observability data with your team");
 cloudCmd.command("login").description("Authenticate with a trickle cloud server")
