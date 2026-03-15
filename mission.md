@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Added console output capture for both JS and Python — console.log/print output saved to .trickle/console.jsonl. MCP server now has 8 tools including get_console_output and get_http_requests. Full agent debugging data: variables, functions (with timing), HTTP requests (with latency), console output, errors. Both JS and Python capture all data symmetrically. Continue expanding TAM.
+Complete agent stack shipped and documented: MCP server (8 tools), CLAUDE.md generation, trickle context (annotated/compact/json with all data), console capture (JS+Python), error capture (JS+Python), function timing, HTTP timing. JSON mode now returns variables + functions + errors + console. Updated ai-agent.md with MCP config, tools table, and data reference. Continue expanding TAM — consider new language support or database tracing.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

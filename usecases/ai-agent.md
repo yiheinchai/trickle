@@ -141,3 +141,47 @@ Use cached runtime data instead of adding console.log/print statements:
 ```
 
 AI agents that read `CLAUDE.md` (like Claude Code) will automatically know to use `trickle context` instead of adding debug prints.
+
+---
+
+## MCP Server Integration
+
+For the deepest integration, add trickle as an MCP server so Claude can query runtime data directly as tools:
+
+```json
+{
+  "mcpServers": {
+    "trickle": {
+      "command": "npx",
+      "args": ["trickle-cli", "mcp-server"]
+    }
+  }
+}
+```
+
+**8 MCP tools available:**
+
+| Tool | What it does |
+|---|---|
+| `get_runtime_context` | Variable values + function types for a file |
+| `get_annotated_source` | Source code with inline runtime values |
+| `get_function_signatures` | All function signatures with execution timing |
+| `get_errors` | Crash context with nearby variable values |
+| `get_console_output` | Captured console.log/error/warn output |
+| `get_http_requests` | HTTP fetch calls with status + latency |
+| `check_data_freshness` | Check if runtime data exists and how old it is |
+| `refresh_runtime_data` | Re-run the app to capture fresh data |
+
+---
+
+## Complete Data Available to Agents
+
+After one run with trickle, agents have access to:
+
+| Data | File | Description |
+|---|---|---|
+| Variable values | `variables.jsonl` | Every variable's type and sample value |
+| Function types | `observations.jsonl` | Signatures, params, return types, execution timing |
+| HTTP requests | `observations.jsonl` | fetch() calls with URL, status, latency, response type |
+| Console output | `console.jsonl` | All console.log/error/warn output |
+| Error context | `errors.jsonl` | Crash info with nearby variable values |
