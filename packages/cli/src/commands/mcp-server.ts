@@ -27,6 +27,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
+import { execSync } from "child_process";
 
 // ── Types ──
 
@@ -265,6 +266,73 @@ function getErrors(): unknown {
   return { errors: errors.length > 0 ? errors : "No errors recorded." };
 }
 
+function checkDataFreshness(): unknown {
+  const dir = findTrickleDir();
+  const varsFile = path.join(dir, "variables.jsonl");
+  const obsFile = path.join(dir, "observations.jsonl");
+
+  const result: Record<string, unknown> = { hasData: false };
+
+  if (fs.existsSync(varsFile)) {
+    const stat = fs.statSync(varsFile);
+    const ageMs = Date.now() - stat.mtimeMs;
+    const lines = fs.readFileSync(varsFile, "utf-8").split("\n").filter(Boolean).length;
+    result.variables = { count: lines, lastModified: stat.mtime.toISOString(), ageMinutes: Math.round(ageMs / 60000) };
+    result.hasData = lines > 0;
+  }
+  if (fs.existsSync(obsFile)) {
+    const stat = fs.statSync(obsFile);
+    const lines = fs.readFileSync(obsFile, "utf-8").split("\n").filter(Boolean).length;
+    result.functions = { count: lines, lastModified: stat.mtime.toISOString() };
+  }
+
+  // Detect project type and suggest run command
+  const pkgPath = path.join(process.cwd(), "package.json");
+  const pyprojectPath = path.join(process.cwd(), "pyproject.toml");
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      const main = pkg.main || "index.js";
+      result.suggestedCommand = `trickle run node ${main}`;
+    } catch {}
+  } else if (fs.existsSync(pyprojectPath) || fs.existsSync(path.join(process.cwd(), "app.py"))) {
+    const entry = fs.existsSync(path.join(process.cwd(), "app.py")) ? "app.py" : "main.py";
+    result.suggestedCommand = `trickle run python ${entry}`;
+  }
+
+  return result;
+}
+
+function refreshData(params: Record<string, unknown>): unknown {
+  const command = params.command as string | undefined;
+  if (!command) {
+    // Try to auto-detect
+    const freshness = checkDataFreshness() as Record<string, unknown>;
+    if (freshness.suggestedCommand) {
+      return { error: `No command provided. Suggested: ${freshness.suggestedCommand}` };
+    }
+    return { error: "No command provided. Pass the command to run, e.g., 'node app.js' or 'python app.py'" };
+  }
+
+  try {
+    const output = execSync(`npx trickle-cli run ${command}`, {
+      cwd: process.cwd(),
+      timeout: 30000,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return { success: true, output: output.substring(0, 500) };
+  } catch (e: any) {
+    // Command may fail (e.g., crash) but still capture data
+    const hasData = fs.existsSync(path.join(findTrickleDir(), "variables.jsonl"));
+    return {
+      success: false,
+      dataCaptured: hasData,
+      error: (e.stderr || e.message || "").substring(0, 300),
+    };
+  }
+}
+
 // ── MCP Protocol ──
 
 const TOOLS = [
@@ -301,6 +369,21 @@ const TOOLS = [
     description: "Get error context from application crashes, including nearby variable values at the crash site.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "check_data_freshness",
+    description: "Check if trickle runtime data exists and how fresh it is. Use this before querying to know if data needs refreshing.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "refresh_runtime_data",
+    description: "Run the application with trickle to capture fresh runtime data. Use when data is stale or missing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Command to run (e.g., 'node app.js' or 'python app.py'). If omitted, suggests a command." },
+      },
+    },
+  },
 ];
 
 function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
@@ -333,6 +416,8 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_annotated_source": result = getAnnotatedSource(args); break;
           case "get_function_signatures": result = getFunctionSignatures(); break;
           case "get_errors": result = getErrors(); break;
+          case "check_data_freshness": result = checkDataFreshness(); break;
+          case "refresh_runtime_data": result = refreshData(args); break;
           default:
             return { jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
         }
