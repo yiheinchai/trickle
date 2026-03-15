@@ -497,6 +497,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_doctor",
+    description: "Comprehensive health check — returns status (healthy/warning/critical), data counts, performance summary, top issues, runtime info, and memory usage. Use this FIRST to get a complete overview before diving into specific tools.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_alerts",
     description: "Get actionable alerts — slow queries, N+1 patterns, errors, memory issues, slow functions. Each alert includes a severity level and a fix suggestion. Use this as the FIRST tool when debugging.",
     inputSchema: { type: "object", properties: {} },
@@ -580,6 +585,21 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_errors": result = getErrors(); break;
           case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_call_trace": result = getCallTrace(); break;
+          case "get_doctor": {
+            try {
+              // Capture doctor output as JSON
+              const origLog = console.log;
+              let doctorOutput = '';
+              console.log = (s: string) => { doctorOutput += s; };
+              const { runDoctor } = require('./doctor');
+              runDoctor({ json: true });
+              console.log = origLog;
+              try { result = JSON.parse(doctorOutput); } catch { result = { doctor: doctorOutput }; }
+            } catch (e: any) {
+              result = { error: e.message };
+            }
+            break;
+          }
           case "get_alerts": result = getAlerts(); break;
           case "get_heal_plans": {
             try {
