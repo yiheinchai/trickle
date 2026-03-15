@@ -66,6 +66,16 @@ export function patchFetch(environment: string, debugMode: boolean): void {
       return originalFetch.call(globalThis, input, init);
     }
 
+    // Inject distributed trace headers
+    if (!init) init = {};
+    if (!init.headers) init.headers = {};
+    const traceId = (globalThis as any).__trickle_trace_id || require('crypto').randomBytes(8).toString('hex');
+    (globalThis as any).__trickle_trace_id = traceId;
+    if (typeof init.headers === 'object' && !Array.isArray(init.headers)) {
+      (init.headers as any)['X-Trickle-Trace-Id'] = traceId;
+      (init.headers as any)['X-Trickle-Service'] = process.env.TRICKLE_SERVICE_NAME || require('path').basename(process.cwd());
+    }
+
     // Make the actual request with timing
     const startTime = performance.now();
     const response = await originalFetch.call(globalThis, input, init);
@@ -77,6 +87,19 @@ export function patchFetch(environment: string, debugMode: boolean): void {
     if (!contentType.includes('json')) {
       return response;
     }
+
+    // Write distributed trace span
+    try {
+      const tracesDir = process.env.TRICKLE_LOCAL_DIR || require('path').join(process.cwd(), '.trickle');
+      const tracesFile = require('path').join(tracesDir, 'traces.jsonl');
+      const span = {
+        kind: 'trace', traceId, spanId: require('crypto').randomBytes(4).toString('hex'),
+        parentSpanId: '0', service: process.env.TRICKLE_SERVICE_NAME || require('path').basename(process.cwd()),
+        operation: `${method} ${url}`, durationMs, status: String(statusCode), timestamp: Date.now(),
+        metadata: { direction: 'outgoing' },
+      };
+      require('fs').appendFileSync(tracesFile, JSON.stringify(span) + '\n');
+    } catch {}
 
     // Clone and intercept: read the clone's JSON in background
     try {
