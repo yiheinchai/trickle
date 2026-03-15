@@ -1,4 +1,4 @@
-Think of 1 item to work on ML engineer user case to improve the developer experience.
+Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <general directive>
@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Ported all CJS robustness fixes to ESM loader hooks (multi-line continuations, regex literals, for-loop initializer skip). Both CJS and ESM transforms now handle all real-world patterns. Tested on Express.js, axios, moment.js, commander.js, lodash.js (JS) and ML pipelines with decorators/async (Python). Also: source maps (tsc/esbuild/webpack), class fields, per-line sample limiting, dataclass display. Codebase is in good shape — continue with VSCode extension improvements or exploring new use cases.
+Enabled source module tracing in pytest — the pytest plugin now installs the import hook so users see data flowing through both test AND source files. Previously only test files were traced. Also fixed NameError in import hook's dataclass sample sanitizer and applied dataclass display fix consistently across all Python tracer paths. All JS/Python transforms are robust and tested on real-world codebases. Continue with VSCode extension improvements or exploring new use cases.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
