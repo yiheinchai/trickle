@@ -1,6 +1,6 @@
 {
   "name": "trickle-cli",
-  "version": "0.1.167",
+  "version": "0.1.168",
   "description": "CLI for trickle runtime type observability",
   "bin": {
     "trickle": "dist/index.js"
