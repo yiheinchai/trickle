@@ -344,6 +344,36 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `TRICKLE_COVERAGE` | `0` | `1` to print type coverage report |
 | `TRICKLE_DEBUG` | `0` | `1` for verbose output |
 
+## Cloud Dashboard & Team Sharing
+
+Share observability data with your team via the cloud backend:
+
+```bash
+# One-time setup
+trickle cloud login --url https://cloud.trickle.dev
+
+# Every trickle run now auto-pushes all data to the cloud
+trickle run python app.py
+
+# Share a dashboard link with your team (no auth needed to view)
+trickle cloud share
+#   ✓ Share link created
+#   URL: https://cloud.trickle.dev/api/v1/shared/abc123
+
+# Pull data on another machine
+trickle cloud pull
+```
+
+Self-host the backend:
+```bash
+docker run -p 4888:4888 -v trickle-data:/data trickle-backend
+trickle cloud login --url http://your-server:4888
+```
+
+The hosted dashboard shows alerts, errors, performance hotspots, database queries, and observed functions — all in a dark-themed UI accessible via a single URL.
+
+**[Full Observability Platform Guide →](usecases/observability-platform.md)**
+
 ## Architecture
 
 ```
@@ -361,12 +391,12 @@ Your Code → trickle (import hooks / AST transform)
          .trickle/alerts.jsonl        (detected anomalies)
          .trickle/heal.jsonl          (fix plans for agents)
                 ↓
-    ┌───────────┼───────────┬──────────────┐
-    ↓           ↓           ↓              ↓
- VSCode      Monitor      AI Agents      MCP Server
- Extension   + Dashboard   (trickle       (15 tools:
- (inline     + Webhook     heal,          alerts, traces,
-  hints)     alerts        verify)        queries, ...)
+    ┌───────────┼───────────┬──────────────┬─────────────┐
+    ↓           ↓           ↓              ↓             ↓
+ VSCode      Monitor      AI Agents      MCP Server    Cloud
+ Extension   + Dashboard   (trickle       (18 tools)    (auto-push,
+ (inline     + Webhook     heal,                        shared
+  hints)     alerts        verify)                      dashboards)
 ```
 
 ## Packages
@@ -375,7 +405,7 @@ Your Code → trickle (import hooks / AST transform)
 |---|---|---|
 | [`trickle-observe`](https://www.npmjs.com/package/trickle-observe) | npm | JS/TS runtime instrumentation |
 | [`trickle-cli`](https://www.npmjs.com/package/trickle-cli) | npm | CLI for codegen, stubs, CI checks |
-| [`trickle-backend`](https://www.npmjs.com/package/trickle-backend) | npm | Optional backend for team sharing |
+| [`trickle-backend`](https://www.npmjs.com/package/trickle-backend) | npm | Cloud backend — team sharing, hosted dashboards, API |
 | [`trickle-observe`](https://pypi.org/project/trickle-observe/) | PyPI | Python runtime instrumentation |
 | [`trickle-vscode`](https://marketplace.visualstudio.com/items?itemName=yiheinchai.trickle-vscode) | VS Marketplace | VSCode inline type hints |
 
