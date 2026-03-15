@@ -553,7 +553,7 @@ export async function runTestCommand(opts: TestOptions): Promise<TestReport> {
     // Run tests through trickle run via shell (not spawnSync with args)
     // so that the command is properly interpreted as a shell command
     const cliPath = path.join(__dirname, '..', 'index.js');
-    const result = spawnSync('sh', ['-c', `node "${cliPath}" run "${testCommand}"`], {
+    const result = spawnSync('sh', ['-c', `node "${cliPath}" run ${testCommand}`], {
       cwd: process.cwd(),
       env: { ...process.env, TRICKLE_LOCAL: '1', TRICKLE_STUBS: '0' },
       timeout: 300000, // 5 minutes
