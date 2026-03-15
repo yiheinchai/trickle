@@ -462,6 +462,101 @@ function extractDestructuredNames(pattern: string): string[] {
 }
 
 /**
+ * Find variable reassignments (not declarations) and return insertions for tracing.
+ * Handles: x = newValue; x += 1; x ||= fallback; etc.
+ * Only matches standalone reassignment statements at the start of a line.
+ * Skips: property assignments (obj.x = ...), indexed (arr[i] = ...),
+ *        comparisons (===, !==), arrow functions (=>), declarations (const/let/var).
+ */
+function findReassignments(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
+  const results: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
+
+  // Match: <identifier> <assignOp>= <value> at the start of a line
+  // Compound operators: +=, -=, *=, /=, %=, **=, &&=, ||=, ??=, <<=, >>=, >>>=, &=, |=, ^=
+  // Plain: = (but not ==, ===, =>, !=)
+  const reassignRegex = /^([ \t]*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:\+|-|\*\*?|\/|%|&&|\|\||<<|>>>?|&|\||\^|\?\?)?=[^=>]/gm;
+  let match;
+
+  while ((match = reassignRegex.exec(source)) !== null) {
+    const varName = match[2];
+
+    // Skip trickle internals
+    if (varName.startsWith('__trickle') || varName.startsWith('_$')) continue;
+    // Skip common non-variable patterns
+    if (varName === '_a' || varName === '_b' || varName === '_c') continue;
+    // Skip 'this', 'self', 'super' (not reassignable in practice)
+    if (varName === 'this' || varName === 'super') continue;
+    // Skip keywords that could look like identifiers
+    if (['if', 'else', 'while', 'for', 'do', 'switch', 'case', 'default', 'return', 'throw',
+         'break', 'continue', 'try', 'catch', 'finally', 'new', 'delete', 'typeof', 'void',
+         'yield', 'await', 'class', 'extends', 'import', 'export', 'from', 'as', 'of', 'in',
+         'const', 'let', 'var', 'function', 'true', 'false', 'null', 'undefined'].includes(varName)) continue;
+
+    // Check that this line doesn't start with const/let/var (would be a declaration, already handled)
+    const lineStart = source.lastIndexOf('\n', match.index) + 1;
+    const linePrefix = source.slice(lineStart, match.index + match[1].length).trim();
+    if (/^(export\s+)?(const|let|var)\s/.test(source.slice(lineStart).trimStart())) continue;
+
+    // Skip if this looks like a property in an object literal (preceded by a key: pattern on same line)
+    // or if it's a label (label: ...)
+    const beforeOnLine = source.slice(lineStart, match.index).trim();
+    if (beforeOnLine.endsWith(':') || beforeOnLine.endsWith(',')) continue;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    // Find end of statement (same logic as findVarDeclarations)
+    const startPos = match.index + match[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch;
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') { pos++; }
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+    results.push({ lineEnd: foundEnd + 1, varName, lineNo });
+  }
+
+  return results;
+}
+
+/**
  * Find for-loop variable declarations and return insertions for tracing.
  * Handles:
  *   for (const item of items) { ... }         → trace item
@@ -1108,13 +1203,16 @@ export function transformEsmSource(
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
+  // Find variable reassignments for tracing
+  const reassignInsertions = traceVars ? findReassignments(source) : [];
+
   // Find for-loop variable declarations for tracing
   const forLoopInsertions = traceVars ? findForLoopVars(source) : [];
 
   // Find function parameter names for tracing
   const funcParamInsertions = traceVars ? findFunctionParams(source, isReactFile) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && forLoopInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -1132,6 +1230,11 @@ export function transformEsmSource(
         const origLine = findOriginalLineDestructured(origLines, di.varNames, di.lineNo);
         if (origLine !== -1) di.lineNo = origLine;
       }
+    }
+    // Fix reassignment line numbers
+    for (const ri of reassignInsertions) {
+      const origLine = findOriginalLine(origLines, ri.varName, ri.lineNo);
+      if (origLine !== -1) ri.lineNo = origLine;
     }
     // Fix for-loop var line numbers
     for (const fi of forLoopInsertions) {
@@ -1177,7 +1280,7 @@ export function transformEsmSource(
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
-  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
+  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
@@ -1247,7 +1350,7 @@ export function transformEsmSource(
   }
 
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Set();`,
@@ -1415,6 +1518,14 @@ export function transformEsmSource(
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // Reassignment insertions: trace after the reassignment statement
+  for (const { lineEnd, varName, lineNo } of reassignInsertions) {
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
     });
   }
 
