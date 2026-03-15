@@ -37,6 +37,7 @@ import { annotateCommand } from "./commands/annotate";
 import { stubsCommand } from "./commands/stubs";
 import { varsCommand } from "./commands/vars";
 import { lambdaCommand } from "./commands/lambda";
+import { toolSchemaCommand } from "./commands/tool-schema";
 import { rnCommand } from "./commands/rn";
 import { nextCommand } from "./commands/next";
 import { pythonCommand } from "./commands/python";
@@ -153,6 +154,17 @@ program
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
+  });
+
+// trickle tool-schema
+program
+  .command("tool-schema [function-name]")
+  .description("Generate LLM tool calling schemas from observed function types")
+  .option("--format <format>", "Output format: openai, anthropic, mcp", "openai")
+  .option("-o, --out <path>", "Write schemas to a JSON file")
+  .option("--module <name>", "Filter by module name")
+  .action(async (functionName: string | undefined, opts) => {
+    await toolSchemaCommand(functionName, opts);
   });
 
 // trickle diff
