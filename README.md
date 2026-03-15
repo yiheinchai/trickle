@@ -272,7 +272,7 @@ trickle dashboard-local             # self-contained HTML dashboard
 trickle monitor --webhook <url>     # Slack/Discord alerts
 ```
 
-Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB) and ORMs (Prisma, Sequelize, TypeORM, SQLAlchemy, Knex, Drizzle), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
+Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB) and ORMs (Prisma, Sequelize, TypeORM, SQLAlchemy, Django ORM, Knex, Drizzle), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
 
 **[Full Observability Platform Guide →](usecases/observability-platform.md)**
 

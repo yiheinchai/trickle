@@ -630,6 +630,98 @@ def _attach_query_listeners(engine: Any, sa_event: Any) -> None:
         _write_query(record)
 
 
+# ── Django ORM ──────────────────────────────────────────────────────────────
+
+def patch_django(django_module: Any) -> None:
+    """Patch Django's database layer to capture all ORM queries.
+
+    Django routes ALL database operations through CursorWrapper.execute()
+    in django.db.backends.utils. By patching this single class, we capture
+    queries from the ORM, raw SQL, migrations, and management commands.
+    """
+    if getattr(django_module, "_trickle_patched", False):
+        return
+    django_module._trickle_patched = True
+
+    if _debug:
+        print("[trickle/db] Patching Django ORM")
+
+    try:
+        from django.db.backends.utils import CursorWrapper
+    except ImportError:
+        return
+
+    _orig_execute = CursorWrapper.execute
+    _orig_executemany = CursorWrapper.executemany
+
+    def _patched_execute(self: Any, sql: Any, params: Any = None) -> Any:
+        sql_str = str(sql) if sql else ""
+        start = time.perf_counter()
+        error_msg = None
+        try:
+            return _orig_execute(self, sql, params)
+        except Exception as e:
+            error_msg = str(e)[:200]
+            raise
+        finally:
+            duration = (time.perf_counter() - start) * 1000
+            row_count = 0
+            columns = None
+            try:
+                if self.cursor.description:
+                    columns = [d[0] for d in self.cursor.description]
+                row_count = self.cursor.rowcount if self.cursor.rowcount >= 0 else 0
+            except Exception:
+                pass
+            record: Dict[str, Any] = {
+                "kind": "query",
+                "driver": "django",
+                "query": _truncate(sql_str),
+                "durationMs": round(duration, 2),
+                "rowCount": row_count,
+                "timestamp": int(time.time() * 1000),
+            }
+            p = _sanitize_params(params)
+            if p:
+                record["params"] = p
+            if columns:
+                record["columns"] = columns
+            if error_msg:
+                record["error"] = error_msg
+            _write_query(record)
+
+    def _patched_executemany(self: Any, sql: Any, param_list: Any) -> Any:
+        sql_str = str(sql) if sql else ""
+        start = time.perf_counter()
+        error_msg = None
+        try:
+            return _orig_executemany(self, sql, param_list)
+        except Exception as e:
+            error_msg = str(e)[:200]
+            raise
+        finally:
+            duration = (time.perf_counter() - start) * 1000
+            batch_size = 0
+            try:
+                batch_size = len(list(param_list)) if param_list else 0
+            except Exception:
+                pass
+            record: Dict[str, Any] = {
+                "kind": "query",
+                "driver": "django",
+                "query": _truncate(sql_str),
+                "durationMs": round(duration, 2),
+                "rowCount": batch_size,
+                "timestamp": int(time.time() * 1000),
+            }
+            if error_msg:
+                record["error"] = error_msg
+            _write_query(record)
+
+    CursorWrapper.execute = _patched_execute
+    CursorWrapper.executemany = _patched_executemany
+
+
 # ── Auto-patching entry point ────────────────────────────────────────────────
 
 def patch_databases(debug: bool = False) -> None:
@@ -659,6 +751,7 @@ def patch_databases(debug: bool = False) -> None:
         "redis": patch_redis,
         "pymongo": patch_pymongo,
         "sqlalchemy": patch_sqlalchemy,
+        "django": patch_django,
     }
     for mod_name, patcher in _DB_PATCHES.items():
         if mod_name in sys.modules:

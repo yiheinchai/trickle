@@ -18,17 +18,18 @@ Production: rate limiting, data retention (30d), request logging, error handling
 Deployment: Dockerfile + fly.toml ready for `fly deploy`.
 Documentation: README with cloud + team sections, 18 usecases (including SRE/Platform Engineer).
 
-ORM/DB auto-patching: 17 drivers (pg, mysql2, sqlite3, Prisma, Sequelize, TypeORM, Knex,
-Drizzle, ioredis, mongoose + psycopg2, pymysql, redis, pymongo, SQLAlchemy, mysql.connector, sqlite3).
+ORM/DB auto-patching: 18 drivers (pg, mysql2, sqlite3, Prisma, Sequelize, TypeORM, Knex,
+Drizzle, ioredis, mongoose + psycopg2, pymysql, redis, pymongo, SQLAlchemy, Django ORM,
+mysql.connector, sqlite3).
 Alerting rules engine: .trickle/rules.json with custom thresholds, pattern matching, query limits.
 
-Validated on: nanoGPT (ML), Express (JS), Flask (Python), FastAPI+SQLAlchemy, Prisma+SQLite,
-Sequelize+SQLite, multi-file APIs, production-like apps with auth/JWT/bcrypt/SQL.
+Validated on: nanoGPT (ML), Express (JS), Flask (Python), FastAPI+SQLAlchemy, Django+SQLite,
+Prisma+SQLite, Sequelize+SQLite, multi-file APIs, production-like apps with auth/JWT/bcrypt/SQL.
 
 Next priorities:
 1. Deploy cloud.trickle.dev to fly.io
 2. PostgreSQL migration for cloud scale
-3. Django ORM auto-patching (Python) for broader Python ecosystem coverage
+3. Log aggregation (winston, pino, structlog, loguru auto-patching)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
