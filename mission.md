@@ -6,13 +6,12 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-JS client 0.2.115. Shipped per-request correlation IDs via AsyncLocalStorage — Express
-middleware propagates requestId through call traces and DB queries. Foundation for
-Jaeger-like per-request tracing with trickle's richer data.
+CLI 0.1.155. 29 MCP tools. Shipped get_request_trace — per-request tracing that shows all
+functions and queries for a single HTTP request, using AsyncLocalStorage correlation IDs.
 
-28 MCP tools. Recent: diff-runs, fix suggestions, OTLP, Prometheus, Slack/Discord, GitHub PR.
+Recent: request tracing, diff-runs, fix suggestions, OTLP, Prometheus, Slack/Discord, GitHub PR.
 
-Next: MCP tool to filter by requestId, Python request correlation, anomaly detection.
+Next: Python request correlation (contextvars), anomaly detection baselines, rate limiting alerts.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
