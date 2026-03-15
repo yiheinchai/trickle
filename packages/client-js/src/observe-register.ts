@@ -1154,6 +1154,24 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // WebSocket (ws)
+    if (request === 'ws' && !expressPatched.has('ws')) {
+      expressPatched.add('ws');
+      try {
+        const { patchWs } = require(path.join(__dirname, 'ws-observer.js'));
+        patchWs(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // socket.io-client
+    if (request === 'socket.io-client' && !expressPatched.has('socket.io-client')) {
+      expressPatched.add('socket.io-client');
+      try {
+        const { patchSocketIo } = require(path.join(__dirname, 'ws-observer.js'));
+        patchSocketIo(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Resolve to absolute path for dedup — do this FIRST since bundlers like
     // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
     // with './' or '/'. We need the resolved path to decide if it's user code.

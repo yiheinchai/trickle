@@ -291,6 +291,17 @@ function getCallTrace(): unknown {
   return { trace: events };
 }
 
+function getWebSocketEvents(): unknown {
+  const file = path.join(findTrickleDir(), "websocket.jsonl");
+  if (!fs.existsSync(file)) return { events: "No WebSocket events captured. The app may not use ws or socket.io." };
+  const events: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { events.push(JSON.parse(line)); } catch {}
+  }
+  if (events.length === 0) return { events: "No WebSocket events recorded." };
+  return { events };
+}
+
 function getConsoleOutput(): unknown {
   const file = path.join(findTrickleDir(), "console.jsonl");
   if (!fs.existsSync(file)) return { output: "No console output captured. Run the app with trickle first." };
@@ -435,6 +446,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_websocket_events",
+    description: "Get WebSocket message events — connections, sent/received messages, close events. Supports ws and socket.io.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_console_output",
     description: "Get console.log/error/warn output from the last application run. Shows what the app printed to stdout/stderr.",
     inputSchema: { type: "object", properties: {} },
@@ -493,6 +509,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_errors": result = getErrors(); break;
           case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_call_trace": result = getCallTrace(); break;
+          case "get_websocket_events": result = getWebSocketEvents(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
