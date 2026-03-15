@@ -102,6 +102,30 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
   Object.defineProperty(wrapper, 'name', { value: fn.name || opts.functionName, configurable: true });
   Object.defineProperty(wrapper, 'length', { value: fn.length, configurable: true });
 
+  // Copy all own properties from original function to wrapper.
+  // This is critical for Express apps (app.get, app.listen, etc.),
+  // class constructors with static methods, and other functions with properties.
+  for (const key of Object.getOwnPropertyNames(fn)) {
+    if (key === 'name' || key === 'length' || key === 'prototype' || key === 'caller' || key === 'arguments') continue;
+    try {
+      const desc = Object.getOwnPropertyDescriptor(fn, key);
+      if (desc) Object.defineProperty(wrapper, key, desc);
+    } catch {
+      // Some properties may not be configurable
+    }
+  }
+  // Also copy symbol properties
+  for (const sym of Object.getOwnPropertySymbols(fn)) {
+    try {
+      const desc = Object.getOwnPropertyDescriptor(fn, sym);
+      if (desc) Object.defineProperty(wrapper, sym, desc);
+    } catch {}
+  }
+  // Copy prototype for constructor functions
+  if (fn.prototype && fn.prototype !== Object.prototype) {
+    wrapper.prototype = fn.prototype;
+  }
+
   // Mark as wrapped to prevent double-wrapping
   (wrapper as any)[TRICKLE_WRAPPED] = true;
 
