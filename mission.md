@@ -10,14 +10,13 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-26 MCP tools. Shipped get_recommended_actions — guided agent workflows that analyze state
-and tell agents exactly which tools to call and in what order. Also fixed Python decorated
-function capture, shipped flamegraph generation.
+26 MCP tools. Errors now include variable context (values at error location).
+Shipped: guided agent workflows, flamegraph, Python decorator capture, error enrichment.
 
 Next priorities:
 1. Test on a real open-source Django project from GitHub
 2. Distributed tracing improvements (cross-service flamegraphs)
-3. Improve error context — show variable values at the point where errors occurred
+3. Improve the summary to include a "root cause" field derived from errors + context
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
