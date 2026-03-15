@@ -24,8 +24,8 @@ import { hashType } from './type-hash';
 let varsFilePath = '';
 let debugMode = false;
 
-/** Cache: "file:line:varName:typeHash" → already written */
-const varCache = new Set<string>();
+/** Cache: "file:line:varName" → { fingerprint, timestamp } for value-aware dedup */
+const varCache = new Map<string, { fp: string; ts: number }>();
 
 /** Batch buffer for writing — avoids one fs.appendFileSync per variable */
 let varBuffer: string[] = [];
@@ -92,9 +92,16 @@ export function traceVar(
     const dummyArgs: TypeNode = { kind: 'tuple', elements: [] };
     const typeHash = hashType(dummyArgs, type);
 
-    const cacheKey = `${filePath}:${line}:${varName}:${typeHash}`;
-    if (varCache.has(cacheKey)) return;
-    varCache.add(cacheKey);
+    // Value-aware dedup: re-send if value changed or 10s elapsed
+    const cacheKey = `${filePath}:${line}:${varName}`;
+    const t = typeof value;
+    const fp = (t === 'string' || t === 'number' || t === 'boolean' || value === null || value === undefined)
+      ? String(value).substring(0, 60)
+      : typeHash;
+    const now = Date.now();
+    const prev = varCache.get(cacheKey);
+    if (prev && prev.fp === fp && (now - prev.ts) < 10000) return;
+    varCache.set(cacheKey, { fp, ts: now });
 
     const sample = sanitizeVarSample(value);
 

@@ -473,7 +473,7 @@ function extractDestructuredNames(pattern: string): string[] {
  * Skips: property assignments (obj.x = ...), indexed (arr[i] = ...),
  *        comparisons (===, !==), arrow functions (=>), declarations (const/let/var).
  */
-function findReassignments(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
+export function findReassignments(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
   const results: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
 
   // Match: <identifier> <assignOp>= <value> at the start of a line
@@ -578,7 +578,7 @@ function findReassignments(source: string): Array<{ lineEnd: number; varName: st
  * Find catch clause variables and return insertions for tracing.
  * Handles: catch (err) { ... } → trace err at start of catch body.
  */
-function findCatchVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
+export function findCatchVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
   const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
   const catchRegex = /\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^)]+?)?\s*\)\s*\{/g;
   let match;
@@ -731,7 +731,7 @@ function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd:
   return results;
 }
 
-function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
+export function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
   const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
 
   // Match: for (const/let/var ...
@@ -823,7 +823,7 @@ function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: s
  * Handles: function declarations, arrow functions, method definitions.
  * Skips: React components (already tracked via __trickle_rc with props).
  */
-function findFunctionParams(source: string, isReactFile: boolean): Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> {
+export function findFunctionParams(source: string, isReactFile: boolean): Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> {
   const results: Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> = [];
 
   // Match function declarations: function name(params) {

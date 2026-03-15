@@ -36,6 +36,12 @@ import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
 import { initVarTracer, traceVar } from './trace-var';
+import {
+  findReassignments,
+  findForLoopVars,
+  findCatchVars,
+  findFunctionParams,
+} from './vite-plugin';
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -508,7 +514,13 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     }
   }
 
-  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && classInsertions.length === 0) return source;
+  // Additional variable patterns: reassignments, for-loops, catch clauses, function params
+  const reassignInsertions = findReassignments(source);
+  const forLoopInsertions = findForLoopVars(source);
+  const catchInsertions = findCatchVars(source);
+  const funcParamInsertions = findFunctionParams(source, false);
+
+  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && classInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
@@ -533,7 +545,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   ];
 
   // Add variable tracing helper if we have var insertions
-  if (varInsertions.length > 0 || destructInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0) {
     const traceVarPath = path.join(__dirname, 'trace-var.js');
     prefixLines.push(
       `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
@@ -568,6 +580,41 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // Reassignment insertions
+  for (const { lineEnd, varName, lineNo } of reassignInsertions) {
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  // For-loop variable insertions
+  for (const { bodyStart, varNames, lineNo } of forLoopInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // Catch clause insertions
+  for (const { bodyStart, varNames, lineNo } of catchInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e2){}\n`,
+    });
+  }
+
+  // Function parameter insertions
+  for (const { bodyStart, paramNames, lineNo } of funcParamInsertions) {
+    const calls = paramNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e){}\n`,
     });
   }
 
