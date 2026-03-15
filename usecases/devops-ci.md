@@ -160,16 +160,53 @@ trickle pack -o types-snapshot.json     # portable bundle
 trickle unpack types-snapshot.json      # import into another environment
 ```
 
+## Use Case 7: One-Command CI with `trickle ci`
+
+The simplest CI integration — one command does everything:
+
+```yaml
+# GitHub Actions
+- run: npx trickle ci "python -m pytest tests/"
+```
+
+This command:
+1. Runs your tests with trickle instrumentation
+2. Detects N+1 queries, slow functions, errors, memory issues
+3. Posts `::error::` and `::warning::` annotations directly on your PR
+4. Exits non-zero if critical issues are found
+
+```bash
+# Fail on warnings too (stricter)
+trickle ci "npm test" --fail-on-warning
+
+# JSON output for custom integrations
+trickle ci "npm test" --format json
+```
+
+## Use Case 8: Autonomous Agent Analysis
+
+```bash
+trickle agent "python app.py" --fix
+```
+
+Generates a visual analysis report with:
+- Status (healthy/warning/critical)
+- Performance hotspot bar chart
+- N+1 query detection
+- Fix recommendations
+- Error summaries
+
 ## CI Commands Reference
 
 | Command | Exit Code | Use |
 |---|---|---|
+| `trickle ci "<command>"` | 1 on critical | **One-command CI** (recommended) |
+| `trickle agent "<command>" --fix` | 0 | Autonomous debugging report |
+| `trickle monitor` | 0 | Detect issues (writes alerts.jsonl) |
+| `trickle verify --baseline` / `trickle verify` | 0 | Before/after comparison |
 | `trickle check --against <file>` | 1 on breaking changes | Contract enforcement |
 | `trickle audit --fail-on-error` | 1 on errors | Quality gate |
-| `trickle audit --fail-on-warning` | 1 on warnings | Strict quality gate |
 | `trickle coverage --fail-under <N>` | 1 below threshold | Coverage gate |
-| `trickle replay --json` | 1 on mismatches | Regression testing |
-| `trickle validate <method> <url>` | 1 on mismatch | Single endpoint check |
 
 All commands support `--json` for machine-readable output.
 
