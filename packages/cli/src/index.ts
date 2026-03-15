@@ -613,6 +613,19 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle ticket
+program
+  .command("ticket")
+  .description("Create tickets in Jira/Linear/GitHub Issues from detected issues")
+  .option("--github", "Create GitHub Issues")
+  .option("--linear", "Create Linear issues")
+  .option("--jira", "Create Jira tickets")
+  .option("--json", "Output ticket data as JSON")
+  .action(async (opts) => {
+    const { createTickets } = await import("./commands/ticket");
+    await createTickets(opts);
+  });
+
 // trickle changelog
 program
   .command("changelog")
