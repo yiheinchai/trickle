@@ -1,17 +1,30 @@
 # React Developer: See Every Variable Value Inline While You Develop
 
-When working on a React app, you often need to understand what data flows through your components — what's in props, what state looks like, what a computed value resolves to. Instead of sprinkling `console.log` everywhere, trickle shows you inline hints for every variable in every file, right in your editor.
+When working on a React app, you need to understand what data flows through your components — props, state, computed values, API responses. Instead of sprinkling `console.log` everywhere, trickle shows you inline hints for every variable, right in your editor.
 
 ## Install
 
 ```bash
 npm install trickle-observe
+npm install -g trickle-cli       # for CLI commands (summary, explain, test, flamegraph)
 ```
 
 Install the VSCode extension: search for "Trickle" in the marketplace, or:
 
 ```bash
 code --install-extension yiheinchai.trickle-vscode
+```
+
+## Debugging Your React App
+
+Beyond inline hints, trickle gives you full runtime observability:
+
+```bash
+trickle run node server.js       # capture backend data (Express/Next.js API routes)
+trickle summary                   # errors, queries, N+1 patterns, root causes
+trickle explain src/api.ts        # functions, call graph, data flow
+trickle test                      # run jest/vitest with structured pass/fail
+trickle flamegraph                # performance hotspots
 ```
 
 ## Setup (Vite)

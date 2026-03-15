@@ -1,26 +1,55 @@
-# QA / Test Engineer: Catch API Regressions Automatically
+# QA / Test Engineer: Catch Regressions and Understand Test Failures
 
-You're responsible for making sure API changes don't break consumers. Instead of maintaining hand-written contract tests, trickle captures real API types and lets you detect breaking changes automatically in CI.
+You're responsible for quality. Trickle helps in two ways:
+1. **Test observability**: run tests and see exactly what happened at runtime (queries, errors, variable values at failure points)
+2. **Contract testing**: detect breaking API changes automatically in CI
 
 ## Install
 
 ```bash
 npm install -g trickle-cli
+pip install trickle-observe    # for Python projects
 ```
 
-## Quick Start
+## Quick Start: Run Tests with Observability
+
+```bash
+# Auto-detects your test framework (jest, vitest, pytest, mocha)
+trickle test
+
+# Or specify:
+trickle test "npx jest"
+trickle test "npx vitest run"
+trickle test "python -m pytest tests/"
+```
+
+You get structured results with runtime context at failure points:
+```
+Tests:  9 passed | 1 failed | 0 skipped | 10 total
+
+Failures:
+  ✗ should return user by id
+    Expected status 200 but got 404
+    Variables near failure: user_id = 999, row = null
+    Queries: SELECT * FROM users WHERE id = 999
+
+Observability:
+  10 functions | 69 queries | N+1 pattern detected
+```
+
+After tests, check for deeper issues:
+```bash
+trickle summary       # root causes, N+1 patterns, slow queries
+trickle flamegraph    # performance hotspots
+trickle doctor        # health check with recommended actions
+```
+
+## Quick Start: API Contract Testing
 
 ### Step 1: Capture a baseline
 
-Run your test suite (or hit your API manually) through trickle:
-
 ```bash
 trickle run npm test
-```
-
-This captures the types of every API response. Save a baseline:
-
-```bash
 trickle check --save baseline.json
 ```
 
@@ -28,13 +57,8 @@ Commit `baseline.json` to your repo.
 
 ### Step 2: Check for breaking changes in CI
 
-Add to your CI pipeline:
-
 ```bash
-# Run tests through trickle to capture current types
 trickle run npm test
-
-# Compare against baseline
 trickle check --against baseline.json
 ```
 

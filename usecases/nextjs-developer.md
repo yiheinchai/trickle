@@ -2,7 +2,23 @@
 
 ## Who they are
 
-Full-stack engineers building web apps with Next.js App Router or Pages Router. They work with both Server Components (run on the server, no hooks, async data fetching) and Client Components (`'use client'`, useState/useEffect, interactive). Debugging re-renders and state changes is as painful as in plain React, but the server/client split adds complexity.
+Full-stack engineers building web apps with Next.js App Router or Pages Router. They work with both Server Components and Client Components, and need visibility into both sides.
+
+## Quick Start: Debugging Next.js
+
+```bash
+npm install trickle-observe
+npm install -g trickle-cli
+
+# Run your Next.js app with observability
+trickle run next dev
+
+# After hitting some pages:
+trickle summary                  # errors, queries, root causes
+trickle explain src/app/page.tsx # understand a file's runtime behavior
+trickle test                     # run jest/vitest with structured pass/fail
+trickle flamegraph               # performance hotspots
+```
 
 ## Pain points without trickle
 

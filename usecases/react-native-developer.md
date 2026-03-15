@@ -2,15 +2,29 @@
 
 ## Who they are
 
-Mobile engineers building iOS/Android apps with React Native (Expo or bare RN). They write the same React hooks and components as web developers but face a harder debugging experience: no browser DevTools, device/simulator gap, Metro bundler (not Vite), and no way to see runtime variable values inline in their editor.
+Mobile engineers building iOS/Android apps with React Native (Expo or bare RN). Debugging is harder than web: no browser DevTools, device/simulator gap, Metro bundler (not Vite).
+
+## Quick Start
+
+```bash
+npm install trickle-observe
+npm install -g trickle-cli
+code --install-extension yiheinchai.trickle-vscode
+```
+
+For backend debugging (API routes, database queries):
+```bash
+trickle run node server.js       # if your RN app has a backend
+trickle summary                   # errors, queries, N+1 patterns
+trickle test                      # run jest tests with observability
+```
 
 ## Pain points without trickle
 
 - Can't use browser DevTools — have to rely on `console.log` and Flipper
-- No inline type hints in the editor showing what state values actually are at runtime
+- No inline type hints showing what state values actually are at runtime
 - useState bugs are hard to trace — "why did this re-render 12 times?"
 - useEffect firing unexpectedly is invisible until something breaks
-- Hot reload makes logs noisy — hard to correlate logs with code
 
 ## How trickle helps
 

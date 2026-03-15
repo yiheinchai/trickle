@@ -6,24 +6,33 @@ You've inherited a codebase with no documentation, no types, and no tests. You n
 
 ```bash
 npm install -g trickle-cli
+pip install trickle-observe    # for Python codebases
 ```
 
 ## Quick Start
 
-Run the existing server through trickle — no code changes needed:
-
 ```bash
-# Node.js
-trickle run node server.js
+# Run the existing server through trickle — no code changes needed:
+trickle run node server.js       # or: trickle run python app.py
 
-# Python
-trickle run python app.py
+# Now use the app (click around, curl endpoints, run tests if they exist)
 
-# Whatever start command the project uses
-trickle run npm start
+# Then understand what happened:
+trickle summary                   # full overview: functions, queries, errors, root causes
+trickle explain src/api.js        # understand a file: functions, call graph, data flow
+trickle flamegraph                # where is time being spent?
+
+# Generate documentation:
+trickle docs -o API.md            # Markdown API docs from runtime data
+trickle openapi -o openapi.json   # OpenAPI spec
 ```
 
-Now use the app. Click around, run the existing test suite if there is one, or just `curl` some endpoints. Trickle captures every request and response type.
+For AI agents (Claude Code, etc.):
+```bash
+trickle init    # creates CLAUDE.md + .claude/settings.json with 26 MCP tools
+```
+
+Now the agent can use `explain_file`, `get_last_run_summary`, and `get_flamegraph` to understand the codebase autonomously.
 
 ## Use Case 1: Discover What Endpoints Exist
 
