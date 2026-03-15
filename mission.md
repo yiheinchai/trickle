@@ -9,9 +9,15 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Added memory profiling (profile.jsonl) with RSS + heap snapshots. 12 MCP tools now. Published Python 0.2.3, CLI 0.1.93.
+Added `trickle monitor` — anomaly detection with actionable alerts. Detects slow queries, N+1 patterns, errors, memory issues, slow functions, deep call stacks. Each alert has severity + fix suggestion. New MCP tool: get_alerts (13 tools total).
 
-Full stack: 9 data types, 12 MCP tools, 15+ drivers auto-patched across JS + Python.
+Added memory profiling (profile.jsonl) — RSS + heap snapshots. Published Python 0.2.3, CLI 0.1.94.
+
+Building toward replacing Datadog: trickle now has observability data collection (9 data types), anomaly detection (monitor), and agent-accessible alerts (MCP). Next steps toward production observability:
+1. Continuous monitoring mode (watch .trickle/ for changes, re-analyze)
+2. Alert routing (webhook/Slack/email notifications)
+3. Agent auto-remediation (detect issue → apply fix → verify)
+4. Cloud dashboard for team-wide observability
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
