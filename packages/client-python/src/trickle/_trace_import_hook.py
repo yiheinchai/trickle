@@ -195,7 +195,9 @@ def _trickle_tv(_val, _name, _line, _func=None):
         _t = infer_type(_val, max_depth=3)
         _th = _trickle_json.dumps(_t, sort_keys=True)[:32]
         _s = None
-        if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):
+        if _val is None:
+            pass
+        elif hasattr(_val, 'shape') and hasattr(_val, 'dtype'):
             _sh = _val.shape
             if hasattr(_sh, '__len__') and len(_sh) == 0:
                 _s = _val.item() if hasattr(_val, 'item') else float(_val)
