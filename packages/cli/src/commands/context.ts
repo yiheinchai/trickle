@@ -283,7 +283,8 @@ export async function contextCommand(
         .map((e, i) => `${f.paramNames?.[i] || `arg${i}`}: ${typeNodeToCompact(e)}`)
         .join(", ");
       const ret = typeNodeToCompact(f.returnType);
-      output.push(`- \`${f.module}.${f.functionName}(${params}) -> ${ret}\``);
+      const timing = (f as any).durationMs !== undefined ? ` (${(f as any).durationMs}ms)` : "";
+      output.push(`- \`${f.module}.${f.functionName}(${params}) -> ${ret}\`${timing}`);
       if (!opts.compact && f.sampleInput !== undefined) {
         output.push(`  Sample call: ${formatSampleCompact(f.sampleInput)} -> ${formatSampleCompact(f.sampleOutput)}`);
       }

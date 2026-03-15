@@ -72,6 +72,7 @@ interface FuncObservation {
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
+  durationMs?: number;
 }
 
 // ── Helpers ──
@@ -186,6 +187,7 @@ function getRuntimeContext(params: Record<string, unknown>): unknown {
       type: typeNodeToCompact(e),
     })),
     returns: typeNodeToCompact(f.returnType),
+    durationMs: f.durationMs,
     sampleInput: f.sampleInput,
     sampleOutput: f.sampleOutput,
   }));
@@ -256,6 +258,7 @@ function getFunctionSignatures(): unknown {
         name: `${f.module}.${f.functionName}`,
         signature: `${f.functionName}(${params}) -> ${typeNodeToCompact(f.returnType)}`,
         module: f.module,
+        durationMs: f.durationMs,
       };
     }),
   };
