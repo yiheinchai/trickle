@@ -177,6 +177,38 @@ trickle test --generate          # auto-generate API tests
 
 ---
 
+### AI Coding Agents (Claude Code, Cursor, Copilot)
+
+> *"My agent keeps adding console.log to debug. There must be a better way."*
+
+Trickle caches runtime variable values so AI agents can debug without re-running your code. Run once, then agents query the cached data:
+
+```bash
+trickle run node app.js          # capture runtime data once
+
+# Agent runs these to understand your code:
+trickle context src/api.ts --annotated   # source + runtime values
+```
+
+```
+  13 | const user = createUser(body.name, body.email);  // user = {"id":1,"name":"Alice",...}
+  19 | const count = users.length;                       // count = 3
+  25 | const user = getUser(id);                         // user = null  ← bug!
+```
+
+Agents see **source code AND runtime values** in one view. When your app crashes, error context + nearby variable values are auto-captured to `.trickle/errors.jsonl`.
+
+```bash
+trickle init                     # creates CLAUDE.md with agent instructions
+trickle context src/api.ts:25    # values near a specific line
+trickle context --json           # structured output for programmatic use
+trickle tool-schema --format openai  # generate LLM tool calling schemas
+```
+
+**[Full AI Agent Guide →](usecases/ai-agent.md)** | **[LLM Tool Schema Guide →](usecases/ai-developer.md)**
+
+---
+
 ### Legacy Codebase Explorers
 
 > *"I inherited a codebase with no docs, no types, and no tests. I need to understand what it does."*
@@ -231,6 +263,9 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle codegen --react-query` | Generate React Query hooks |
 | `trickle openapi` | Generate OpenAPI 3.0 spec |
 | `trickle check --against base.json` | CI: detect breaking type changes |
+| `trickle context <file>` | Runtime context for AI agent debugging |
+| `trickle context --annotated` | Source code with inline runtime values |
+| `trickle tool-schema` | Generate LLM tool calling schemas |
 | `trickle functions` | List all observed functions |
 | `trickle overview` | Compact view of all routes and types |
 | `trickle vars` | Show traced variables with types |
@@ -255,13 +290,14 @@ Your Code → trickle (import hooks / AST transform)
                 ↓
          .trickle/observations.jsonl  (function types)
          .trickle/variables.jsonl     (variable assignments)
+         .trickle/errors.jsonl        (crash context + nearby values)
                 ↓
-    ┌───────────┼───────────┐
-    ↓           ↓           ↓
- VSCode      CLI tools    Backend
- Extension   (codegen,    (optional,
- (inline     stubs,       for team
-  hints)     openapi)     sharing)
+    ┌───────────┼───────────┬──────────────┐
+    ↓           ↓           ↓              ↓
+ VSCode      CLI tools    AI Agents      Backend
+ Extension   (codegen,    (trickle       (optional,
+ (inline     stubs,       context,       for team
+  hints)     openapi)     tool-schema)   sharing)
 ```
 
 ## Packages
