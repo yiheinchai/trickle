@@ -520,13 +520,55 @@ export function runMonitor(opts: MonitorOptions): Alert[] {
 async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
   const critical = alerts.filter(a => a.severity === 'critical');
   const warnings = alerts.filter(a => a.severity === 'warning');
+  const isSlack = url.includes('hooks.slack.com') || url.includes('slack.com/api');
 
-  // Format for Slack-compatible webhook
+  // Slack Block Kit for rich formatting
+  if (isSlack) {
+    const color = critical.length > 0 ? '#e74c3c' : warnings.length > 0 ? '#f39c12' : '#2ecc71';
+    const status = critical.length > 0 ? '🔴 Critical Issues' : warnings.length > 0 ? '🟡 Warnings' : '🟢 Healthy';
+
+    const blocks: any[] = [
+      { type: 'header', text: { type: 'plain_text', text: `trickle: ${status}` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*${critical.length}* critical | *${warnings.length}* warnings | *${alerts.length}* total` } },
+      { type: 'divider' },
+    ];
+
+    for (const a of alerts.slice(0, 5)) {
+      const icon = a.severity === 'critical' ? '🔴' : '🟡';
+      let text = `${icon} *${a.category}*: ${a.message}`;
+      if (a.suggestion) text += `\n> _${a.suggestion}_`;
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text } });
+    }
+
+    if (alerts.length > 5) {
+      blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `_...and ${alerts.length - 5} more alerts_` }] });
+    }
+
+    blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `_Run \`trickle summary\` for full analysis | <https://github.com/yiheinchai/trickle|trickle>_` }] });
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `trickle: ${critical.length} critical, ${warnings.length} warnings`,
+          attachments: [{ color, blocks }],
+        }),
+      });
+      if (res.ok) console.log(chalk.green(`  ✓ Alerts sent to Slack`));
+      else console.log(chalk.yellow(`  ⚠ Slack responded with ${res.status}`));
+    } catch (err: any) {
+      console.log(chalk.yellow(`  ⚠ Failed to send to Slack: ${err.message}`));
+    }
+    return;
+  }
+
+  // Generic webhook (works with Discord, PagerDuty, custom endpoints)
   const text = [
-    `*trickle monitor*: ${critical.length} critical, ${warnings.length} warnings`,
+    `trickle monitor: ${critical.length} critical, ${warnings.length} warnings`,
     ...alerts.slice(0, 10).map(a => {
       const icon = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟡' : 'ℹ️';
-      return `${icon} *${a.category}*: ${a.message}${a.suggestion ? `\n   → ${a.suggestion}` : ''}`;
+      return `${icon} ${a.category}: ${a.message}${a.suggestion ? ` → ${a.suggestion}` : ''}`;
     }),
   ].join('\n');
 
@@ -536,19 +578,16 @@ async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         text,
-        // Also include structured data for non-Slack webhooks
+        content: text, // Discord compatibility
         alerts: alerts.map(a => ({
           severity: a.severity,
           category: a.category,
           message: a.message,
           suggestion: a.suggestion,
-          details: a.details,
         })),
       }),
     });
-    if (res.ok) {
-      console.log(chalk.green(`  ✓ Alerts sent to webhook`));
-    }
+    if (res.ok) console.log(chalk.green(`  ✓ Alerts sent to webhook`));
   } catch (err: any) {
     console.log(chalk.yellow(`  ⚠ Failed to send webhook: ${err.message}`));
   }
