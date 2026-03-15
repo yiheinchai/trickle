@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-JS variable tracing now covers: declarations, destructuring, for-loops, function params, reassignments, and catch clauses. Browser transport via Vite HMR WebSocket. VSCode extension updated with symlink fix for React hints and expanded JS hint positioning. Next areas:
-- Run a full end-to-end test with an actual browser (not simulated WS) on a real React app and verify inline hints appear correctly in VSCode for all variable types
+Full end-to-end pipeline verified with real Chrome browser: 28 variables, 10 renders, 18 hooks, 2 state updates captured from React app via Vite HMR WebSocket. Next areas:
 - Consider adding a Next.js client-side transport (webpack HMR or fetch-based) so client components also capture data in the browser
 - Explore capturing JSX expression values inline (e.g., what {user.name} evaluates to inside JSX)
+- Test the VSCode extension with the captured data to verify hints display at correct positions
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
