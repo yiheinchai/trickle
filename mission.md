@@ -6,17 +6,18 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.149. Shipped OpenTelemetry (OTLP) export — trickle data can now flow to Grafana,
-SigNoz, Jaeger, or any OTLP-compatible backend. Also shipped GitHub PR comment posting.
+CLI 0.1.150. Shipped Slack Block Kit + Discord webhook formatting.
 
 Completed TAM opportunities:
 1. ✓ OpenTelemetry export (trickle export --otlp)
 2. ✓ GitHub PR comments (trickle ci with GITHUB_TOKEN)
+3. ✓ Slack Block Kit webhooks (auto-detected, rich formatting)
+4. ✓ Discord webhook compatibility
 
 Remaining:
-1. Slack/PagerDuty alerting integrations (Block Kit formatting)
+1. Prometheus metrics endpoint (/metrics in text format)
 2. GitHub App for richer PR integration
-3. Prometheus metrics endpoint
+3. PagerDuty integration
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
