@@ -6,11 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.172. Dashboard rewritten with Datadog-style log explorer UI: search bar, tab navigation
-(Overview/Functions/Queries/Logs/Errors/CallTrace/Variables), faceted filtering, expandable rows,
-badge counts, auto-refresh every 5s. Data loaded via JSON API for full interactivity.
+CLI 0.1.173. Dashboard now has column sorting (click headers for asc/desc with ▲/▼ indicators).
+Search, tabs, facets, expandable rows, auto-refresh all working.
 
-31 MCP tools, 16 integrations. Next: column sorting, time range filtering, chart visualizations.
+31 MCP tools, 16 integrations. Next: chart visualizations (query latency histogram, function
+timing sparklines), time range filtering, export to CSV.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
