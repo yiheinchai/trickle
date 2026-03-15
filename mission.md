@@ -14,9 +14,14 @@ Complete Datadog-replacement observability platform shipped.
 Stats: 12 data types, 18 MCP tools, 15+ auto-patched drivers, full JS + Python parity.
 CLI commands: run, monitor, heal, verify, doctor, agent, ci, cloud, dashboard-local, status.
 Usecases updated: ai-agent.md, observability-platform.md, devops-ci.md, README.
-GitHub Actions workflow template added.
 
-All validated on real multifile Python + JS + TS codebases.
+Recent fixes:
+- Fixed calltrace recording for JS (initCallTrace) and Python (entry transform)
+- Fixed codegen duplicate overloads and type name mismatches in .d.ts output
+- Fixed massive Python startup overhead: type inference no longer cold-imports
+  torch/sklearn/pandas/datasets (2000x improvement, 550x→3.5x total overhead)
+
+All validated on real multifile Python + JS + TS codebases including Express and sqlite3 apps.
 
 Next priorities:
 1. Build cloud.trickle.dev backend service (team sharing, hosted dashboards)
