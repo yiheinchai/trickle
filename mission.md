@@ -33,10 +33,21 @@ get_runtime_context, get_annotated_source, get_function_signatures, get_errors,
 get_database_queries, get_call_trace, get_console_output, get_http_requests,
 check_data_freshness, refresh_runtime_data
 
+Done: Python call trace with parent-child relationships + timing. Both JS and Python now write calltrace.jsonl.
+
+Full agent observability stack is now feature-complete across both languages:
+- Variables + types + sample values (JS + Python)
+- Function signatures + execution timing (JS + Python)
+- Call trace / execution flow (JS + Python)
+- Database queries: SQL, Redis, MongoDB (JS + Python)
+- HTTP requests + status codes (JS + Python)
+- Console output (JS + Python)
+- Error context with nearby variables (JS + Python)
+- 10 MCP server tools
+
 Next:
-1. Python call trace (matching JS calltrace.jsonl)
-2. Test full agent debugging workflow on real project
-3. Consider adding Go/Rust support for broader TAM
+1. Test full agent debugging workflow on real project
+2. Consider adding Go/Rust support for broader TAM
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
