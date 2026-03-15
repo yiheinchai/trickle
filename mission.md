@@ -6,14 +6,12 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.170. 31 MCP tools. 16 platform integrations. Shipped `trickle run` auto-detection —
-runs without arguments by detecting package.json scripts.start, main field, or common entry
-files (app.js, index.ts, server.py, etc.). Reduces onboarding friction to zero.
+Shipped: trickle demo (CLI 0.1.171) — self-running 60-second showcase. Also shipped auto-detect
+entry point for `trickle run`.
 
-Also shipped: OpsGenie, Teams, PagerDuty, ticket creation, GitLab CI, changelog, security,
-cost, waterfall, deps, anomaly detection, per-request tracing, OTLP, Prometheus, and more.
-
-Next: Datadog metrics export, Bitbucket Pipelines, interactive onboarding wizard.
+Current task: Improve dashboard-local to match Datadog log explorer — needs search/filter,
+expandable rows, faceted filtering, time-based views. Dashboard-local.ts is 232 lines, needs
+major rewrite. Starting next cycle.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
