@@ -236,6 +236,10 @@ function findVarDeclarationsESM(source) {
     const restOfLine = source.slice(match.index + match[0].length - 1, match.index + match[0].length + 200);
     if (/^\s*require\s*\(/.test(restOfLine)) continue;
 
+    // Skip variable declarations inside for-loop headers
+    const beforeDecl = source.slice(Math.max(0, match.index - 50), match.index);
+    if (/\bfor\s*\(\s*$/.test(beforeDecl)) continue;
+
     // Calculate line number where the declaration starts
     let lineNo = 1;
     for (let i = 0; i < match.index; i++) {
@@ -260,6 +264,19 @@ function findVarDeclarationsESM(source) {
       } else if (ch === '\n' && depth === 0) {
         const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
         if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          // Check if a recent non-empty line ends with an operator (continuation across empty lines)
+          let checkPos = pos;
+          let lastCh = '';
+          for (let back = 0; back < 5; back++) {
+            const prevNL = source.lastIndexOf('\n', checkPos - 1);
+            const prevLine = source.slice(prevNL + 1, checkPos).trimEnd();
+            if (prevLine.length > 0) { lastCh = prevLine[prevLine.length - 1]; break; }
+            checkPos = prevNL;
+            if (prevNL <= 0) break;
+          }
+          if (lastCh && '=+-*/%&|^~<>?:,({['.includes(lastCh)) {
+            pos++; continue;
+          }
           foundEnd = pos;
           break;
         }
@@ -269,6 +286,21 @@ function findVarDeclarationsESM(source) {
           if (source[pos] === '\\') pos++;
           else if (source[pos] === quote) break;
           pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] !== '/' && source[pos + 1] !== '*') {
+        // Possible regex literal
+        let rp = pos - 1;
+        while (rp >= 0 && (source[rp] === ' ' || source[rp] === '\t')) rp--;
+        const rpCh = rp >= 0 ? source[rp] : '';
+        if ('=(!,;:?[{&|^~+-><%'.includes(rpCh) || source.slice(Math.max(0, rp - 5), rp + 1).match(/\b(return|typeof|instanceof|in|of|void|delete|throw|new|case)\s*$/)) {
+          pos++;
+          while (pos < source.length) {
+            if (source[pos] === '\\') pos++;
+            else if (source[pos] === '[') { pos++; while (pos < source.length && source[pos] !== ']') { if (source[pos] === '\\') pos++; pos++; } }
+            else if (source[pos] === '/') break;
+            pos++;
+          }
+          while (pos + 1 < source.length && /[gimsuy]/.test(source[pos + 1])) pos++;
         }
       } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
         while (pos < source.length && source[pos] !== '\n') pos++;
