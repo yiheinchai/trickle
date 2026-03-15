@@ -10,20 +10,19 @@ the goal is to make it production ready, where real companies can start deployin
 </higher directive>
 
 <focus point>
-Cloud backend v1 shipped: multi-tenant API with auth, push/pull, shared dashboards.
+Cloud backend v2 shipped: multi-tenant API + real-time streaming + Docker deployment.
 
-API: /api/v1/keys, /push, /pull, /projects, /share, /shared/:id, /dashboard/:id
-CLI: cloud login, push, pull, share, projects, status — all working end-to-end.
-Auth: API keys (sha256 hashed), Bearer token middleware.
-Dashboard: dark-themed HTML with alerts, errors, performance, queries.
-
-Tested: login → push 10 files → list projects → share → pull on different machine.
+Cloud API: /api/v1/keys, /push, /pull, /ingest (streaming), /projects, /share, /shared/:id
+CLI: cloud login, push, pull, share, projects, status — all end-to-end.
+Dockerfile: ready for Docker/fly.io/railway deployment.
+Real-time streaming: JS + Python clients auto-detect ~/.trickle/cloud.json and stream
+observations to cloud every 5s while app runs. Dual-write: local files + cloud.
 
 Next priorities:
-1. Deploy cloud.trickle.dev to a real server (Docker/fly.io/railway)
-2. Add real-time streaming (push observations while app runs, not just after)
-3. Team management (invite members, RBAC, org-level projects)
-4. Production hardening (rate limiting, data retention, PostgreSQL migration)
+1. Deploy cloud.trickle.dev to fly.io (production deployment)
+2. Team management (invite members, RBAC, org-level projects)
+3. Production hardening (rate limiting, data retention, PostgreSQL)
+4. Stream all data types to cloud (variables, calltrace, queries, errors)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
