@@ -6,12 +6,18 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.166. 31 MCP tools. Shipped trickle ticket — auto-create tickets in Jira, Linear,
-or GitHub Issues from detected issues, with full context (root cause, fix suggestions,
-N+1 details). Also shipped GitLab CI integration.
+CLI 0.1.167. 31 MCP tools. Shipped PagerDuty Events API v2 integration — auto-detected
+from webhook URL, sends incidents with severity, component, and alert details.
 
-Integrations: GitHub Actions, GitLab CI, Slack, Discord, Jira, Linear, Grafana (OTLP),
-Prometheus, SigNoz, Jaeger. Next: Bitbucket Pipelines, PagerDuty, multi-service deps.
+Complete integration ecosystem:
+- CI/CD: GitHub Actions, GitLab CI
+- Chat: Slack (Block Kit), Discord
+- Tickets: Jira, Linear, GitHub Issues
+- Alerting: PagerDuty, webhooks
+- Observability: Grafana (OTLP), Prometheus, SigNoz, Jaeger
+- MCP: 31 tools for AI agents
+
+Next: Bitbucket Pipelines, OpsGenie, Teams webhook, multi-service dependency map.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
