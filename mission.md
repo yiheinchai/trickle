@@ -29,9 +29,13 @@ Datadog replacement stack complete:
 - Production mode (sampling, no var tracing)
 - Agent access (13 MCP tools)
 
-Next:
-1. Cloud dashboard for team sharing
-2. Agent auto-remediation loop
+Done: `trickle heal` — agent auto-remediation with contextual fix plans. 14 MCP tools (get_heal_plans). CLI 0.1.97.
+
+Datadog replacement is now feature-complete:
+- Data collection → Anomaly detection → Alerting → Dashboard → Heal plans → Agent access
+- 14 MCP tools, 9 data types, 15+ auto-patched drivers, production mode
+
+Next: Cloud dashboard for team sharing, multi-service tracing
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
