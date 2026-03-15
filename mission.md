@@ -14,6 +14,8 @@ Complete observability platform: 12 data types, 18 MCP tools, 15+ auto-patched d
 Pipeline: run → monitor → heal → verify → cloud
 Data: variables, functions+timing, call trace, DB queries, HTTP, WebSocket, logs, console, errors, memory, traces, environment
 
+Done: `trickle ci` — CI/CD integration with GitHub Actions annotations. CLI 0.1.106.
+
 Next: Build cloud.trickle.dev backend, Go/Rust language support
 </focus point>
 
