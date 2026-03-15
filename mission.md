@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Python error capture now matches Node.js — both write crash context + nearby variable values to .trickle/errors.jsonl. Full agent debugging stack complete: CLAUDE.md generation (trickle init), trickle context (plain/compact/annotated/json), auto error capture (JS + Python), tool-schema (OpenAI/Anthropic/MCP). Continue expanding TAM — consider database/ORM query tracing, new language support (Go/Ruby), or deeper IDE integration.
+Updated README with AI agent section, new commands in quick reference, and architecture diagram showing errors.jsonl + agent integration. Full agent stack shipped: CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema (OpenAI/Anthropic/MCP). README, use cases (ai-agent.md, ai-developer.md), and documentation all updated. Continue expanding TAM — consider database/ORM query tracing, new language support, or building an MCP server that wraps trickle context.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
