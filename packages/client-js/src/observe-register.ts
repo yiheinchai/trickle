@@ -1113,6 +1113,15 @@ if (enabled) {
       } catch { /* fall through to normal processing */ }
     }
 
+    // ── PostgreSQL auto-detection: patch pg to capture SQL queries ──
+    if (request === 'pg' && !expressPatched.has('pg')) {
+      expressPatched.add('pg');
+      try {
+        const { patchPg } = require(path.join(__dirname, 'db-observer.js'));
+        patchPg(exports, debug);
+      } catch { /* pg observer not critical */ }
+    }
+
     // Resolve to absolute path for dedup — do this FIRST since bundlers like
     // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
     // with './' or '/'. We need the resolved path to decide if it's user code.

@@ -269,6 +269,17 @@ function getErrors(): unknown {
   return { errors: errors.length > 0 ? errors : "No errors recorded." };
 }
 
+function getDatabaseQueries(): unknown {
+  const file = path.join(findTrickleDir(), "queries.jsonl");
+  if (!fs.existsSync(file)) return { queries: "No database queries captured. The app may not use pg (node-postgres)." };
+  const lines: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { lines.push(JSON.parse(line)); } catch {}
+  }
+  if (lines.length === 0) return { queries: "No database queries recorded." };
+  return { queries: lines };
+}
+
 function getConsoleOutput(): unknown {
   const file = path.join(findTrickleDir(), "console.jsonl");
   if (!fs.existsSync(file)) return { output: "No console output captured. Run the app with trickle first." };
@@ -403,6 +414,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_database_queries",
+    description: "Get captured SQL database queries with execution time, row counts, and column names. Works with PostgreSQL (pg driver).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_console_output",
     description: "Get console.log/error/warn output from the last application run. Shows what the app printed to stdout/stderr.",
     inputSchema: { type: "object", properties: {} },
@@ -459,6 +475,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_annotated_source": result = getAnnotatedSource(args); break;
           case "get_function_signatures": result = getFunctionSignatures(); break;
           case "get_errors": result = getErrors(); break;
+          case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
