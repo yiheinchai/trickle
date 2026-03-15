@@ -10,16 +10,22 @@ this is just an example, you need to follow through and empathise with the user 
 </higher directive>
 
 <focus point>
-Docs rewrite complete for core usecases:
-- README: backend section now shows debugging/testing first, AI agent section shows 26 MCP tools
-- ai-agent.md: complete rewrite (8 use cases, on-call loop, all 26 tools)
+Documentation rewrite COMPLETE for all 18 usecase docs + README:
+- README: backend + AI agent sections rewritten
+- ai-agent.md: complete rewrite (8 use cases, 26 MCP tools, on-call loop)
 - javascript-developer.md: vitest/jest testing with 3 options
-- backend-api-developer.md: debugging, testing, verification use cases added
+- backend-api-developer.md: debugging, testing, verification use cases
 - python-developer.md: debugging/observability quick start at top
-- fullstack-developer.md: debugging quick start added
+- fullstack-developer.md: debugging quick start
+- qa-engineer.md: trickle test with structured output + contract testing
+- legacy-codebase.md: summary/explain/flamegraph discovery workflow
+- react-developer.md: debugging section added
+- nextjs-developer.md: Quick Start debugging section
+- react-native-developer.md: Quick Start with backend debugging
+- sre-platform-engineer.md + observability-platform.md: updated to 26 MCP tools
 
-Remaining docs to review: qa-engineer.md, devops-ci.md, legacy-codebase.md,
-react-developer.md, nextjs-developer.md, react-native-developer.md
+All docs now lead with practical "how do I debug/test my app" before codegen.
+devops-ci.md was already comprehensive and up-to-date.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
