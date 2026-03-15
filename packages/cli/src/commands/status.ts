@@ -85,5 +85,24 @@ export function runStatus(): void {
 
   console.log(chalk.gray('  ' + '─'.repeat(50)));
   console.log(`  Total: ${formatSize(totalSize)} | Last updated: ${formatAge(Date.now() - latestMtime)} ago`);
+
+  // Suggest next action based on data state
+  const dataAge = Date.now() - latestMtime;
+  const hasErrors = countLines(path.join(trickleDir, 'errors.jsonl')) > 0;
+  const hasAlerts = countLines(path.join(trickleDir, 'alerts.jsonl')) > 0;
+  const hasCalltrace = countLines(path.join(trickleDir, 'calltrace.jsonl')) > 5;
+
+  console.log('');
+  if (dataAge > 3600000) {
+    console.log(chalk.yellow('  Data is stale. Re-run: ') + 'trickle run <command>');
+  } else if (hasErrors) {
+    console.log(chalk.cyan('  Errors detected. Run: ') + 'trickle summary');
+  } else if (hasAlerts) {
+    console.log(chalk.cyan('  Alerts found. Run: ') + 'trickle summary');
+  } else if (hasCalltrace) {
+    console.log(chalk.cyan('  Try: ') + 'trickle summary | trickle explain <file> | trickle flamegraph');
+  } else {
+    console.log(chalk.cyan('  Try: ') + 'trickle summary');
+  }
   console.log('');
 }
