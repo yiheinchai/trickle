@@ -5,6 +5,120 @@ import * as path from 'path';
 const _EXPLODING_THRESHOLD = 100.0;
 const _VANISHING_THRESHOLD = 1e-6;
 
+/**
+ * Walk up from `startDir` looking for a `.trickle` directory.
+ * Stops at the workspace root (or filesystem root). Returns the
+ * `.trickle` directory path, or undefined if not found.
+ */
+function findNearestTrickleDir(startDir: string): string | undefined {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  // Collect workspace roots so we know when to stop walking
+  const roots = new Set<string>(
+    (workspaceFolders || []).map(f => f.uri.fsPath),
+  );
+
+  let dir = startDir;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const candidate = path.join(dir, '.trickle');
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+      return candidate;
+    }
+    // Stop if we reached a workspace root (we already checked it)
+    if (roots.has(dir)) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root
+    dir = parent;
+  }
+  return undefined;
+}
+
+/** Cache: directory path → nearest .trickle directory (or null if none found). */
+const trickleDirCache = new Map<string, string | null>();
+
+/** Cached version of findNearestTrickleDir. */
+function findNearestTrickleDirCached(startDir: string): string | undefined {
+  if (trickleDirCache.has(startDir)) {
+    return trickleDirCache.get(startDir) ?? undefined;
+  }
+  const result = findNearestTrickleDir(startDir);
+  trickleDirCache.set(startDir, result ?? null);
+  return result;
+}
+
+/** Invalidate the trickle-dir cache (called when .trickle dirs are created/deleted). */
+function clearTrickleDirCache(): void {
+  trickleDirCache.clear();
+}
+
+/**
+ * Recursively find all `.trickle` directories under a given root.
+ * Uses a breadth-first walk. Skips node_modules, .git, etc.
+ */
+function findAllTrickleDirs(rootDir: string): string[] {
+  const results: string[] = [];
+  const SKIP = new Set(['node_modules', '.git', '__pycache__', '.venv', 'venv', 'dist', 'build']);
+  const queue = [rootDir];
+  while (queue.length > 0) {
+    const dir = queue.shift()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === '.trickle') {
+        results.push(path.join(dir, entry.name));
+      } else if (!SKIP.has(entry.name) && !entry.name.startsWith('.')) {
+        queue.push(path.join(dir, entry.name));
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Collect all variables.jsonl paths across all workspace folders,
+ * including subdirectory .trickle folders.
+ */
+function findAllVariablesJsonlPaths(): string[] {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return [];
+  const paths: string[] = [];
+  for (const folder of workspaceFolders) {
+    const trickleDirs = findAllTrickleDirs(folder.uri.fsPath);
+    for (const td of trickleDirs) {
+      const jsonlPath = path.join(td, 'variables.jsonl');
+      if (fs.existsSync(jsonlPath)) {
+        paths.push(jsonlPath);
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Collect all errors.jsonl paths across all workspace folders,
+ * including subdirectory .trickle folders.
+ */
+function findAllErrorsJsonlPaths(): string[] {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return [];
+  const paths: string[] = [];
+  for (const folder of workspaceFolders) {
+    const trickleDirs = findAllTrickleDirs(folder.uri.fsPath);
+    for (const td of trickleDirs) {
+      const errorsPath = path.join(td, 'errors.jsonl');
+      if (fs.existsSync(errorsPath)) {
+        paths.push(errorsPath);
+      }
+    }
+  }
+  return paths;
+}
+
 interface CallFlowInput {
   name: string;
   type: TypeNode;
@@ -328,36 +442,57 @@ let prevTypeHashes: Map<string, string> = new Map();
 /** Variables whose type changed since the last run: "file:line:varName" */
 let changedVarKeys: Set<string> = new Set();
 
-/** Load persisted type hashes from .trickle/type_history.json for cross-session drift detection. */
+/** Load persisted type hashes from all .trickle/type_history.json files for cross-session drift detection. */
 function loadTypeHistory(): void {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
-  const historyPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'type_history.json');
-  try {
-    if (fs.existsSync(historyPath)) {
-      const data = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
-      if (data && typeof data === 'object') {
-        prevTypeHashes = new Map(Object.entries(data));
+  for (const folder of workspaceFolders) {
+    for (const trickleDir of findAllTrickleDirs(folder.uri.fsPath)) {
+      const historyPath = path.join(trickleDir, 'type_history.json');
+      try {
+        if (fs.existsSync(historyPath)) {
+          const data = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+          if (data && typeof data === 'object') {
+            for (const [k, v] of Object.entries(data)) {
+              prevTypeHashes.set(k, v as string);
+            }
+          }
+        }
+      } catch {
+        // Ignore — corrupt or missing history is non-fatal
       }
     }
-  } catch {
-    // Ignore — corrupt or missing history is non-fatal
   }
 }
 
-/** Persist current type hashes to .trickle/type_history.json for next session. */
+/** Persist current type hashes to all discovered .trickle/type_history.json files.
+ *  Falls back to workspace root .trickle/ if no existing dirs found. */
 function saveTypeHistory(hashes: Map<string, string>): void {
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
-  const trickleDir = path.join(workspaceFolders[0].uri.fsPath, '.trickle');
-  const historyPath = path.join(trickleDir, 'type_history.json');
-  try {
-    if (!fs.existsSync(trickleDir)) fs.mkdirSync(trickleDir, { recursive: true });
-    const obj: Record<string, string> = {};
-    hashes.forEach((v, k) => { obj[k] = v; });
-    fs.writeFileSync(historyPath, JSON.stringify(obj), 'utf8');
-  } catch {
-    // Non-fatal — persistence is best-effort
+
+  // Collect all existing .trickle dirs; fall back to workspace root
+  const allTrickleDirs: string[] = [];
+  for (const folder of workspaceFolders) {
+    const found = findAllTrickleDirs(folder.uri.fsPath);
+    if (found.length > 0) {
+      allTrickleDirs.push(...found);
+    } else {
+      allTrickleDirs.push(path.join(folder.uri.fsPath, '.trickle'));
+    }
+  }
+
+  const obj: Record<string, string> = {};
+  hashes.forEach((v, k) => { obj[k] = v; });
+  const json = JSON.stringify(obj);
+
+  for (const trickleDir of allTrickleDirs) {
+    try {
+      if (!fs.existsSync(trickleDir)) fs.mkdirSync(trickleDir, { recursive: true });
+      fs.writeFileSync(path.join(trickleDir, 'type_history.json'), json, 'utf8');
+    } catch {
+      // Non-fatal — persistence is best-effort
+    }
   }
 }
 
@@ -395,48 +530,58 @@ export function activate(context: vscode.ExtensionContext) {
   // Register inline hints provider
   registerInlineHints(context, selector);
 
-  // Watch for changes to variables.jsonl with debouncing for rapid writes
+  // Watch for changes to variables.jsonl in ANY subdirectory (not just workspace root)
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders) {
-    const pattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/variables.jsonl');
-    fileWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+    // Use glob pattern to watch **/.trickle/variables.jsonl across all workspace folders
+    for (const folder of workspaceFolders) {
+      const pattern = new vscode.RelativePattern(folder, '**/.trickle/variables.jsonl');
+      const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
-    let reloadTimer: ReturnType<typeof setTimeout> | undefined;
-    const debouncedReload = () => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      reloadTimer = setTimeout(() => loadAllVariables(), 300);
-    };
+      let reloadTimer: ReturnType<typeof setTimeout> | undefined;
+      const debouncedReload = () => {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        clearTrickleDirCache();
+        reloadTimer = setTimeout(() => loadAllVariables(), 300);
+      };
 
-    fileWatcher.onDidChange(debouncedReload);
-    fileWatcher.onDidCreate(debouncedReload);
-    fileWatcher.onDidDelete(() => {
-      if (reloadTimer) clearTimeout(reloadTimer);
-      varIndex.clear();
-      notebookCellIndex.clear();
-      updateStatusBar();
-      refreshInlineHints();
-    });
-    context.subscriptions.push(fileWatcher);
+      watcher.onDidChange(debouncedReload);
+      watcher.onDidCreate(debouncedReload);
+      watcher.onDidDelete(() => {
+        if (reloadTimer) clearTimeout(reloadTimer);
+        clearTrickleDirCache();
+        varIndex.clear();
+        notebookCellIndex.clear();
+        updateStatusBar();
+        refreshInlineHints();
+      });
+      context.subscriptions.push(watcher);
+      // Keep reference to first watcher for deactivate
+      if (!fileWatcher) fileWatcher = watcher;
 
-    // Watch errors.jsonl for crash diagnostics
-    const errorPattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/errors.jsonl');
-    errorFileWatcher = vscode.workspace.createFileSystemWatcher(errorPattern);
+      // Watch errors.jsonl in ANY subdirectory
+      const errorPattern = new vscode.RelativePattern(folder, '**/.trickle/errors.jsonl');
+      const errWatcher = vscode.workspace.createFileSystemWatcher(errorPattern);
 
-    let errorReloadTimer: ReturnType<typeof setTimeout> | undefined;
-    const debouncedErrorReload = () => {
-      if (errorReloadTimer) clearTimeout(errorReloadTimer);
-      errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
-    };
+      let errorReloadTimer: ReturnType<typeof setTimeout> | undefined;
+      const debouncedErrorReload = () => {
+        if (errorReloadTimer) clearTimeout(errorReloadTimer);
+        clearTrickleDirCache();
+        errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
+      };
 
-    errorFileWatcher.onDidChange(debouncedErrorReload);
-    errorFileWatcher.onDidCreate(debouncedErrorReload);
-    errorFileWatcher.onDidDelete(() => {
-      if (errorReloadTimer) clearTimeout(errorReloadTimer);
-      diagnosticCollection.clear();
-      crashVarIndex.clear();
-      refreshInlineHints();
-    });
-    context.subscriptions.push(errorFileWatcher);
+      errWatcher.onDidChange(debouncedErrorReload);
+      errWatcher.onDidCreate(debouncedErrorReload);
+      errWatcher.onDidDelete(() => {
+        if (errorReloadTimer) clearTimeout(errorReloadTimer);
+        clearTrickleDirCache();
+        diagnosticCollection.clear();
+        crashVarIndex.clear();
+        refreshInlineHints();
+      });
+      context.subscriptions.push(errWatcher);
+      if (!errorFileWatcher) errorFileWatcher = errWatcher;
+    }
   }
 
   // Watch for source file edits — shift hint line numbers and invalidate edited lines
@@ -531,20 +676,28 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('trickle.clearVariables', () => {
       const workspaceFolders = vscode.workspace.workspaceFolders;
       if (workspaceFolders) {
-        const jsonlPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'variables.jsonl');
-        try {
-          fs.writeFileSync(jsonlPath, '');
-          // Also clear errors
-          const errorsPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'errors.jsonl');
-          try { fs.writeFileSync(errorsPath, ''); } catch { /* ignore */ }
-          varIndex.clear();
-          notebookCellIndex.clear();
-          diagnosticCollection.clear();
-          updateStatusBar();
-          refreshInlineHints();
+        let cleared = false;
+        for (const folder of workspaceFolders) {
+          for (const trickleDir of findAllTrickleDirs(folder.uri.fsPath)) {
+            try {
+              const jsonlPath = path.join(trickleDir, 'variables.jsonl');
+              if (fs.existsSync(jsonlPath)) fs.writeFileSync(jsonlPath, '');
+              const errorsPath = path.join(trickleDir, 'errors.jsonl');
+              if (fs.existsSync(errorsPath)) fs.writeFileSync(errorsPath, '');
+              cleared = true;
+            } catch { /* ignore individual failures */ }
+          }
+        }
+        varIndex.clear();
+        notebookCellIndex.clear();
+        diagnosticCollection.clear();
+        clearTrickleDirCache();
+        updateStatusBar();
+        refreshInlineHints();
+        if (cleared) {
           vscode.window.showInformationMessage('Trickle: Variable data cleared');
-        } catch {
-          vscode.window.showErrorMessage('Trickle: Failed to clear variable data');
+        } else {
+          vscode.window.showErrorMessage('Trickle: No .trickle directories found to clear');
         }
       }
     }),
@@ -661,13 +814,15 @@ function loadAllVariables() {
   reactHookIndex.clear();
   reactStateIndex.clear();
 
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) return;
+  // Find all variables.jsonl files across all workspace folders and subdirectories
+  const allJsonlPaths = findAllVariablesJsonlPaths();
+  if (allJsonlPaths.length === 0) {
+    updateStatusBar();
+    refreshInlineHints();
+    return;
+  }
 
-  for (const folder of workspaceFolders) {
-    const jsonlPath = path.join(folder.uri.fsPath, '.trickle', 'variables.jsonl');
-    if (!fs.existsSync(jsonlPath)) continue;
-
+  for (const jsonlPath of allJsonlPaths) {
     try {
       const content = fs.readFileSync(jsonlPath, 'utf8');
       const lines = content.split('\n').filter(l => l.trim());
@@ -967,13 +1122,10 @@ function loadErrors() {
   diagnosticCollection.clear();
   crashVarIndex.clear();
 
-  const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) return;
+  // Find all errors.jsonl files across all workspace folders and subdirectories
+  const allErrorPaths = findAllErrorsJsonlPaths();
 
-  for (const folder of workspaceFolders) {
-    const errorsPath = path.join(folder.uri.fsPath, '.trickle', 'errors.jsonl');
-    if (!fs.existsSync(errorsPath)) continue;
-
+  for (const errorsPath of allErrorPaths) {
     try {
       const content = fs.readFileSync(errorsPath, 'utf8');
       const lines = content.split('\n').filter(l => l.trim());

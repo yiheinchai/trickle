@@ -12,7 +12,7 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:.trickle/variables.jsonl",
+    "workspaceContains:**/.trickle/variables.jsonl",
     "onNotebook:jupyter-notebook"
   ],
   "main": "./dist/extension.js",
