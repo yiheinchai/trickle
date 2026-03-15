@@ -573,6 +573,16 @@ program
     console.log(JSON.stringify(summary, null, 2));
   });
 
+// trickle explain <file>
+program
+  .command("explain <file>")
+  .description("Understand a file via runtime data — functions, call graph, queries, errors (agent-optimized)")
+  .option("--json", "Structured JSON output for agent consumption")
+  .action(async (file: string, opts) => {
+    const { runExplain } = await import("./commands/explain");
+    runExplain({ file, json: opts.json });
+  });
+
 // trickle cloud
 const cloudCmd = program.command("cloud").description("Cloud sync — share observability data with your team");
 cloudCmd.command("login").description("Authenticate with a trickle cloud server")

@@ -576,6 +576,17 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "explain_file",
+    description: "Understand a file via runtime data. Returns: functions with signatures and sample I/O, call graph (who calls these functions, what they call), database queries triggered, variables with values, errors, and relevant alerts. Use this when you need to understand how a file works at runtime before modifying it.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        file: { type: "string", description: "Source file path to explain (e.g., 'src/api.ts', 'app.py')" },
+      },
+      required: ["file"],
+    },
+  },
+  {
     name: "run_tests",
     description: "Run tests with trickle observability and get structured results. Returns pass/fail for each test, and for failures: the error message, runtime variable values near the failure, database queries that ran, and the call trace. Auto-detects the test framework (jest, vitest, pytest, mocha). Much more useful than raw test output — gives agents actionable context for fixing failures.",
     inputSchema: {
@@ -691,6 +702,20 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
                 result = generateRunSummary({ dir: findTrickleDir() });
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
+              }
+            }
+            break;
+          }
+          case "explain_file": {
+            const file = args.file as string;
+            if (!file) {
+              result = { error: "file parameter required" };
+            } else {
+              try {
+                const { explain } = require('./explain');
+                result = explain(file);
+              } catch (e: any) {
+                result = { error: `Failed to explain file: ${e.message}` };
               }
             }
             break;
