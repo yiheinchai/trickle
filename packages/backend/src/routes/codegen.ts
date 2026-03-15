@@ -72,7 +72,18 @@ function collectFunctionTypes(opts: {
     });
   }
 
-  return results;
+  // Deduplicate by function name — when the same endpoint is observed
+  // across different modules/languages/sessions, keep only the most
+  // recently observed entry to avoid duplicate declarations in codegen.
+  const deduped = new Map<string, FunctionTypeData>();
+  for (const entry of results) {
+    const existing = deduped.get(entry.name);
+    if (!existing || (entry.observedAt && (!existing.observedAt || entry.observedAt > existing.observedAt))) {
+      deduped.set(entry.name, entry);
+    }
+  }
+
+  return Array.from(deduped.values());
 }
 
 // GET / — generate types for all (or filtered) functions
