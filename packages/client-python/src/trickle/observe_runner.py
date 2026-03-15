@@ -98,6 +98,10 @@ def main() -> None:
 
     # Install hooks BEFORE loading user code.
     import os as _os2
+    _production = _os2.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")
+    # In production mode, disable variable tracing by default (too expensive)
+    if _production and not _os2.environ.get("TRICKLE_TRACE_VARS"):
+        _os2.environ["TRICKLE_TRACE_VARS"] = "0"
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")
     if _trace_vars:
         # Variable tracing mode: use AST import hook to trace variables

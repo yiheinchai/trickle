@@ -295,6 +295,8 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 |---|---|---|
 | `TRICKLE_LOCAL` | `0` | `1` for offline mode (no backend needed) |
 | `TRICKLE_TRACE_VARS` | `1` | `0` to disable variable tracing |
+| `TRICKLE_PRODUCTION` | `0` | `1` for production mode (disables var tracing, enables sampling) |
+| `TRICKLE_SAMPLE_RATE` | `1.0` | Fraction of calls to observe (0.01 = 1%, useful for production) |
 | `TRICKLE_OBSERVE_INCLUDE` | all user code | Comma-separated module patterns to trace |
 | `TRICKLE_OBSERVE_EXCLUDE` | none | Comma-separated module patterns to skip |
 | `TRICKLE_INJECT` | `0` | `1` to inject types into source files |

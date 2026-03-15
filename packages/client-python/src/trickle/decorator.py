@@ -28,6 +28,12 @@ _call_depth = threading.local()
 _cache = TypeCache()
 _environment: Optional[str] = None
 
+# Sample rate for production mode (0.0 = no sampling, 1.0 = trace everything)
+import os as _os
+import random as _random
+_sample_rate: float = float(_os.environ.get("TRICKLE_SAMPLE_RATE", "1.0"))
+_production_mode: bool = _os.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")
+
 
 def _get_environment() -> str:
     global _environment
@@ -103,6 +109,17 @@ def _wrap(fn: Callable, *, name: Optional[str], module: Optional[str]) -> Callab
 
 def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kwargs: dict) -> Any:
     from .call_trace import trace_call, trace_return
+
+    # Production sampling: skip type observation for most calls (errors always captured)
+    if _sample_rate < 1.0 and _random.random() > _sample_rate:
+        start = time.perf_counter()
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            # Always capture errors even when sampling
+            duration_ms = (time.perf_counter() - start) * 1000
+            _emit(fn, func_name, func_module, args, kwargs, None, [], exc, is_async=False, duration_ms=duration_ms)
+            raise
 
     # Re-entrancy guard: if already inside an observed call, skip type observation
     # but still record call trace for execution flow
