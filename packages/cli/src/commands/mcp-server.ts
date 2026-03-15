@@ -700,6 +700,16 @@ const TOOLS = [
     },
   },
   {
+    name: "get_request_trace",
+    description: "Show everything that happened during a single HTTP request — functions called, database queries, timing. Pass a requestId to filter, or omit to list all requests. Requires trickle-observe >= 0.2.115 with per-request correlation enabled.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", description: "Request ID to trace (e.g., 'req-3-m4x7k2'). Omit to list all request IDs." },
+      },
+    },
+  },
+  {
     name: "diff_runs",
     description: "Compare current runtime data against a saved snapshot. Shows new/removed functions, query changes, performance regressions, new/resolved errors. Call save_snapshot first, then make changes, re-run, and call diff_runs. Returns a verdict: improved/regressed/mixed/unchanged.",
     inputSchema: {
@@ -856,6 +866,53 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "get_request_trace": {
+            const reqId = args.requestId as string | undefined;
+            const dir = findTrickleDir();
+
+            const calltrace = fs.existsSync(path.join(dir, 'calltrace.jsonl'))
+              ? fs.readFileSync(path.join(dir, 'calltrace.jsonl'), 'utf-8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+              : [];
+            const queries = fs.existsSync(path.join(dir, 'queries.jsonl'))
+              ? fs.readFileSync(path.join(dir, 'queries.jsonl'), 'utf-8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+              : [];
+
+            if (!reqId) {
+              // List all unique request IDs
+              const ids = new Set<string>();
+              for (const e of calltrace) if (e.requestId) ids.add(e.requestId);
+              for (const q of queries) if (q.requestId) ids.add(q.requestId);
+              result = {
+                requestIds: [...ids],
+                count: ids.size,
+                hint: ids.size === 0 ? 'No request IDs found. Make sure you are using trickle-observe >= 0.2.115 and the Express middleware is active.' : 'Pass a requestId to see the full trace.',
+              };
+            } else {
+              // Filter by request ID
+              const reqCalls = calltrace.filter((e: any) => e.requestId === reqId);
+              const reqQueries = queries.filter((q: any) => q.requestId === reqId);
+              const totalMs = reqCalls.reduce((sum: number, c: any) => Math.max(sum, c.durationMs || 0), 0);
+
+              result = {
+                requestId: reqId,
+                functions: reqCalls.map((c: any) => ({
+                  name: `${c.module}.${c.function}`,
+                  durationMs: c.durationMs,
+                  depth: c.depth,
+                  error: c.error,
+                })),
+                queries: reqQueries.map((q: any) => ({
+                  query: (q.query || '').substring(0, 200),
+                  durationMs: q.durationMs,
+                  rowCount: q.rowCount,
+                })),
+                totalFunctions: reqCalls.length,
+                totalQueries: reqQueries.length,
+                totalMs,
+              };
             }
             break;
           }
