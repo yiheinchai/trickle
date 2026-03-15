@@ -66,8 +66,11 @@ export function patchFetch(environment: string, debugMode: boolean): void {
       return originalFetch.call(globalThis, input, init);
     }
 
-    // Make the actual request
+    // Make the actual request with timing
+    const startTime = performance.now();
     const response = await originalFetch.call(globalThis, input, init);
+    const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+    const statusCode = response.status;
 
     // Only observe JSON responses
     const contentType = response.headers.get('content-type') || '';
@@ -80,7 +83,7 @@ export function patchFetch(environment: string, debugMode: boolean): void {
       const cloned = response.clone();
       cloned.json().then((data: any) => {
         try {
-          captureHttpResponse(method, url, init?.body, data, environment, debugMode);
+          captureHttpResponse(method, url, init?.body, data, environment, debugMode, statusCode, durationMs);
         } catch {
           // Never interfere
         }
@@ -128,6 +131,8 @@ function captureHttpResponse(
   responseData: unknown,
   environment: string,
   debugMode: boolean,
+  statusCode?: number,
+  durationMs?: number,
 ): void {
   const { functionName, module: moduleName } = parseUrl(method, url);
 
@@ -164,8 +169,8 @@ function captureHttpResponse(
     }
   }
 
-  const payload: IngestPayload = {
-    functionName,
+  const payload: IngestPayload & { statusCode?: number } = {
+    functionName: statusCode ? `${functionName} [${statusCode}]` : functionName,
     module: moduleName,
     language: 'js',
     environment,
@@ -174,9 +179,10 @@ function captureHttpResponse(
     returnType,
     sampleInput: sampleInput ? [sampleInput] : undefined,
     sampleOutput: sanitizeSample(responseData),
+    durationMs,
   };
 
-  enqueue(payload);
+  enqueue(payload as IngestPayload);
 
   if (debugMode) {
     console.log(`[trickle/fetch] Captured ${functionName} → ${describeType(returnType)}`);
