@@ -62,7 +62,8 @@ export async function transform({ src, filename, options }: MetroTransformArgs) 
 
   if ((isReactFile || isJsFile) && !filename.includes('node_modules') && !filename.includes('trickle-observe')) {
     const moduleName = path.basename(filename).replace(/\.[jt]sx?$/, '');
-    const transformed = transformEsmSource(src, filename, moduleName, backendUrl, debug, false);
+    // React Native has a JS runtime with fs access, use SSR mode
+    const transformed = transformEsmSource(src, filename, moduleName, backendUrl, debug, false, null, true);
     if (transformed !== src) {
       if (debug) {
         console.log(`[trickle/metro] Instrumented ${filename}`);

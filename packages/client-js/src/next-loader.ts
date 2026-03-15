@@ -43,7 +43,8 @@ export default function trickleNextLoader(this: { resourcePath: string; getOptio
   const moduleName = path.basename(resourcePath).replace(/\.[jt]sx?$/, '');
 
   try {
-    const transformed = transformEsmSource(source, resourcePath, moduleName, backendUrl, debug, traceVars, source);
+    // Next.js SSR renders all components on the server, so use SSR mode (node:fs)
+    const transformed = transformEsmSource(source, resourcePath, moduleName, backendUrl, debug, traceVars, source, true);
     if (debug && transformed !== source) {
       console.log(`[trickle/next] Instrumented ${resourcePath}`);
     }

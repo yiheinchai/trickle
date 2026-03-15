@@ -78,8 +78,32 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
     name: 'trickle-observe',
     enforce: 'post' as const,
 
-    transform(code: string, id: string) {
+    configureServer(server: any) {
+      // Listen for variable data from browser clients via Vite's HMR WebSocket
+      const hot = server.hot || server.ws;
+      if (hot && hot.on) {
+        const varDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+        try { fs.mkdirSync(varDir, { recursive: true }); } catch {}
+        const varsFile = path.join(varDir, 'variables.jsonl');
+
+        hot.on('trickle:vars', (data: { lines: string }, client: any) => {
+          try {
+            if (data && data.lines) {
+              fs.appendFileSync(varsFile, data.lines);
+            }
+          } catch {}
+        });
+
+        if (debug) {
+          console.log(`[trickle/vite] WebSocket bridge active → ${varsFile}`);
+        }
+      }
+    },
+
+    transform(code: string, id: string, options?: { ssr?: boolean }) {
       if (!shouldTransform(id)) return null;
+
+      const isSSR = options?.ssr === true;
 
       // Read the original source file to get accurate line numbers.
       // Vite transforms the code before our plugin (enforce: 'post'),
@@ -92,11 +116,11 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
       }
 
       const moduleName = path.basename(id).replace(/\.[jt]sx?$/, '');
-      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug, traceVars, originalSource);
+      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug, traceVars, originalSource, isSSR);
       if (transformed === code) return null;
 
       if (debug) {
-        console.log(`[trickle/vite] Transformed ${moduleName} (${id})`);
+        console.log(`[trickle/vite] Transformed ${moduleName} (${id}) [${isSSR ? 'SSR' : 'browser'}]`);
       }
 
       return { code: transformed, map: null };
@@ -514,6 +538,7 @@ export function transformEsmSource(
   debug: boolean,
   traceVars: boolean,
   originalSource?: string | null,
+  isSSR?: boolean,
 ): string {
   // Detect React files for component render tracking
   const isReactFile = /\.(tsx|jsx)$/.test(filename);
@@ -875,10 +900,12 @@ export function transformEsmSource(
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
+  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0) {
+  if (needsTracing && isSSR) {
+    // SSR/Node.js — use file system for writing
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -904,14 +931,49 @@ export function transformEsmSource(
     `}`,
   ];
 
+  // Add unified __trickle_send() transport — browser uses HMR WebSocket, SSR uses fs
+  if (needsTracing) {
+    if (isSSR) {
+      // SSR/Node.js mode — write directly to file system
+      prefixLines.push(
+        `let __trickle_varsFile = null;`,
+        `function __trickle_send(line) {`,
+        `  try {`,
+        `    if (!__trickle_varsFile) {`,
+        `      const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
+        `      try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
+        `      __trickle_varsFile = __trickle_join(dir, 'variables.jsonl');`,
+        `    }`,
+        `    __trickle_appendFileSync(__trickle_varsFile, line + '\\n');`,
+        `  } catch(e) {}`,
+        `}`,
+      );
+    } else {
+      // Browser mode — buffer and send via Vite HMR WebSocket
+      prefixLines.push(
+        `const __trickle_sendBuf = [];`,
+        `let __trickle_sendTimer = null;`,
+        `function __trickle_flush() {`,
+        `  if (__trickle_sendBuf.length === 0) return;`,
+        `  const lines = __trickle_sendBuf.join('\\n') + '\\n';`,
+        `  __trickle_sendBuf.length = 0;`,
+        `  try { if (import.meta.hot) import.meta.hot.send('trickle:vars', { lines }); } catch(e) {}`,
+        `}`,
+        `function __trickle_send(line) {`,
+        `  __trickle_sendBuf.push(line);`,
+        `  if (!__trickle_sendTimer) {`,
+        `    __trickle_sendTimer = setTimeout(() => { __trickle_sendTimer = null; __trickle_flush(); }, 300);`,
+        `  }`,
+        `}`,
+      );
+    }
+  }
+
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  // Uses synchronous writes (appendFileSync) to guarantee data persists even if Vitest
-  // kills the worker abruptly without firing exit events.
   if (varInsertions.length > 0 || destructInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Set();`,
-      `  let _varsFile = null;`,
       `  function _inferType(v, d) {`,
       `    if (d <= 0) return { kind: 'primitive', name: 'unknown' };`,
       `    if (v === null) return { kind: 'primitive', name: 'null' };`,
@@ -943,17 +1005,12 @@ export function transformEsmSource(
       `  }`,
       `  globalThis.__trickle_var_tracer = function(v, n, l, mod, file) {`,
       `    try {`,
-      `      if (!_varsFile) {`,
-      `        const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
-      `        try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
-      `        _varsFile = __trickle_join(dir, 'variables.jsonl');`,
-      `      }`,
       `      const type = _inferType(v, 3);`,
       `      const th = JSON.stringify(type).substring(0, 32);`,
       `      const ck = file + ':' + l + ':' + n + ':' + th;`,
       `      if (_cache.has(ck)) return;`,
       `      _cache.add(ck);`,
-      `      __trickle_appendFileSync(_varsFile, JSON.stringify({ kind: 'variable', varName: n, line: l, module: mod, file: file, type: type, typeHash: th, sample: _sanitize(v, 2) }) + '\\n');`,
+      `      __trickle_send(JSON.stringify({ kind: 'variable', varName: n, line: l, module: mod, file: file, type: type, typeHash: th, sample: _sanitize(v, 2) }));`,
       `    } catch(e) {}`,
       `  };`,
       `}`,
@@ -971,9 +1028,6 @@ export function transformEsmSource(
       `    const key = ${JSON.stringify(filename)} + ':' + line;`,
       `    const count = (globalThis.__trickle_react_renders.get(key) || 0) + 1;`,
       `    globalThis.__trickle_react_renders.set(key, count);`,
-      `    const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
-      `    try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
-      `    const f = __trickle_join(dir, 'variables.jsonl');`,
       `    const rec = { kind: 'react_render', file: ${JSON.stringify(filename)}, line: line, component: name, renderCount: count, timestamp: Date.now() / 1000 };`,
       `    if (props !== undefined && props !== null && typeof props === 'object') {`,
       `      try {`,
@@ -991,7 +1045,6 @@ export function transformEsmSource(
       `        }`,
       `        rec.props = propSample;`,
       `        rec.propKeys = propKeys;`,
-      `        // Detect which props changed vs previous render`,
       `        const prevProps = globalThis.__trickle_react_prev_props.get(key);`,
       `        if (prevProps && count > 1) {`,
       `          const changedProps = [];`,
@@ -1008,7 +1061,7 @@ export function transformEsmSource(
       `        globalThis.__trickle_react_prev_props.set(key, propSample);`,
       `      } catch(e2) {}`,
       `    }`,
-      `    __trickle_appendFileSync(f, JSON.stringify(rec) + '\\n');`,
+      `    __trickle_send(JSON.stringify(rec));`,
       `  } catch(e) {}`,
       `}`,
     );
@@ -1024,10 +1077,7 @@ export function transformEsmSource(
       `      const key = ${JSON.stringify(filename)} + ':' + line + ':' + hookName;`,
       `      const n = (globalThis.__trickle_hook_counts.get(key) || 0) + 1;`,
       `      globalThis.__trickle_hook_counts.set(key, n);`,
-      `      const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
-      `      try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e2) {}`,
-      `      __trickle_appendFileSync(__trickle_join(dir, 'variables.jsonl'),`,
-      `        JSON.stringify({ kind: 'react_hook', hookName, file: ${JSON.stringify(filename)}, line, invokeCount: n, timestamp: Date.now() / 1000 }) + '\\n');`,
+      `      __trickle_send(JSON.stringify({ kind: 'react_hook', hookName, file: ${JSON.stringify(filename)}, line, invokeCount: n, timestamp: Date.now() / 1000 }));`,
       `    } catch(e) {}`,
       `    return cb(...args);`,
       `  };`,
@@ -1053,10 +1103,7 @@ export function transformEsmSource(
       `      else if (newVal === null || newVal === undefined) sample = newVal;`,
       `      else if (Array.isArray(newVal)) sample = '[arr:'+newVal.length+']';`,
       `      else sample = '[object]';`,
-      `      const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
-      `      try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e2) {}`,
-      `      __trickle_appendFileSync(__trickle_join(dir, 'variables.jsonl'),`,
-      `        JSON.stringify({ kind: 'react_state', file: ${JSON.stringify(filename)}, line, stateName, updateCount: n, value: sample, timestamp: Date.now()/1000 }) + '\\n');`,
+      `      __trickle_send(JSON.stringify({ kind: 'react_state', file: ${JSON.stringify(filename)}, line, stateName, updateCount: n, value: sample, timestamp: Date.now()/1000 }));`,
       `    } catch(e) {}`,
       `    return origSetter(newVal);`,
       `  };`,
