@@ -17,7 +17,7 @@ import os
 
 
 def pytest_sessionstart(session: object) -> None:
-    """Clear the variables file at the start of each pytest run."""
+    """Clear the variables file and install import hook at the start of each pytest run."""
     if os.environ.get("TRICKLE_TRACE_VARS", "1") in ("0", "false"):
         return
 
@@ -27,6 +27,15 @@ def pytest_sessionstart(session: object) -> None:
     # Clear so each run starts fresh (VSCode extension will reload)
     try:
         open(vars_file, "w").close()
+    except Exception:
+        pass
+
+    # Install the import hook so source modules (not just test files)
+    # get variable tracing. This lets users see values flowing through
+    # functions being tested, not just the test assertions.
+    try:
+        from trickle._trace_import_hook import install_trace_hook
+        install_trace_hook()
     except Exception:
         pass
 

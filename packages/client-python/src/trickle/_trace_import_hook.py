@@ -215,9 +215,9 @@ def _trickle_tv(_val, _name, _line, _func=None):
                 if isinstance(v, str): return v[:40]
                 _cn = type(v).__name__
                 if _cn not in ('list','dict','tuple','set'): return _cn + '(...)'
-                if isinstance(v, (list, tuple)): return f'[{_cn}: {len(v)} items]'
-                if isinstance(v, dict): return f'{{{_cn}: {len(v)} keys}}'
-                if isinstance(v, set): return f'{{{_cn}: {len(v)} items}}'
+                if isinstance(v, (list, tuple)): return '[' + _cn + ': ' + str(len(v)) + ' items]'
+                if isinstance(v, dict): return '{{' + _cn + ': ' + str(len(v)) + ' keys}}'
+                if isinstance(v, set): return '{{' + _cn + ': ' + str(len(v)) + ' items}}'
                 return str(v)[:40]
             _s = {{f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}}
         else:
@@ -227,9 +227,9 @@ def _trickle_tv(_val, _name, _line, _func=None):
                 if isinstance(v, str): return v[:40]
                 _cn = type(v).__name__
                 if _cn not in ('list','dict','tuple','set'): return _cn + '(...)'
-                if isinstance(v, (list, tuple)): return f'[{_cn}: {len(v)} items]'
-                if isinstance(v, dict): return f'{{{_cn}: {len(v)} keys}}'
-                if isinstance(v, set): return f'{{{_cn}: {len(v)} items}}'
+                if isinstance(v, (list, tuple)): return '[' + _cn + ': ' + str(len(v)) + ' items]'
+                if isinstance(v, dict): return '{{' + _cn + ': ' + str(len(v)) + ' keys}}'
+                if isinstance(v, set): return '{{' + _cn + ': ' + str(len(v)) + ' items}}'
                 return str(v)[:40]
             if _dc.is_dataclass(_val) and not isinstance(_val, type):
                 _s = {{f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}}
