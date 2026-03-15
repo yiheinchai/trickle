@@ -828,12 +828,15 @@ class _TrickleTraceLoader:
             "psycopg2": "patch_psycopg2",
             "pymysql": "patch_pymysql",
             "mysql.connector": "patch_mysql_connector",
+            "redis": "patch_redis",
+            "pymongo": "patch_pymongo",
         }
         if fullname in _DB_DRIVERS:
             try:
-                from trickle.db_observer import patch_psycopg2, patch_pymysql, patch_mysql_connector
-                patcher = {"patch_psycopg2": patch_psycopg2, "patch_pymysql": patch_pymysql, "patch_mysql_connector": patch_mysql_connector}
-                patcher[_DB_DRIVERS[fullname]](module)
+                from trickle import db_observer
+                patcher = getattr(db_observer, _DB_DRIVERS[fullname], None)
+                if patcher:
+                    patcher(module)
             except Exception:
                 pass
         return module

@@ -68,11 +68,19 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if max_depth <= 0:
         return {"kind": "primitive", "name": "unknown"}
 
-    # Unwrap TrackedObject to get the actual object for type inference
+    # Unwrap TrackedObject and proxy objects to get the actual object
     try:
         from trickle.attr_tracker import TrackedObject
         if isinstance(value, TrackedObject):
             value = object.__getattribute__(value, "_inner")
+    except Exception:
+        pass
+    try:
+        from trickle.db_observer import _TracedSqliteConnection, _TracedSqliteCursor
+        if isinstance(value, _TracedSqliteConnection):
+            value = object.__getattribute__(value, "_conn")
+        elif isinstance(value, _TracedSqliteCursor):
+            value = object.__getattribute__(value, "_cursor")
     except Exception:
         pass
 

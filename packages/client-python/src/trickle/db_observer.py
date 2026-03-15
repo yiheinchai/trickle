@@ -168,7 +168,10 @@ class _TracedSqliteCursor:
 
 
 class _TracedSqliteConnection:
-    """Proxy connection that returns traced cursors."""
+    """Proxy connection that returns traced cursors.
+
+    Presents itself as sqlite3.Connection to type inference via __class__.
+    """
 
     def __init__(self, real_conn: Any) -> None:
         object.__setattr__(self, "_conn", real_conn)
@@ -376,6 +379,138 @@ def patch_mysql_connector(mysql_module: Any) -> None:
     CursorClass.execute = _patched_execute
 
 
+# ── Redis (redis-py) ─────────────────────────────────────────────────────────
+
+def patch_redis(redis_module: Any) -> None:
+    """Patch redis.client.Redis.execute_command to capture Redis operations."""
+    if getattr(redis_module, "_trickle_patched", False):
+        return
+    redis_module._trickle_patched = True
+
+    if _debug:
+        print("[trickle/db] Patching redis")
+
+    try:
+        RedisClass = redis_module.Redis
+    except AttributeError:
+        return
+
+    _orig_execute = RedisClass.execute_command
+
+    def _patched_execute_command(self: Any, *args: Any, **kwargs: Any) -> Any:
+        cmd = args[0] if args else "UNKNOWN"
+        cmd_args = list(args[1:4])  # Capture first 3 args
+        start = time.perf_counter()
+        error_msg = None
+        try:
+            result = _orig_execute(self, *args, **kwargs)
+            return result
+        except Exception as e:
+            error_msg = str(e)[:200]
+            raise
+        finally:
+            duration = (time.perf_counter() - start) * 1000
+            query_str = f"{cmd} {' '.join(str(a)[:50] for a in cmd_args)}".strip()
+            record: Dict[str, Any] = {
+                "kind": "query",
+                "driver": "redis",
+                "query": _truncate(query_str),
+                "durationMs": round(duration, 2),
+                "rowCount": 1,
+                "timestamp": int(time.time() * 1000),
+            }
+            if error_msg:
+                record["error"] = error_msg
+            _write_query(record)
+
+    RedisClass.execute_command = _patched_execute_command
+
+
+# ── MongoDB (pymongo) ────────────────────────────────────────────────────────
+
+def patch_pymongo(pymongo_module: Any) -> None:
+    """Patch pymongo Collection methods to capture MongoDB operations."""
+    if getattr(pymongo_module, "_trickle_patched", False):
+        return
+    pymongo_module._trickle_patched = True
+
+    if _debug:
+        print("[trickle/db] Patching pymongo")
+
+    try:
+        Collection = pymongo_module.collection.Collection
+    except AttributeError:
+        return
+
+    _methods_to_patch = [
+        "find", "find_one", "insert_one", "insert_many",
+        "update_one", "update_many", "delete_one", "delete_many",
+        "aggregate", "count_documents",
+    ]
+
+    for method_name in _methods_to_patch:
+        orig = getattr(Collection, method_name, None)
+        if orig is None or getattr(orig, "_trickle_patched", False):
+            continue
+
+        def _make_wrapper(orig_method: Any, op_name: str) -> Any:
+            def _wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+                collection_name = getattr(self, "name", "?")
+                start = time.perf_counter()
+                error_msg = None
+                result = None
+                try:
+                    result = orig_method(self, *args, **kwargs)
+                    return result
+                except Exception as e:
+                    error_msg = str(e)[:200]
+                    raise
+                finally:
+                    duration = (time.perf_counter() - start) * 1000
+                    # Build a readable query string
+                    filter_str = ""
+                    if args:
+                        try:
+                            filter_str = " " + json.dumps(args[0], default=str)[:200]
+                        except Exception:
+                            pass
+                    query_str = f"db.{collection_name}.{op_name}({filter_str.strip()})"
+                    row_count = 0
+                    if op_name == "insert_many" and result:
+                        try:
+                            row_count = len(result.inserted_ids)
+                        except Exception:
+                            pass
+                    elif op_name in ("update_one", "update_many") and result:
+                        try:
+                            row_count = result.modified_count
+                        except Exception:
+                            pass
+                    elif op_name in ("delete_one", "delete_many") and result:
+                        try:
+                            row_count = result.deleted_count
+                        except Exception:
+                            pass
+                    elif op_name in ("find_one", "count_documents"):
+                        row_count = 1 if result is not None else 0
+
+                    record: Dict[str, Any] = {
+                        "kind": "query",
+                        "driver": "pymongo",
+                        "query": _truncate(query_str),
+                        "durationMs": round(duration, 2),
+                        "rowCount": row_count,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    if error_msg:
+                        record["error"] = error_msg
+                    _write_query(record)
+            _wrapper._trickle_patched = True
+            return _wrapper
+
+        setattr(Collection, method_name, _make_wrapper(orig, method_name))
+
+
 # ── Auto-patching entry point ────────────────────────────────────────────────
 
 def patch_databases(debug: bool = False) -> None:
@@ -402,6 +537,8 @@ def patch_databases(debug: bool = False) -> None:
         "psycopg2": patch_psycopg2,
         "pymysql": patch_pymysql,
         "mysql.connector": patch_mysql_connector,
+        "redis": patch_redis,
+        "pymongo": patch_pymongo,
     }
     for mod_name, patcher in _DB_PATCHES.items():
         if mod_name in sys.modules:
