@@ -1233,6 +1233,33 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // Winston logger
+    if (request === 'winston' && !expressPatched.has('winston')) {
+      expressPatched.add('winston');
+      try {
+        const { patchWinston } = require(path.join(__dirname, 'log-observer.js'));
+        patchWinston(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Pino logger
+    if (request === 'pino' && !expressPatched.has('pino')) {
+      expressPatched.add('pino');
+      try {
+        const { patchPino } = require(path.join(__dirname, 'log-observer.js'));
+        patchPino(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Bunyan logger
+    if (request === 'bunyan' && !expressPatched.has('bunyan')) {
+      expressPatched.add('bunyan');
+      try {
+        const { patchBunyan } = require(path.join(__dirname, 'log-observer.js'));
+        patchBunyan(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Redis (ioredis)
     if (request === 'ioredis' && !expressPatched.has('ioredis')) {
       expressPatched.add('ioredis');

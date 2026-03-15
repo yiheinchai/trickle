@@ -216,7 +216,7 @@ trickle context src/api.ts --annotated   # source + runtime values
 | Errors | `trickle context --errors` | Stack trace + nearby variable values |
 | DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts (Prisma, Sequelize, TypeORM, SQLAlchemy, Knex, Drizzle auto-patched) |
 | HTTP | `trickle context --http` | Fetch calls with status codes + response types |
-| Logs | `trickle context --logs` | Structured logging events with levels + context |
+| Logs | `trickle context --logs` | Structured logging events with levels + context (winston, pino, bunyan, loguru, structlog auto-patched) |
 | Console | `trickle context --console` | All stdout/stderr with timestamps |
 | Memory | `trickle context --profile` | RSS + heap snapshots at start/end |
 | Traces | `trickle context --traces` | Distributed spans across microservices |

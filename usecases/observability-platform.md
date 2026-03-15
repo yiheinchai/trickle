@@ -34,6 +34,7 @@ That's it. No code changes, no config files, no dashboard setup. Trickle auto-pa
 | HTTP Requests | URL, method, status, latency, response shape | requests, httpx, fetch |
 | WebSocket | Messages sent/received, connect/close events | ws, socket.io |
 | Console Output | All stdout/stderr with timestamps | — |
+| Structured Logs | Level, message, metadata from loggers | winston, pino, bunyan (JS); logging, loguru, structlog (Python) |
 | Errors | Stack trace + variable values at crash site | — |
 | Memory | RSS + heap snapshots at start/end | — |
 | Distributed Traces | Cross-service request flow via trace IDs | X-Trickle-Trace-Id headers |

@@ -26,10 +26,12 @@ Alerting rules engine: .trickle/rules.json with custom thresholds, pattern match
 Validated on: nanoGPT (ML), Express (JS), Flask (Python), FastAPI+SQLAlchemy, Django+SQLite,
 Prisma+SQLite, Sequelize+SQLite, multi-file APIs, production-like apps with auth/JWT/bcrypt/SQL.
 
+Log aggregation: winston, pino, bunyan (JS); loguru, structlog (Python) auto-patched to logs.jsonl.
+
 Next priorities:
 1. Deploy cloud.trickle.dev to fly.io
 2. PostgreSQL migration for cloud scale
-3. Log aggregation (winston, pino, structlog, loguru auto-patching)
+3. Metrics/APM dashboards (latency percentiles, throughput, error rates over time)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -45,7 +45,7 @@ That's it. No SDK integration, no config files, no code changes. Trickle auto-pa
 - **Database drivers**: pg, mysql2, sqlite3, psycopg2, pymysql, redis, pymongo, **Prisma**, **SQLAlchemy**, **Django ORM**, Knex, Drizzle, **Sequelize**, **TypeORM**
 - **HTTP clients**: fetch, requests, httpx
 - **WebSocket**: ws, socket.io
-- **Logging**: Python logging module, console.log
+- **Logging**: winston, pino, bunyan (JS); Python logging, loguru, structlog; console.log
 
 ## Use Case 2: Team Dashboard
 

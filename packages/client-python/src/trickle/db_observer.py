@@ -770,6 +770,32 @@ def patch_databases(debug: bool = False) -> None:
                 _DB_PATCHES[name](module)
             except Exception:
                 pass
+        # Schedule deferred loguru/structlog patching (can't patch mid-import)
+        if name == "loguru" and not getattr(module, "_trickle_patched_logger", False):
+            try:
+                import threading
+                def _deferred_patch_loguru():
+                    import time as _t; _t.sleep(0)  # yield to let import finish
+                    try:
+                        from trickle.log_observer import _patch_loguru
+                        _patch_loguru()
+                    except Exception:
+                        pass
+                threading.Timer(0.01, _deferred_patch_loguru).start()
+            except Exception:
+                pass
+        if name == "structlog" and not getattr(module, "_trickle_patched", False):
+            try:
+                import threading
+                def _deferred_patch_structlog():
+                    try:
+                        from trickle.log_observer import _patch_structlog
+                        _patch_structlog()
+                    except Exception:
+                        pass
+                threading.Timer(0.01, _deferred_patch_structlog).start()
+            except Exception:
+                pass
         return module
 
     builtins.__import__ = _hooked_import
