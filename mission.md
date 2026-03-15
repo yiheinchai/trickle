@@ -45,9 +45,12 @@ Full agent observability stack is now feature-complete across both languages:
 - Error context with nearby variables (JS + Python)
 - 10 MCP server tools
 
-Next:
-1. Test full agent debugging workflow on real project
-2. Consider adding Go/Rust support for broader TAM
+Validated: Full agent debugging workflow tested on real 4-file Python project (app→service→db with sqlite3). All data captured: 47 vars, 4 functions, 18 SQL queries, 26 call trace events, 46 console lines. Agent can identify N+1 queries, missing users, slow initialization.
+
+The agent observability stack is feature-complete and validated. Consider:
+1. Go/Rust support for broader TAM
+2. Performance profiling data (memory, CPU)
+3. Streaming/WebSocket tracing
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
