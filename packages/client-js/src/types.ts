@@ -1,7 +1,7 @@
 export type TypeNode =
   | { kind: "primitive"; name: "string" | "number" | "boolean" | "null" | "undefined" | "bigint" | "symbol" }
   | { kind: "array"; element: TypeNode }
-  | { kind: "object"; properties: Record<string, TypeNode> }
+  | { kind: "object"; properties: Record<string, TypeNode>; class_name?: string }
   | { kind: "union"; members: TypeNode[] }
   | { kind: "function"; params: TypeNode[]; returnType: TypeNode }
   | { kind: "promise"; resolved: TypeNode }

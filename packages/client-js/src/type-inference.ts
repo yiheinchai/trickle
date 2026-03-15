@@ -168,6 +168,24 @@ function inferObject(obj: object, depth: number, seen: WeakSet<object>): TypeNod
     };
   }
 
+  // Known complex framework objects — use class name instead of deep introspection.
+  // These types have dozens of internal properties that generate unusably verbose stubs.
+  const className = obj.constructor?.name;
+  const OPAQUE_CLASSES = new Set([
+    // Node.js HTTP internals
+    'IncomingMessage', 'ServerResponse', 'Socket', 'Server',
+    'ReadableState', 'WritableState',
+    // Express
+    'IncomingMessage', // Express req extends this
+    // Streams
+    'Readable', 'Writable', 'Duplex', 'Transform', 'PassThrough',
+    // EventEmitter
+    'EventEmitter',
+  ]);
+  if (className && OPAQUE_CLASSES.has(className)) {
+    return { kind: 'object', properties: {}, class_name: className };
+  }
+
   // Plain objects
   return inferPlainObject(obj, depth, seen);
 }
@@ -187,7 +205,7 @@ function inferArray(arr: unknown[], depth: number, seen: WeakSet<object>): TypeN
   return { kind: 'array', element: unifyTypes(elementTypes) };
 }
 
-const MAX_PROPERTIES = 20;
+const MAX_PROPERTIES = 12;
 
 function inferPlainObject(obj: object, depth: number, seen: WeakSet<object>): TypeNode {
   const properties: Record<string, TypeNode> = {};
