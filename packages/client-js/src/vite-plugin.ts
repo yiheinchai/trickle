@@ -473,6 +473,57 @@ function extractDestructuredNames(pattern: string): string[] {
 }
 
 /**
+ * Find class body ranges in source code. Handles both:
+ *   class Foo { ... }
+ *   var Foo = class { ... }
+ * Returns an array of [start, end] positions (inclusive of braces).
+ */
+export function findClassBodyRanges(source: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  // Match both class declarations and class expressions
+  const classRegex = /\bclass\s*(?:[a-zA-Z_$][a-zA-Z0-9_$]*)?\s*(?:extends\s+[a-zA-Z_$.[\]]+\s*)?\{/g;
+  let m;
+  while ((m = classRegex.exec(source)) !== null) {
+    const openBrace = source.indexOf('{', m.index + 5); // skip past 'class'
+    if (openBrace === -1) continue;
+    // Find matching close brace
+    let depth = 1;
+    let pos = openBrace + 1;
+    while (pos < source.length && depth > 0) {
+      const ch = source[pos];
+      if (ch === '{') depth++;
+      else if (ch === '}') { depth--; if (depth === 0) break; }
+      else if (ch === '"' || ch === "'" || ch === '`') {
+        const q = ch; pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') pos++;
+          else if (source[pos] === q) break;
+          else if (q === '`' && source[pos] === '$' && source[pos + 1] === '{') {
+            pos += 2; let td = 1;
+            while (pos < source.length && td > 0) {
+              if (source[pos] === '{') td++;
+              else if (source[pos] === '}') td--;
+              pos++;
+            }
+            continue;
+          }
+          pos++;
+        }
+      } else if (ch === '/' && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+      } else if (ch === '/' && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+    if (depth === 0) ranges.push([openBrace, pos]);
+  }
+  return ranges;
+}
+
+/**
  * Find variable reassignments (not declarations) and return insertions for tracing.
  * Handles: x = newValue; x += 1; x ||= fallback; etc.
  * Only matches standalone reassignment statements at the start of a line.
@@ -481,6 +532,8 @@ function extractDestructuredNames(pattern: string): string[] {
  */
 export function findReassignments(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
   const results: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
+  // Pre-compute class body ranges to skip class field declarations
+  const classRanges = findClassBodyRanges(source);
 
   // Match: <identifier> <assignOp>= <value> at the start of a line
   // Compound operators: +=, -=, *=, /=, %=, **=, &&=, ||=, ??=, <<=, >>=, >>>=, &=, |=, ^=
@@ -512,6 +565,10 @@ export function findReassignments(source: string): Array<{ lineEnd: number; varN
     const lineStart = source.lastIndexOf('\n', match.index) + 1;
     const linePrefix = source.slice(lineStart, match.index + match[1].length).trim();
     if (/^(export\s+)?(const|let|var)\s/.test(source.slice(lineStart).trimStart())) continue;
+
+    // Skip class field declarations (e.g., `tasks = []` inside a class body)
+    // Inserting trace calls inside class bodies causes SyntaxError
+    if (classRanges.some(([start, end]) => match!.index > start && match!.index < end)) continue;
 
     // Skip if this looks like a property in an object literal (preceded by a key: pattern on same line)
     // or if it's a label (label: ...)
