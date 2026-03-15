@@ -159,7 +159,7 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 }
 ```
 
-**8 MCP tools available:**
+**9 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
@@ -167,10 +167,34 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 | `get_annotated_source` | Source code with inline runtime values |
 | `get_function_signatures` | All function signatures with execution timing |
 | `get_errors` | Crash context with nearby variable values |
+| `get_database_queries` | SQL, Redis, MongoDB queries with timing + row counts |
 | `get_console_output` | Captured console.log/error/warn output |
 | `get_http_requests` | HTTP fetch calls with status + latency |
 | `check_data_freshness` | Check if runtime data exists and how old it is |
 | `refresh_runtime_data` | Re-run the app to capture fresh data |
+
+---
+
+## Use Case 6: Debugging Slow Database Queries
+
+```bash
+trickle context --queries
+```
+
+Shows all database operations with timing — agents can immediately spot N+1 queries or slow operations:
+
+```
+  sqlite3   2.79ms  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)
+  sqlite3   0.06ms  INSERT INTO users VALUES ('Alice', 'alice@test.com')
+  sqlite3  45.20ms  SELECT * FROM users WHERE email LIKE '%test%'  ← slow!
+  redis     0.12ms  GET session:user123
+  pymongo   3.40ms  db.orders.find({"user_id": "123"})
+```
+
+**Supported databases (auto-detected, zero config):**
+- SQL: PostgreSQL (pg/psycopg2), MySQL (mysql2/pymysql), SQLite (better-sqlite3/sqlite3)
+- Redis: ioredis (JS), redis-py (Python)
+- MongoDB: mongoose (JS), pymongo (Python)
 
 ---
 
@@ -181,7 +205,8 @@ After one run with trickle, agents have access to:
 | Data | File | Description |
 |---|---|---|
 | Variable values | `variables.jsonl` | Every variable's type and sample value |
-| Function types | `observations.jsonl` | Signatures, params, return types, execution timing |
+| Function types | `observations.jsonl` | Signatures, params, return types, execution timing (ms) |
+| Database queries | `queries.jsonl` | SQL/Redis/MongoDB operations with timing + row counts |
 | HTTP requests | `observations.jsonl` | fetch() calls with URL, status, latency, response type |
 | Console output | `console.jsonl` | All console.log/error/warn output |
 | Error context | `errors.jsonl` | Crash info with nearby variable values |
