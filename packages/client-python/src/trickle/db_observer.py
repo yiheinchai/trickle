@@ -517,6 +517,119 @@ def patch_pymongo(pymongo_module: Any) -> None:
         setattr(Collection, method_name, _make_wrapper(orig, method_name))
 
 
+# ── SQLAlchemy ──────────────────────────────────────────────────────────────
+
+def patch_sqlalchemy(sa_module: Any) -> None:
+    """Patch SQLAlchemy to capture queries via event listeners.
+
+    SQLAlchemy's event system lets us listen to 'before_cursor_execute' and
+    'after_cursor_execute' events on Engine instances. We monkey-patch
+    create_engine to auto-register these listeners.
+    """
+    if getattr(sa_module, "_trickle_patched", False):
+        return
+    sa_module._trickle_patched = True
+
+    if _debug:
+        print("[trickle/db] Patching SQLAlchemy")
+
+    try:
+        from sqlalchemy import event as sa_event
+    except ImportError:
+        return
+
+    _orig_create_engine = sa_module.create_engine
+
+    def _patched_create_engine(*args: Any, **kwargs: Any) -> Any:
+        engine = _orig_create_engine(*args, **kwargs)
+        _attach_query_listeners(engine, sa_event)
+        return engine
+
+    sa_module.create_engine = _patched_create_engine
+
+    # Also patch create_async_engine if available
+    try:
+        if hasattr(sa_module, "create_async_engine"):
+            _orig_create_async = sa_module.create_async_engine
+
+            def _patched_create_async(*args: Any, **kwargs: Any) -> Any:
+                engine = _orig_create_async(*args, **kwargs)
+                # async engine wraps a sync engine
+                try:
+                    _attach_query_listeners(engine.sync_engine, sa_event)
+                except Exception:
+                    pass
+                return engine
+
+            sa_module.create_async_engine = _patched_create_async
+    except Exception:
+        pass
+
+
+def _attach_query_listeners(engine: Any, sa_event: Any) -> None:
+    """Attach before/after_cursor_execute event listeners to an engine."""
+    if getattr(engine, "_trickle_listeners", False):
+        return
+    engine._trickle_listeners = True
+
+    @sa_event.listens_for(engine, "before_cursor_execute")
+    def _before_execute(conn: Any, cursor: Any, statement: Any,
+                        parameters: Any, context: Any, executemany: Any) -> None:
+        conn.info.setdefault("_trickle_query_start", {})[id(cursor)] = time.perf_counter()
+
+    @sa_event.listens_for(engine, "after_cursor_execute")
+    def _after_execute(conn: Any, cursor: Any, statement: Any,
+                       parameters: Any, context: Any, executemany: Any) -> None:
+        start = conn.info.get("_trickle_query_start", {}).pop(id(cursor), None)
+        duration = (time.perf_counter() - start) * 1000 if start else 0
+
+        row_count = 0
+        columns = None
+        try:
+            row_count = cursor.rowcount if cursor.rowcount >= 0 else 0
+            if cursor.description:
+                columns = [d[0] for d in cursor.description]
+        except Exception:
+            pass
+
+        sql_text = str(statement) if statement else ""
+        record: Dict[str, Any] = {
+            "kind": "query",
+            "driver": "sqlalchemy",
+            "query": _truncate(sql_text),
+            "durationMs": round(duration, 2),
+            "rowCount": row_count,
+            "timestamp": int(time.time() * 1000),
+        }
+        params = _sanitize_params(parameters)
+        if params:
+            record["params"] = params
+        if columns:
+            record["columns"] = columns
+        _write_query(record)
+
+    @sa_event.listens_for(engine, "handle_error")
+    def _on_error(exception_context: Any) -> None:
+        start = None
+        try:
+            cursor = exception_context.cursor
+            start = exception_context.connection.info.get("_trickle_query_start", {}).pop(id(cursor), None)
+        except Exception:
+            pass
+        duration = (time.perf_counter() - start) * 1000 if start else 0
+        sql_text = str(exception_context.statement) if exception_context.statement else ""
+        record: Dict[str, Any] = {
+            "kind": "query",
+            "driver": "sqlalchemy",
+            "query": _truncate(sql_text),
+            "durationMs": round(duration, 2),
+            "rowCount": 0,
+            "error": str(exception_context.original_exception)[:200],
+            "timestamp": int(time.time() * 1000),
+        }
+        _write_query(record)
+
+
 # ── Auto-patching entry point ────────────────────────────────────────────────
 
 def patch_databases(debug: bool = False) -> None:
@@ -545,6 +658,7 @@ def patch_databases(debug: bool = False) -> None:
         "mysql.connector": patch_mysql_connector,
         "redis": patch_redis,
         "pymongo": patch_pymongo,
+        "sqlalchemy": patch_sqlalchemy,
     }
     for mod_name, patcher in _DB_PATCHES.items():
         if mod_name in sys.modules:

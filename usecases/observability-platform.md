@@ -30,7 +30,7 @@ That's it. No code changes, no config files, no dashboard setup. Trickle auto-pa
 | Variables | Every variable assignment with type + value | — |
 | Functions | Signatures, params, return types, execution time | — |
 | Call Trace | Which function called which, parent-child flow | — |
-| DB Queries | SQL text, timing, row counts, columns | pg, mysql2, sqlite3, psycopg2, pymysql, redis, pymongo |
+| DB Queries | SQL text, timing, row counts, columns | pg, mysql2, sqlite3, psycopg2, pymysql, redis, pymongo, **Prisma**, **SQLAlchemy**, Knex, Drizzle |
 | HTTP Requests | URL, method, status, latency, response shape | requests, httpx, fetch |
 | WebSocket | Messages sent/received, connect/close events | ws, socket.io |
 | Console Output | All stdout/stderr with timestamps | — |

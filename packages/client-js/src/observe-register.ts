@@ -1188,6 +1188,33 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // Prisma ORM
+    if (request === '@prisma/client' && !expressPatched.has('@prisma/client')) {
+      expressPatched.add('@prisma/client');
+      try {
+        const { patchPrisma } = require(path.join(__dirname, 'db-observer.js'));
+        patchPrisma(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Drizzle ORM
+    if (request.startsWith('drizzle-orm') && !expressPatched.has('drizzle-orm')) {
+      expressPatched.add('drizzle-orm');
+      try {
+        const { patchDrizzle } = require(path.join(__dirname, 'db-observer.js'));
+        patchDrizzle(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Knex query builder
+    if (request === 'knex' && !expressPatched.has('knex')) {
+      expressPatched.add('knex');
+      try {
+        const { patchKnex } = require(path.join(__dirname, 'db-observer.js'));
+        patchKnex(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Redis (ioredis)
     if (request === 'ioredis' && !expressPatched.has('ioredis')) {
       expressPatched.add('ioredis');

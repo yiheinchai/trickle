@@ -333,6 +333,207 @@ export function patchIoredis(ioredisModule: any, debug: boolean): void {
 }
 
 /**
+ * Patch @prisma/client to capture queries.
+ * Prisma has its own query engine (Rust binary) so patching pg/mysql2 won't work.
+ * Instead, we hook into Prisma's $on('query') event and $use() middleware.
+ */
+export function patchPrisma(prismaModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  const PrismaClient = prismaModule.PrismaClient;
+  if (!PrismaClient || (PrismaClient as any).__trickle_patched) return;
+
+  const originalConstructor = PrismaClient;
+  const OriginalPrototype = PrismaClient.prototype;
+
+  // Wrap the constructor to inject query logging
+  const patchedConstructor = function (this: any, opts: any = {}) {
+    // Enable query logging in Prisma
+    if (!opts.log) opts.log = [];
+    const logEntries = Array.isArray(opts.log) ? opts.log : [];
+
+    // Add query event if not already present
+    const hasQueryLog = logEntries.some((entry: any) =>
+      (typeof entry === 'string' && entry === 'query') ||
+      (typeof entry === 'object' && entry.emit === 'event' && entry.level === 'query')
+    );
+    if (!hasQueryLog) {
+      logEntries.push({ emit: 'event', level: 'query' });
+    }
+    opts.log = logEntries;
+
+    // Call original constructor
+    const instance = new originalConstructor(opts);
+
+    // Subscribe to query events
+    try {
+      instance.$on('query', (e: any) => {
+        const queryText = (e.query || '').substring(0, MAX_QUERY_LENGTH);
+        const params = e.params ? (() => { try { return JSON.parse(e.params).slice(0, 5); } catch { return undefined; } })() : undefined;
+        writeQuery({
+          kind: 'query',
+          query: queryText,
+          params,
+          durationMs: e.duration || 0,
+          rowCount: 0, // Prisma query events don't include row count
+          timestamp: Date.now(),
+        });
+        if (debugMode) {
+          console.log(`[trickle/db] Prisma: ${queryText.substring(0, 60)}... (${e.duration}ms)`);
+        }
+      });
+    } catch { /* $on may not be available on all Prisma versions */ }
+
+    return instance;
+  };
+
+  // Copy prototype chain
+  patchedConstructor.prototype = OriginalPrototype;
+  Object.setPrototypeOf(patchedConstructor, originalConstructor);
+
+  // Copy static properties
+  for (const key of Object.getOwnPropertyNames(originalConstructor)) {
+    if (key !== 'prototype' && key !== 'length' && key !== 'name') {
+      try {
+        Object.defineProperty(patchedConstructor, key, Object.getOwnPropertyDescriptor(originalConstructor, key)!);
+      } catch {}
+    }
+  }
+
+  prismaModule.PrismaClient = patchedConstructor;
+  (prismaModule.PrismaClient as any).__trickle_patched = true;
+
+  if (debug) console.log('[trickle/db] Prisma query tracing enabled');
+}
+
+/**
+ * Patch Drizzle ORM to capture queries.
+ * Drizzle exposes a logger option in its constructor.
+ * We patch the db object's execute method to capture queries.
+ */
+export function patchDrizzle(drizzleModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  // drizzle-orm exports various dialect-specific functions
+  // The common pattern is drizzle(client, { logger: true })
+  // We patch by wrapping the module's default export or named exports
+
+  for (const key of Object.keys(drizzleModule)) {
+    const fn = drizzleModule[key];
+    if (typeof fn !== 'function') continue;
+    if ((fn as any).__trickle_patched) continue;
+
+    // Only patch functions that look like drizzle constructors
+    // (they take a client + config object)
+    drizzleModule[key] = function patchedDrizzle(...args: any[]): any {
+      // Inject a custom logger into the config
+      const config = args[1] && typeof args[1] === 'object' ? { ...args[1] } : (args.length > 1 ? args[1] : {});
+
+      if (typeof config === 'object' && config !== null) {
+        const origLogger = config.logger;
+        config.logger = {
+          logQuery(query: string, params: unknown[]): void {
+            const startTime = performance.now();
+            writeQuery({
+              kind: 'query',
+              query: query.substring(0, MAX_QUERY_LENGTH),
+              params: Array.isArray(params) ? params.slice(0, 5) : undefined,
+              durationMs: 0, // Drizzle logger doesn't provide timing
+              rowCount: 0,
+              timestamp: Date.now(),
+            });
+            // Call original logger if present
+            if (origLogger && typeof origLogger === 'object' && 'logQuery' in origLogger) {
+              (origLogger as any).logQuery(query, params);
+            }
+          },
+        };
+        args[1] = config;
+      }
+
+      return fn.apply(this, args);
+    };
+    (drizzleModule[key] as any).__trickle_patched = true;
+  }
+
+  if (debug) console.log('[trickle/db] Drizzle ORM query tracing enabled');
+}
+
+/**
+ * Patch Knex to capture queries.
+ * Knex emits 'query' and 'query-response' events on the knex instance.
+ */
+export function patchKnex(knexModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  const origKnex = knexModule.default || knexModule;
+  if (typeof origKnex !== 'function' || (origKnex as any).__trickle_patched) return;
+
+  const wrapped = function patchedKnex(this: any, ...args: any[]): any {
+    const instance = origKnex.apply(this, args);
+
+    // Track query start times
+    const queryTimers = new Map<string, number>();
+
+    try {
+      instance.on('query', (data: any) => {
+        queryTimers.set(data.__knexQueryUid || '', performance.now());
+      });
+
+      instance.on('query-response', (_response: any, data: any) => {
+        const startTime = queryTimers.get(data.__knexQueryUid || '');
+        const durationMs = startTime ? Math.round((performance.now() - startTime) * 100) / 100 : 0;
+        queryTimers.delete(data.__knexQueryUid || '');
+
+        writeQuery({
+          kind: 'query',
+          query: (data.sql || '').substring(0, MAX_QUERY_LENGTH),
+          params: Array.isArray(data.bindings) ? data.bindings.slice(0, 5) : undefined,
+          durationMs,
+          rowCount: 0,
+          timestamp: Date.now(),
+        });
+      });
+
+      instance.on('query-error', (error: any, data: any) => {
+        const startTime = queryTimers.get(data.__knexQueryUid || '');
+        const durationMs = startTime ? Math.round((performance.now() - startTime) * 100) / 100 : 0;
+        queryTimers.delete(data.__knexQueryUid || '');
+
+        writeQuery({
+          kind: 'query',
+          query: (data.sql || '').substring(0, MAX_QUERY_LENGTH),
+          durationMs,
+          rowCount: 0,
+          error: error?.message?.substring(0, 200),
+          timestamp: Date.now(),
+        });
+      });
+    } catch { /* query events not available */ }
+
+    return instance;
+  };
+
+  // Copy properties
+  Object.setPrototypeOf(wrapped, origKnex);
+  for (const key of Object.getOwnPropertyNames(origKnex)) {
+    if (key !== 'length' && key !== 'name') {
+      try { Object.defineProperty(wrapped, key, Object.getOwnPropertyDescriptor(origKnex, key)!); } catch {}
+    }
+  }
+
+  if (knexModule.default) {
+    knexModule.default = wrapped;
+  } else {
+    // knex exports the function directly via module.exports
+    // We can't replace module.exports from here, but observe-register handles that
+  }
+
+  (wrapped as any).__trickle_patched = true;
+  if (debug) console.log('[trickle/db] Knex query tracing enabled');
+}
+
+/**
  * Patch mongoose to capture MongoDB operations.
  * Called from observe-register when mongoose is required.
  */

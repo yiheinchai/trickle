@@ -214,7 +214,7 @@ trickle context src/api.ts --annotated   # source + runtime values
 | Functions | `trickle functions` | Signatures with parameter types + timing |
 | Call trace | `trickle context --trace` | Which function called which, execution flow |
 | Errors | `trickle context --errors` | Stack trace + nearby variable values |
-| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts |
+| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts (Prisma, SQLAlchemy, Knex, Drizzle auto-patched) |
 | HTTP | `trickle context --http` | Fetch calls with status codes + response types |
 | Logs | `trickle context --logs` | Structured logging events with levels + context |
 | Console | `trickle context --console` | All stdout/stderr with timestamps |
