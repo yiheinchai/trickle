@@ -1,6 +1,6 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.107",
+  "version": "0.2.108",
   "description": "Runtime type observability for JavaScript applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
