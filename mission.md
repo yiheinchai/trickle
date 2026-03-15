@@ -6,12 +6,14 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.159. 30 MCP tools. Shipped trickle deps — module dependency graph with interactive
-HTML view and Mermaid diagram output for GitHub/docs. Also shipped cost estimation, waterfall,
-anomaly detection, per-request tracing, diff-runs, fix suggestions, OTLP, Prometheus,
-Slack/Discord, GitHub PR comments.
+CLI 0.1.159. 30 MCP tools. All new features validated E2E on real Express+SQLite project:
+cost, waterfall, deps, anomaly, diff-runs, fix, request trace, OTLP — all working.
 
-Next: SLO burn rate alerting, dependency graph MCP tool, test all new features on real projects.
+Next TAM research areas:
+1. SLO burn rate alerting with budget tracking
+2. API versioning/changelog detection from type diffs
+3. Security scanning (detect secrets in variables/logs, SQL injection patterns)
+4. Multi-service dependency map (across microservices)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
