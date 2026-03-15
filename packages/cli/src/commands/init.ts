@@ -771,11 +771,12 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   }
 
   console.log("");
-  console.log(chalk.gray("  Other commands:"));
-  console.log(chalk.gray("     trickle context <file>    — runtime context for AI agent debugging"));
-  console.log(chalk.gray("     trickle functions         — list observed functions"));
-  console.log(chalk.gray("     trickle vars              — list captured variable types + values"));
-  console.log(chalk.gray("     trickle tool-schema       — generate LLM tool calling schemas"));
+  console.log(chalk.gray("  After running, explore your data:"));
+  console.log(chalk.gray("     trickle summary           — errors, queries, root causes, fix recommendations"));
+  console.log(chalk.gray("     trickle explain <file>    — functions, call graph, data flow, variables"));
+  console.log(chalk.gray("     trickle test              — run tests with observability (jest/vitest/pytest)"));
+  console.log(chalk.gray("     trickle flamegraph        — interactive performance hotspot visualization"));
+  console.log(chalk.gray("     trickle doctor            — health check with recommended next actions"));
 
   console.log("");
 }
