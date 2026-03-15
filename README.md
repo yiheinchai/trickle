@@ -181,34 +181,45 @@ trickle test --generate          # auto-generate API tests
 
 > *"My agent keeps adding console.log to debug. There must be a better way."*
 
-Trickle caches runtime variable values so AI agents can debug without re-running your code. Run once, then agents query the cached data:
+Trickle caches **full runtime state** so AI agents can debug autonomously without re-running your code:
 
 ```bash
-trickle run node app.js          # capture runtime data once
-
-# Agent runs these to understand your code:
-trickle context src/api.ts --annotated   # source + runtime values
+trickle run node app.js          # capture everything once
 ```
 
+Agents then query the cached data — no more edit→run→read cycles:
+
+```bash
+trickle context src/api.ts --annotated   # source + runtime values
+```
 ```
   13 | const user = createUser(body.name, body.email);  // user = {"id":1,"name":"Alice",...}
   19 | const count = users.length;                       // count = 3
   25 | const user = getUser(id);                         // user = null  ← bug!
 ```
 
-Agents see **source code AND runtime values** in one view. When your app crashes, error context + nearby variable values are auto-captured to `.trickle/errors.jsonl`.
+**What agents can query:**
 
-```bash
-trickle init                     # creates CLAUDE.md with agent instructions
-trickle context src/api.ts:25    # values near a specific line
-trickle context --json           # structured output for programmatic use
-trickle tool-schema --format openai  # generate LLM tool calling schemas
-trickle mcp-server               # MCP server for direct agent integration
-```
+| Data | Command | Description |
+|------|---------|-------------|
+| Variables | `trickle context <file>` | Types + actual values at every line |
+| Functions | `trickle functions` | Signatures with parameter types + timing |
+| Errors | `trickle context --errors` | Stack trace + nearby variable values |
+| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts |
+| HTTP | `trickle context --http` | Fetch calls with status codes + response types |
+| Console | `trickle context --console` | All stdout/stderr with timestamps |
 
-**MCP Integration** — add trickle as an MCP server so Claude can query runtime data directly:
+**Database tracing** captures SQL queries (pg, mysql2, sqlite3, psycopg2, pymysql), Redis commands (ioredis, redis-py), and MongoDB operations (mongoose, pymongo) — all automatically, zero config.
+
+**MCP Integration** — 9 tools for direct agent access:
 ```json
 { "mcpServers": { "trickle": { "command": "npx", "args": ["trickle-cli", "mcp-server"] } } }
+```
+
+Tools: `get_runtime_context`, `get_annotated_source`, `get_function_signatures`, `get_errors`, `get_database_queries`, `get_console_output`, `get_http_requests`, `check_data_freshness`, `refresh_runtime_data`.
+
+```bash
+trickle init                     # creates CLAUDE.md with agent debugging workflow
 ```
 
 **[Full AI Agent Guide →](usecases/ai-agent.md)** | **[LLM Tool Schema Guide →](usecases/ai-developer.md)**
@@ -295,16 +306,18 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 ```
 Your Code → trickle (import hooks / AST transform)
                 ↓
-         .trickle/observations.jsonl  (function types)
+         .trickle/observations.jsonl  (function types + timing)
          .trickle/variables.jsonl     (variable assignments)
          .trickle/errors.jsonl        (crash context + nearby values)
+         .trickle/queries.jsonl       (SQL, Redis, MongoDB queries)
+         .trickle/console.jsonl       (stdout/stderr output)
                 ↓
     ┌───────────┼───────────┬──────────────┐
     ↓           ↓           ↓              ↓
- VSCode      CLI tools    AI Agents      Backend
- Extension   (codegen,    (trickle       (optional,
- (inline     stubs,       context,       for team
-  hints)     openapi)     tool-schema)   sharing)
+ VSCode      CLI tools    AI Agents      MCP Server
+ Extension   (codegen,    (trickle       (9 tools for
+ (inline     stubs,       context,       Claude, Cursor,
+  hints)     openapi)     CLAUDE.md)     Copilot)
 ```
 
 ## Packages
