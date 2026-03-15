@@ -484,6 +484,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_heal_plans",
+    description: "Get auto-remediation plans — each plan has a detected issue, relevant context (variables, queries, call trace), a fix recommendation, and a confidence level. Use this to automatically fix issues.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_performance_profile",
     description: "Get memory usage profile — RSS and heap snapshots at start/end of execution. Use to identify memory leaks or high memory usage.",
     inputSchema: { type: "object", properties: {} },
@@ -548,6 +553,16 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_call_trace": result = getCallTrace(); break;
           case "get_alerts": result = getAlerts(); break;
+          case "get_heal_plans": {
+            try {
+              const { runHeal } = require('./heal');
+              const plans = runHeal({ json: true, dir: findTrickleDir() });
+              result = { plans: plans.length > 0 ? plans : "No issues detected — all clear." };
+            } catch (e: any) {
+              result = { plans: `Error generating heal plans: ${e.message}` };
+            }
+            break;
+          }
           case "get_websocket_events": result = getWebSocketEvents(); break;
           case "get_performance_profile": result = getPerformanceProfile(); break;
           case "get_console_output": result = getConsoleOutput(); break;

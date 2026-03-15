@@ -502,6 +502,16 @@ program
     });
   });
 
+// trickle heal
+program
+  .command("heal")
+  .description("Agent auto-remediation — detects issues, gathers context, generates fix plans with recommendations")
+  .option("--json", "Output structured JSON for agent consumption")
+  .action(async (opts) => {
+    const { runHeal } = await import("./commands/heal");
+    runHeal({ json: opts.json });
+  });
+
 // trickle dashboard --local
 program
   .command("dashboard-local")
