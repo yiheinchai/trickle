@@ -395,6 +395,9 @@ async function executeSingleRun(
       await autoGenerateSidecar(singleFile);
     }
 
+    // Auto-push to cloud if configured
+    await autoCloudPush();
+
     return exitCode;
   }
 
@@ -499,6 +502,9 @@ async function executeSingleRun(
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 
+  // Auto-push all data to cloud if configured
+  await autoCloudPush();
+
   return exitCode;
 }
 
@@ -511,6 +517,19 @@ async function executeSingleRun(
  * Uses polling (fs.watchFile) because the file is being appended to by
  * the child process and fs.watch can be unreliable with rapid appends.
  */
+
+async function autoCloudPush(): Promise<void> {
+  const configPath = path.join(process.env.HOME || "~", ".trickle", "cloud.json");
+  if (!fs.existsSync(configPath)) return;
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    if (config.url && config.token) {
+      const { cloudPush } = await import("./cloud");
+      await cloudPush();
+    }
+  } catch {}
+}
+
 function startLiveLocalTypes(
   sourceFile: string,
   jsonlPath: string,
