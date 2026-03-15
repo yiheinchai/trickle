@@ -269,6 +269,25 @@ function getErrors(): unknown {
   return { errors: errors.length > 0 ? errors : "No errors recorded." };
 }
 
+function getHttpRequests(): unknown {
+  const funcs = loadFuncs();
+  const httpObs = funcs.filter(f =>
+    f.functionName.startsWith("GET ") || f.functionName.startsWith("POST ") ||
+    f.functionName.startsWith("PUT ") || f.functionName.startsWith("DELETE ") ||
+    f.functionName.startsWith("PATCH ")
+  );
+  if (httpObs.length === 0) return { requests: "No HTTP requests captured. Run the app with trickle to observe fetch() calls." };
+  return {
+    requests: httpObs.map(f => ({
+      endpoint: f.functionName,
+      host: f.module,
+      durationMs: f.durationMs,
+      responseType: typeNodeToCompact(f.returnType),
+      sampleResponse: f.sampleOutput,
+    })),
+  };
+}
+
 function checkDataFreshness(): unknown {
   const dir = findTrickleDir();
   const varsFile = path.join(dir, "variables.jsonl");
@@ -373,6 +392,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_http_requests",
+    description: "Get all HTTP requests (fetch calls) made by the application, with URL, status, response time, and response type.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "check_data_freshness",
     description: "Check if trickle runtime data exists and how fresh it is. Use this before querying to know if data needs refreshing.",
     inputSchema: { type: "object", properties: {} },
@@ -419,6 +443,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_annotated_source": result = getAnnotatedSource(args); break;
           case "get_function_signatures": result = getFunctionSignatures(); break;
           case "get_errors": result = getErrors(); break;
+          case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
           case "refresh_runtime_data": result = refreshData(args); break;
           default:
