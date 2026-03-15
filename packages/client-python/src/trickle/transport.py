@@ -50,6 +50,14 @@ _MAX_OBSERVATIONS_PER_FN = 10
 _obs_counts: Dict[str, int] = {}  # "module::functionName" -> count
 _obs_hashes: Dict[str, set] = {}  # "module::functionName" -> set of typeHashes
 
+# Cloud streaming: buffer observations for periodic upload
+_cloud_url: str = ""
+_cloud_token: str = ""
+_cloud_project: str = ""
+_cloud_buffer: List[str] = []
+_cloud_lock = threading.Lock()
+_cloud_timer: Optional[threading.Timer] = None
+
 
 def configure(
     backend_url: Optional[str] = None,
@@ -85,6 +93,9 @@ def configure(
             _local_file_path = os.path.join(local_dir, "observations.jsonl")
             logger.debug("Local mode: writing to %s", _local_file_path)
 
+        # Initialize cloud streaming if configured
+        _init_cloud_streaming()
+
 
 def enqueue(payload: Dict[str, Any]) -> None:
     """Add a payload to the send queue.  Starts the worker on first call."""
@@ -114,8 +125,13 @@ def enqueue(payload: Dict[str, Any]) -> None:
     # Local file mode: append directly to JSONL file
     if _local_mode and _local_file_path:
         try:
+            line = json.dumps(payload) + "\n"
             with open(_local_file_path, "a") as f:
-                f.write(json.dumps(payload) + "\n")
+                f.write(line)
+            # Also buffer for cloud streaming
+            if _cloud_url and _cloud_token:
+                with _cloud_lock:
+                    _cloud_buffer.append(line)
         except Exception:
             pass  # Never crash user's app
         return
@@ -206,6 +222,84 @@ def _send_batch(session: Any, batch: List[Dict[str, Any]]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Cloud streaming
+# ---------------------------------------------------------------------------
+
+def _init_cloud_streaming() -> None:
+    """Initialize cloud streaming from env vars or ~/.trickle/cloud.json."""
+    global _cloud_url, _cloud_token, _cloud_project
+
+    _cloud_url = os.environ.get("TRICKLE_CLOUD_URL", "")
+    _cloud_token = os.environ.get("TRICKLE_CLOUD_TOKEN", "")
+
+    # Load from config file if env vars not set
+    if not _cloud_url or not _cloud_token:
+        try:
+            config_path = os.path.join(os.environ.get("HOME", "~"), ".trickle", "cloud.json")
+            if os.path.exists(config_path):
+                with open(config_path) as f:
+                    config = json.load(f)
+                if not _cloud_url and config.get("url"):
+                    _cloud_url = config["url"]
+                if not _cloud_token and config.get("token"):
+                    _cloud_token = config["token"]
+        except Exception:
+            pass
+
+    _cloud_project = os.environ.get("TRICKLE_CLOUD_PROJECT", os.path.basename(os.getcwd()))
+
+    if _cloud_url and _cloud_token:
+        _schedule_cloud_flush()
+        logger.debug("Cloud streaming enabled → %s", _cloud_url)
+
+
+def _schedule_cloud_flush() -> None:
+    """Schedule periodic cloud buffer flush."""
+    global _cloud_timer
+    if _cloud_timer is not None:
+        return
+
+    def _flush_loop() -> None:
+        global _cloud_timer
+        _flush_cloud_buffer()
+        _cloud_timer = threading.Timer(5.0, _flush_loop)
+        _cloud_timer.daemon = True
+        _cloud_timer.start()
+
+    _cloud_timer = threading.Timer(5.0, _flush_loop)
+    _cloud_timer.daemon = True
+    _cloud_timer.start()
+
+
+def _flush_cloud_buffer() -> None:
+    """Send buffered observations to the cloud."""
+    if not _cloud_buffer or not _cloud_url or not _cloud_token:
+        return
+
+    with _cloud_lock:
+        lines = _cloud_buffer[:]
+        _cloud_buffer.clear()
+
+    if not lines:
+        return
+
+    try:
+        import requests
+        requests.post(
+            f"{_cloud_url}/api/v1/ingest",
+            json={
+                "project": _cloud_project,
+                "file": "observations.jsonl",
+                "lines": "".join(lines),
+            },
+            headers={"Authorization": f"Bearer {_cloud_token}"},
+            timeout=10,
+        )
+    except Exception:
+        pass  # Silent — data is already saved locally
+
+
+# ---------------------------------------------------------------------------
 # Shutdown hook
 # ---------------------------------------------------------------------------
 
@@ -214,6 +308,8 @@ def _atexit_flush() -> None:
     t = _worker_thread
     if t is not None and t.is_alive():
         t.join(timeout=5)
+    # Final cloud flush
+    _flush_cloud_buffer()
 
 
 atexit.register(_atexit_flush)

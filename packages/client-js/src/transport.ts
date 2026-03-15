@@ -19,6 +19,14 @@ let queue: IngestPayload[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let isFlushing = false;
 
+// Cloud streaming: when TRICKLE_CLOUD_URL + TRICKLE_CLOUD_TOKEN are set,
+// observations are also streamed to the cloud backend in real-time.
+let cloudUrl = process.env.TRICKLE_CLOUD_URL || '';
+let cloudToken = process.env.TRICKLE_CLOUD_TOKEN || '';
+let cloudProject = '';
+let cloudBuffer: string[] = [];
+let cloudFlushTimer: ReturnType<typeof setInterval> | null = null;
+
 /**
  * Configure the transport layer with global options.
  */
@@ -28,6 +36,33 @@ export function configure(opts: GlobalOpts): void {
   maxBatchSize = opts.maxBatchSize || DEFAULT_MAX_BATCH_SIZE;
   enabled = opts.enabled !== false;
   debug = opts.debug === true;
+
+  // Load cloud config from ~/.trickle/cloud.json if env vars not set
+  if (!cloudUrl || !cloudToken) {
+    try {
+      const configPath = pathMod.join(process.env.HOME || '~', '.trickle', 'cloud.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (!cloudUrl && config.url) cloudUrl = config.url;
+        if (!cloudToken && config.token) cloudToken = config.token;
+      }
+    } catch {}
+  }
+  cloudProject = process.env.TRICKLE_CLOUD_PROJECT || pathMod.basename(process.cwd());
+
+  // Start cloud streaming if configured
+  if (cloudUrl && cloudToken && !cloudFlushTimer) {
+    cloudFlushTimer = setInterval(() => {
+      flushCloud().catch(() => {});
+    }, 5000); // Flush to cloud every 5 seconds
+    if (cloudFlushTimer.unref) cloudFlushTimer.unref();
+    if (debug) {
+      console.log(`[trickle] Cloud streaming enabled → ${cloudUrl}`);
+    }
+
+    // Flush cloud buffer on exit
+    process.on('beforeExit', () => { flushCloud().catch(() => {}); });
+  }
 
   // Check for local/file-based mode
   if (process.env.TRICKLE_LOCAL === '1') {
@@ -58,7 +93,12 @@ export function enqueue(payload: IngestPayload): void {
   // Local file mode: append directly to JSONL file
   if (localMode && localFilePath) {
     try {
-      fs.appendFileSync(localFilePath, JSON.stringify(payload) + '\n');
+      const line = JSON.stringify(payload) + '\n';
+      fs.appendFileSync(localFilePath, line);
+      // Also buffer for cloud if configured
+      if (cloudUrl && cloudToken) {
+        cloudBuffer.push(line);
+      }
     } catch {
       // Never crash user's app
     }
@@ -173,6 +213,32 @@ function stopTimer(): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Flush buffered observations to the cloud backend.
+ */
+async function flushCloud(): Promise<void> {
+  if (cloudBuffer.length === 0 || !cloudUrl || !cloudToken) return;
+
+  const lines = cloudBuffer.splice(0);
+  try {
+    await fetch(`${cloudUrl}/api/v1/ingest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${cloudToken}`,
+      },
+      body: JSON.stringify({
+        project: cloudProject,
+        file: 'observations.jsonl',
+        lines: lines.join(''),
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+  } catch {
+    // Silent — never crash user's app. Data is still saved locally.
+  }
 }
 
 function silentError(): void {

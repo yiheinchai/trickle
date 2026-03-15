@@ -94,7 +94,49 @@ router.post("/keys", (req: Request, res: Response) => {
   });
 });
 
-// ── POST /api/v1/push — Upload project data ──
+// ── POST /api/v1/ingest — Real-time streaming ingest ──
+// Accepts batched observations and appends to project data files.
+// This enables `trickle run` to stream data to the cloud in real-time.
+
+router.post("/ingest", requireAuth, (req: AuthedRequest, res: Response) => {
+  const { project, file, lines } = req.body;
+
+  if (!project || !file || !lines) {
+    res.status(400).json({ error: "project, file, and lines required" });
+    return;
+  }
+
+  const projectId = `${req.keyId}:${project}`;
+
+  // Auto-create project
+  db.prepare(`
+    INSERT INTO projects (id, name, owner_key_id, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET updated_at = datetime('now')
+  `).run(projectId, project, req.keyId);
+
+  // Append to existing content (or create new)
+  const existing = db.prepare(
+    "SELECT content FROM project_data WHERE project_id = ? AND filename = ?"
+  ).get(projectId, file) as any;
+
+  const newContent = typeof lines === "string" ? lines : (lines as string[]).join("\n") + "\n";
+  const content = existing ? existing.content + newContent : newContent;
+  const bytes = Buffer.byteLength(content, "utf-8");
+
+  db.prepare(`
+    INSERT INTO project_data (project_id, filename, content, size_bytes, pushed_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(project_id, filename) DO UPDATE SET
+      content = excluded.content,
+      size_bytes = excluded.size_bytes,
+      pushed_at = datetime('now')
+  `).run(projectId, file, content, bytes);
+
+  res.json({ ok: true, file, bytes });
+});
+
+// ── POST /api/v1/push — Upload project data (full replace) ──
 
 router.post("/push", requireAuth, (req: AuthedRequest, res: Response) => {
   const { project, files, timestamp } = req.body;
