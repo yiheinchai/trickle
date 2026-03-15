@@ -14,7 +14,9 @@ Observability platform complete. 10 data types, 15 MCP tools, 15+ auto-patched d
 Pipeline: trickle run → monitor → heal → verify
 Features: dashboard, webhook alerts, watch mode, production sampling, distributed tracing
 
-Done: Updated ai-agent.md (15 MCP tools, auto-remediation loop), created observability-platform.md (Datadog replacement guide with comparison table), added Datadog section to README.
+Done: Updated docs (ai-agent.md, observability-platform.md, README). Fixed sqlite3 row_factory bug, PRAGMA false positives, query cap → 500.
+
+Validated on real 3-file API: 104 vars, 8 functions, 100+ queries, 8 alerts, 8 heal plans.
 
 Next: Cloud dashboard for team sharing, Go/Rust language support
 </focus point>
