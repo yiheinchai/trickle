@@ -141,6 +141,20 @@ trickle annotate src/utils.py    # injects types into source
 
 ---
 
+### JavaScript / TypeScript Developers
+
+> *"I want to see runtime values inline in my editor without console.log."*
+
+```bash
+trickle run node app.js          # captures all variable values + function types
+```
+
+Open the file in VSCode — inline type hints appear for every variable. Works with CJS, ESM, TypeScript (tsx/ts-node), and React/JSX.
+
+**[Full JavaScript Developer Guide →](usecases/javascript-developer.md)**
+
+---
+
 ### Frontend Developers
 
 > *"The backend team ships endpoints faster than they write docs. I'm guessing at response shapes."*
@@ -162,7 +176,7 @@ const users = await api.getApiUsers();
 
 Also generates: React Query hooks, SWR hooks, Axios clients, MSW mock handlers, JSON Schema.
 
-**[Full Frontend Developer Guide →](usecases/frontend-developer.md)**
+**[Full Frontend Developer Guide →](usecases/frontend-developer.md)** | **[React Guide →](usecases/react-developer.md)** | **[Next.js Guide →](usecases/nextjs-developer.md)** | **[React Native Guide →](usecases/react-native-developer.md)**
 
 ---
 
@@ -182,7 +196,7 @@ trickle flamegraph                # where is time being spent?
 
 Also generates types: `trickle codegen` (TypeScript), `trickle openapi` (OpenAPI spec), `trickle codegen --zod` (Zod schemas).
 
-**[Full Backend Developer Guide →](usecases/backend-api-developer.md)**
+**[Full Backend Developer Guide →](usecases/backend-api-developer.md)** | **[AWS Lambda Guide →](usecases/aws-lambda-developer.md)**
 
 ---
 
@@ -299,7 +313,7 @@ trickle monitor --webhook <url>     # Slack/Discord alerts
 
 Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB) and ORMs (Prisma, Sequelize, TypeORM, SQLAlchemy, Django ORM, Knex, Drizzle), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
 
-**[Full Observability Platform Guide →](usecases/observability-platform.md)**
+**[Full Observability Platform Guide →](usecases/observability-platform.md)** | **[SRE / Platform Engineer Guide →](usecases/sre-platform-engineer.md)**
 
 ---
 
