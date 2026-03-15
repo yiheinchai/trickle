@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Added HTTP fetch tracing with timing and status codes — `GET /api/users [200] 49.07ms`. Agents can now see API call latency and response shapes alongside function types. Full feature set: MCP server (6 tools), CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema, function timing, HTTP timing. Continue expanding TAM — consider new language support or deeper integrations.
+MCP server now has 7 tools including get_http_requests. HTTP fetch tracing captures status codes and timing. Full agent stack: MCP (7 tools), CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema (OpenAI/Anthropic/MCP), function + HTTP timing. Continue expanding TAM — consider new language support, database query tracing, or building more integrations.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
