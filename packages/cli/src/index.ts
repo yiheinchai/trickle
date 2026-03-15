@@ -613,6 +613,17 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle changelog
+program
+  .command("changelog")
+  .description("Auto-generate API changelog from type diffs between runs")
+  .option("--json", "Structured JSON output")
+  .option("--markdown", "Output as Markdown (for PR comments)")
+  .action(async (opts) => {
+    const { runChangelog } = await import("./commands/changelog");
+    runChangelog({ json: opts.json, markdown: opts.markdown });
+  });
+
 // trickle security
 program
   .command("security")
