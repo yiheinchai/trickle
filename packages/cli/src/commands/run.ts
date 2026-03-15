@@ -514,14 +514,43 @@ async function executeSingleRun(
 
   console.log(chalk.gray("  " + "─".repeat(50)));
 
-  // Next steps hint for first-time users
-  console.log("");
-  console.log(chalk.bold("  Next steps:"));
-  console.log(chalk.gray("    trickle summary        ") + "full analysis (errors, queries, root causes)");
-  console.log(chalk.gray("    trickle explain <file>  ") + "understand a file (functions, call graph, data flow)");
-  console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
-  console.log(chalk.gray("    trickle test            ") + "run tests with observability");
-  console.log("");
+  // Show condensed insights if data exists, otherwise show next steps
+  try {
+    const { generateRunSummary } = await import("./summary");
+    const s = generateRunSummary({ dir: localDir });
+    const hasIssues = s.rootCauses.length > 0 || s.alerts.length > 0 || s.errors.length > 0;
+    if (hasIssues) {
+      console.log("");
+      if (s.rootCauses.length > 0) {
+        console.log(chalk.bold("  Issues detected:"));
+        for (const rc of s.rootCauses.slice(0, 3)) {
+          const icon = rc.severity === 'critical' ? chalk.red('✗') : chalk.yellow('⚠');
+          console.log(`    ${icon} ${rc.description}`);
+        }
+      }
+      if (s.counts.queries > 0) {
+        console.log(chalk.gray(`  ${s.counts.queries} queries captured${s.queries.nPlusOnePatterns.length > 0 ? ` (${s.queries.nPlusOnePatterns.length} N+1 pattern${s.queries.nPlusOnePatterns.length > 1 ? 's' : ''})` : ''}`));
+      }
+      console.log("");
+      console.log(chalk.gray("  Dig deeper:"));
+      console.log(chalk.gray("    trickle summary        ") + "root causes + fix recommendations");
+      console.log(chalk.gray("    trickle explain <file>  ") + "functions, call graph, data flow");
+    } else {
+      console.log("");
+      console.log(chalk.green("  ✓ No issues detected"));
+      if (s.counts.queries > 0) console.log(chalk.gray(`  ${s.counts.queries} queries captured`));
+      console.log("");
+      console.log(chalk.gray("  Explore:"));
+      console.log(chalk.gray("    trickle summary        ") + "full overview");
+      console.log(chalk.gray("    trickle explain <file>  ") + "understand a file");
+      console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
+    }
+    console.log("");
+  } catch {
+    console.log("");
+    console.log(chalk.gray("  Run trickle summary for full analysis"));
+    console.log("");
+  }
 
   // Auto-push all data to cloud if configured
   await autoCloudPush();
