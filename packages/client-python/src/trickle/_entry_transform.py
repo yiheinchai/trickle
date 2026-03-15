@@ -100,6 +100,8 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
     from .type_inference import infer_type
 
     cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
+    sample_count: Dict[str, int] = {}  # cache_key -> count of samples taken
+    max_samples = 5  # Max samples per (file, line, var) to avoid loop spam
     vars_file: Optional[str] = None
 
     def _tv(value: Any, var_name: str, line_no: int) -> None:
@@ -113,8 +115,13 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
             type_node = infer_type(value, max_depth=3)
             type_hash = json.dumps(type_node, sort_keys=True)[:32]
 
-            # Value-aware dedup: re-send if value changed or 10s elapsed
+            # Per-line sample count limit: stop after N samples to avoid loop spam
             cache_key = f"{filepath}:{line_no}:{var_name}"
+            cnt = sample_count.get(cache_key, 0)
+            if cnt >= max_samples:
+                return
+
+            # Value-aware dedup: re-send if value changed or 10s elapsed
             t = type(value)
             if t in (int, float, bool, str) or value is None:
                 val_fp = str(value)[:60]
@@ -130,6 +137,7 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
                 if prev_fp == val_fp and (now - prev_ts) < 10.0:
                     return
             cache[cache_key] = (val_fp, now)
+            sample_count[cache_key] = cnt + 1
 
             # Build a small sample value for display
             sample = _sanitize(value, depth=2)
@@ -410,15 +418,21 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
 
     if trace_vars:
         lines.extend([
-            "# Variable tracer with tensor shape support and value-aware dedup",
+            "# Variable tracer with tensor shape support, value-aware dedup, and sample limiting",
             "_trickle_tv_cache = {}",
+            "_trickle_tv_count = {}",
             "_trickle_tv_file = None",
+            "_TRICKLE_MAX_SAMPLES = 5",
             "import time as _trickle_time",
             "def _trickle_tv(_val, _name, _line, _func=None):",
             "    global _trickle_tv_file",
             "    try:",
-            "        # Value-aware dedup: re-send if value changed or 10s elapsed",
+            "        # Per-line sample count limit: stop after N samples to avoid loop spam",
             f"        _ck = {filename!r} + ':' + str(_line) + ':' + _name",
+            "        _cnt = _trickle_tv_count.get(_ck, 0)",
+            "        if _cnt >= _TRICKLE_MAX_SAMPLES:",
+            "            return",
+            "        # Value-aware dedup: re-send if value changed or 10s elapsed",
             "        _t_type = type(_val)",
             "        if _t_type in (int, float, bool, str) or _val is None:",
             "            _vfp = str(_val)[:60]",
@@ -433,6 +447,7 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            if _pfp == _vfp and (_now - _pts) < 10.0:",
             "                return",
             "        _trickle_tv_cache[_ck] = (_vfp, _now)",
+            "        _trickle_tv_count[_ck] = _cnt + 1",
             "        if _trickle_tv_file is None:",
             "            _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')",
             "            _trickle_os.makedirs(_d, exist_ok=True)",

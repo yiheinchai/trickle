@@ -27,6 +27,8 @@ _installed = False
 _entry_file_setup_done = False  # tracks whether install() has run entry-file setup
 _assignment_map: Dict[str, Dict[int, List[str]]] = {}  # filename -> {line_no -> [var_names]}
 _cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
+_sample_count: Dict[str, int] = {}  # cache_key -> count of samples taken
+_MAX_SAMPLES = 5  # Max samples per (file, line, var) to avoid loop spam
 _vars_file: Optional[str] = None
 _entry_file: Optional[str] = None
 _old_trace: Any = None
@@ -459,8 +461,13 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
         type_node = _infer_type(value, max_depth=3)
         type_hash = json.dumps(type_node, sort_keys=True)[:32]
 
-        # Value-aware dedup: re-send if value changed or 10s elapsed (for training loops)
+        # Per-line sample count limit: stop after N samples to avoid loop spam
         cache_key = f"{file_path}:{line_no}:{var_name}"
+        cnt = _sample_count.get(cache_key, 0)
+        if cnt >= _MAX_SAMPLES:
+            return
+
+        # Value-aware dedup: re-send if value changed or 10s elapsed (for training loops)
         try:
             t = type(value)
             if t in (int, float, bool, str) or value is None:
@@ -479,6 +486,7 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
             if prev_fp == val_fp and (now - prev_ts) < 10.0:
                 return
         _cache[cache_key] = (val_fp, now)
+        _sample_count[cache_key] = cnt + 1
 
         # Debug: uncomment to trace dedup decisions
         # import sys as _dbg_sys

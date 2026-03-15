@@ -26,6 +26,9 @@ let debugMode = false;
 
 /** Cache: "file:line:varName" → { fingerprint, timestamp } for value-aware dedup */
 const varCache = new Map<string, { fp: string; ts: number }>();
+/** Per-line sample count to avoid loop variable spam */
+const sampleCount = new Map<string, number>();
+const MAX_SAMPLES_PER_LINE = 5;
 
 /** Batch buffer for writing — avoids one fs.appendFileSync per variable */
 let varBuffer: string[] = [];
@@ -92,8 +95,12 @@ export function traceVar(
     const dummyArgs: TypeNode = { kind: 'tuple', elements: [] };
     const typeHash = hashType(dummyArgs, type);
 
-    // Value-aware dedup: re-send if value changed or 10s elapsed
+    // Per-line sample count limit: stop after N samples to avoid loop spam
     const cacheKey = `${filePath}:${line}:${varName}`;
+    const cnt = sampleCount.get(cacheKey) || 0;
+    if (cnt >= MAX_SAMPLES_PER_LINE) return;
+
+    // Value-aware dedup: re-send if value changed or 10s elapsed
     const t = typeof value;
     const fp = (t === 'string' || t === 'number' || t === 'boolean' || value === null || value === undefined)
       ? String(value).substring(0, 60)
@@ -102,6 +109,7 @@ export function traceVar(
     const prev = varCache.get(cacheKey);
     if (prev && prev.fp === fp && (now - prev.ts) < 10000) return;
     varCache.set(cacheKey, { fp, ts: now });
+    sampleCount.set(cacheKey, cnt + 1);
 
     const sample = sanitizeVarSample(value);
 

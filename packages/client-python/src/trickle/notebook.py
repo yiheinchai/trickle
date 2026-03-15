@@ -34,6 +34,8 @@ from typing import Any, Dict, Optional, Set
 # ---------------------------------------------------------------------------
 
 _tv_cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
+_tv_sample_count: Dict[str, int] = {}  # per-line sample count
+_MAX_SAMPLES = 5
 _tv_file: Optional[str] = None
 _cell_counter: int = 0
 _notebook_path: Optional[str] = None
@@ -75,8 +77,12 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         type_node = infer_type(value, max_depth=3)
         type_hash = json.dumps(type_node, sort_keys=True)[:32]
 
-        # Value-aware dedup: re-send if value changed or 10s elapsed
+        # Per-line sample count limit and value-aware dedup
         cache_key = f"{cell_id}:{line_no}:{var_name}"
+        cnt = _tv_sample_count.get(cache_key, 0)
+        if cnt >= _MAX_SAMPLES:
+            return
+
         t = type(value)
         if t in (int, float, bool, str) or value is None:
             val_fp = str(value)[:60]
@@ -95,6 +101,7 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                 _try_scalar_agg(value, var_name, line_no, cell_id, func_name)
                 return
         _tv_cache[cache_key] = (val_fp, now)
+        _tv_sample_count[cache_key] = cnt + 1
 
         # Build sample
         sample: Any = None
@@ -568,6 +575,7 @@ def _clear_cell_data(cell_id: str) -> None:
         _prev_shapes = dict(_curr_shapes)
     _curr_shapes = {}
     _tv_cache.clear()
+    _tv_sample_count.clear()
 
 
 def _format_shape(shape_str: str, dtype_str: str) -> str:
@@ -709,6 +717,7 @@ def clear() -> None:
     """Clear the cached variable observations and the variables.jsonl file."""
     global _tv_cache, _tv_file, _prev_shapes, _curr_shapes
     _tv_cache.clear()
+    _tv_sample_count.clear()
     _prev_shapes.clear()
     _curr_shapes.clear()
     _scalar_agg.clear()

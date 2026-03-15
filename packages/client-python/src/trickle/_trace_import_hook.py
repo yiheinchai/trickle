@@ -159,13 +159,19 @@ def _trickle_wrap(__fn, __name):
     except Exception:
         return __fn
 _trickle_tv_cache = {{}}
+_trickle_tv_count = {{}}
 _trickle_tv_file = None
+_TRICKLE_MAX_SAMPLES = 5
 import time as _trickle_time
 def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
     try:
-        # Value-aware dedup: re-send if value changed or 10s elapsed
         _ck = {filename!r} + ':' + str(_line) + ':' + _name
+        # Per-line sample count limit: stop after N samples to avoid loop spam
+        _cnt = _trickle_tv_count.get(_ck, 0)
+        if _cnt >= _TRICKLE_MAX_SAMPLES:
+            return
+        # Value-aware dedup: re-send if value changed or 10s elapsed
         _t_type = type(_val)
         if _t_type in (int, float, bool, str) or _val is None:
             _vfp = str(_val)[:60]
@@ -180,6 +186,7 @@ def _trickle_tv(_val, _name, _line, _func=None):
             if _pfp == _vfp and (_now - _pts) < 10.0:
                 return
         _trickle_tv_cache[_ck] = (_vfp, _now)
+        _trickle_tv_count[_ck] = _cnt + 1
         if _trickle_tv_file is None:
             _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')
             _trickle_os.makedirs(_d, exist_ok=True)
