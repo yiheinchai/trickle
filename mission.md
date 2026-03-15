@@ -6,9 +6,12 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.143. Updated trickle init output to show modern commands (summary, explain, test,
-flamegraph, doctor) instead of outdated ones. Also fixed glob expansion in trickle test.
-26 MCP tools, all docs complete, all user-facing messages consistent.
+CLI 0.1.144. Tested on httpbin (real open-source Flask project, 56 pytest tests) — found and
+fixed spurious "unknown failure" shown when all tests pass. Also tested on Create React App
+(1 test pass), json-server (found glob bug), express-typescript-boilerplate (found suite
+failure bug). All bugs found by real-world testing are now fixed.
+
+26 MCP tools, all docs complete. Tested on 10+ real projects across JS/TS/Python.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
