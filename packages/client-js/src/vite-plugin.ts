@@ -462,6 +462,236 @@ function extractDestructuredNames(pattern: string): string[] {
 }
 
 /**
+ * Find for-loop variable declarations and return insertions for tracing.
+ * Handles:
+ *   for (const item of items) { ... }         → trace item
+ *   for (const [key, val] of entries) { ... }  → trace key, val
+ *   for (const { a, b } of items) { ... }      → trace a, b
+ *   for (const key in obj) { ... }             → trace key
+ *   for (let i = 0; i < n; i++) { ... }        → trace i
+ * Inserts trace calls at the start of the loop body.
+ */
+function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
+  const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
+
+  // Match: for (const/let/var ...
+  const forRegex = /\bfor\s*\(/g;
+  let match;
+
+  while ((match = forRegex.exec(source)) !== null) {
+    const afterParen = match.index + match[0].length;
+
+    // Skip whitespace
+    let pos = afterParen;
+    while (pos < source.length && /\s/.test(source[pos])) pos++;
+
+    // Expect const/let/var
+    const declMatch = source.slice(pos).match(/^(const|let|var)\s+/);
+    if (!declMatch) continue;
+    pos += declMatch[0].length;
+
+    // Now we have the variable pattern — could be identifier, {destructure}, or [destructure]
+    const varNames: string[] = [];
+    const patternStart = pos;
+
+    if (source[pos] === '{' || source[pos] === '[') {
+      // Destructured: find matching brace/bracket
+      const open = source[pos];
+      const close = open === '{' ? '}' : ']';
+      let depth = 1;
+      let end = pos + 1;
+      while (end < source.length && depth > 0) {
+        if (source[end] === open) depth++;
+        else if (source[end] === close) depth--;
+        end++;
+      }
+      const pattern = source.slice(pos, end);
+      const names = extractDestructuredNames(pattern);
+      varNames.push(...names);
+      pos = end;
+    } else {
+      // Simple identifier
+      const idMatch = source.slice(pos).match(/^([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+      if (!idMatch) continue;
+      varNames.push(idMatch[1]);
+      pos += idMatch[0].length;
+    }
+
+    if (varNames.length === 0) continue;
+
+    // Skip trickle internals
+    if (varNames.every(n => n.startsWith('__trickle') || n === '_a' || n === '_b' || n === '_c')) continue;
+
+    // Now find the opening `{` of the loop body
+    // Skip everything until the `)` that closes the for(...)
+    let parenDepth = 1; // We're inside the for(
+    while (pos < source.length && parenDepth > 0) {
+      const ch = source[pos];
+      if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      else if (ch === '"' || ch === "'" || ch === '`') {
+        const q = ch; pos++;
+        while (pos < source.length && source[pos] !== q) {
+          if (source[pos] === '\\') pos++;
+          pos++;
+        }
+      }
+      pos++;
+    }
+
+    // Now find the `{` after the closing `)`
+    while (pos < source.length && /\s/.test(source[pos])) pos++;
+    if (pos >= source.length || source[pos] !== '{') continue;
+
+    const bodyBrace = pos;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ bodyStart: bodyBrace + 1, varNames: varNames.filter(n => !n.startsWith('__trickle')), lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Find function parameter names and return insertions for tracing at the start
+ * of function bodies. Traces the runtime values of all parameters.
+ * Handles: function declarations, arrow functions, method definitions.
+ * Skips: React components (already tracked via __trickle_rc with props).
+ */
+function findFunctionParams(source: string, isReactFile: boolean): Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> {
+  const results: Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> = [];
+
+  // Match function declarations: function name(params) {
+  const funcDeclRegex = /\b(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/g;
+  let match;
+
+  while ((match = funcDeclRegex.exec(source)) !== null) {
+    const name = match[1];
+    if (name === 'require' || name === 'exports' || name === 'module') continue;
+    if (name.startsWith('__trickle')) continue;
+
+    // Skip React components (uppercase) in React files — already tracked
+    if (isReactFile && /^[A-Z]/.test(name)) continue;
+
+    const afterParen = match.index + match[0].length;
+    const bodyBrace = findFunctionBodyBrace(source, afterParen);
+    if (bodyBrace === -1) continue;
+
+    // Extract parameter names from between ( and )
+    const paramStr = source.slice(afterParen, bodyBrace);
+    const closeParen = paramStr.indexOf(')');
+    if (closeParen === -1) continue;
+    const rawParams = paramStr.slice(0, closeParen).trim();
+    const paramNames = extractParamNames(rawParams);
+    if (paramNames.length === 0) continue;
+
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ bodyStart: bodyBrace + 1, paramNames, lineNo });
+  }
+
+  // Match arrow functions: const name = (params) => {
+  const arrowFuncRegex = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:\s*[^=]+?)?\s*=\s*(?:async\s+)?\(([^)]*)\)\s*(?::\s*[^=]+?)?\s*=>\s*\{/g;
+
+  while ((match = arrowFuncRegex.exec(source)) !== null) {
+    const name = match[1];
+    if (name.startsWith('__trickle')) continue;
+    // Skip React components in React files
+    if (isReactFile && /^[A-Z]/.test(name)) continue;
+
+    const rawParams = match[2].trim();
+    const paramNames = extractParamNames(rawParams);
+    if (paramNames.length === 0) continue;
+
+    // Find the { position
+    const bracePos = match.index + match[0].length - 1;
+
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ bodyStart: bracePos + 1, paramNames, lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Extract parameter names from a function parameter string.
+ * Handles: simple names, destructured { a, b }, defaults (a = 1), rest (...args).
+ * Skips type annotations.
+ */
+function extractParamNames(rawParams: string): string[] {
+  if (!rawParams) return [];
+  const names: string[] = [];
+
+  // Split by commas at depth 0
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of rawParams) {
+    if (ch === '{' || ch === '[' || ch === '(' || ch === '<') depth++;
+    else if (ch === '}' || ch === ']' || ch === ')' || ch === '>') depth--;
+    else if (ch === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+
+    // Destructured params — extract individual names
+    if (trimmed.startsWith('{')) {
+      const closeBrace = trimmed.indexOf('}');
+      if (closeBrace !== -1) {
+        const destructNames = extractDestructuredNames(trimmed.slice(0, closeBrace + 1));
+        names.push(...destructNames);
+      }
+      continue;
+    }
+    if (trimmed.startsWith('[')) {
+      const closeBracket = trimmed.indexOf(']');
+      if (closeBracket !== -1) {
+        const destructNames = extractDestructuredNames(trimmed.slice(0, closeBracket + 1));
+        names.push(...destructNames);
+      }
+      continue;
+    }
+
+    // Rest parameter: ...args
+    if (trimmed.startsWith('...')) {
+      const restName = trimmed.slice(3).split(/[\s:=]/)[0].trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(restName)) {
+        names.push(restName);
+      }
+      continue;
+    }
+
+    // Simple param: name or name: Type or name = default
+    const paramName = trimmed.split(/[\s:=]/)[0].trim();
+    if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(paramName)) {
+      names.push(paramName);
+    }
+  }
+
+  return names;
+}
+
+/**
  * Transform ESM source code to wrap function declarations and trace variables.
  *
  * Prepends imports of the wrap/trace helpers, then inserts wrapper calls after
@@ -878,7 +1108,13 @@ export function transformEsmSource(
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
+  // Find for-loop variable declarations for tracing
+  const forLoopInsertions = traceVars ? findForLoopVars(source) : [];
+
+  // Find function parameter names for tracing
+  const funcParamInsertions = traceVars ? findFunctionParams(source, isReactFile) : [];
+
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && forLoopInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -897,10 +1133,51 @@ export function transformEsmSource(
         if (origLine !== -1) di.lineNo = origLine;
       }
     }
+    // Fix for-loop var line numbers
+    for (const fi of forLoopInsertions) {
+      if (fi.varNames.length > 0) {
+        // Search for 'for' keyword near the expected line
+        const pattern = /\bfor\s*\(/;
+        for (let delta = 0; delta <= 80; delta++) {
+          const fwd = fi.lineNo - 1 + delta;
+          if (fwd >= 0 && fwd < origLines.length && pattern.test(origLines[fwd])) {
+            fi.lineNo = fwd + 1;
+            break;
+          }
+          if (delta > 0 && delta <= 10) {
+            const bwd = fi.lineNo - 1 - delta;
+            if (bwd >= 0 && bwd < origLines.length && pattern.test(origLines[bwd])) {
+              fi.lineNo = bwd + 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+    // Fix function param line numbers
+    for (const fp of funcParamInsertions) {
+      if (fp.paramNames.length > 0) {
+        const pattern = /\bfunction\s+\w+\s*\(|=>\s*\{/;
+        for (let delta = 0; delta <= 80; delta++) {
+          const fwd = fp.lineNo - 1 + delta;
+          if (fwd >= 0 && fwd < origLines.length && pattern.test(origLines[fwd])) {
+            fp.lineNo = fwd + 1;
+            break;
+          }
+          if (delta > 0 && delta <= 10) {
+            const bwd = fp.lineNo - 1 - delta;
+            if (bwd >= 0 && bwd < origLines.length && pattern.test(origLines[bwd])) {
+              fp.lineNo = bwd + 1;
+              break;
+            }
+          }
+        }
+      }
+    }
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
-  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
+  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
@@ -970,7 +1247,7 @@ export function transformEsmSource(
   }
 
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  if (varInsertions.length > 0 || destructInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Set();`,
@@ -1138,6 +1415,24 @@ export function transformEsmSource(
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // For-loop variable insertions: insert trace at start of loop body
+  for (const { bodyStart, varNames, lineNo } of forLoopInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // Function parameter insertions: insert trace at start of function body
+  for (const { bodyStart, paramNames, lineNo } of funcParamInsertions) {
+    const calls = paramNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e){}\n`,
     });
   }
 
