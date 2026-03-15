@@ -161,17 +161,68 @@ Trickle automatically injects `X-Trickle-Trace-Id` headers into outgoing HTTP re
 
 15 tools available — agents can query any aspect of your application's runtime behavior without adding console.log or re-running code.
 
+## Use Case 8: Cloud Dashboard & Team Sharing
+
+```bash
+# One-time setup: authenticate with the cloud
+trickle cloud login --url https://cloud.trickle.dev
+
+# After that, every trickle run auto-pushes to cloud
+trickle run python app.py
+# → all data (variables, calltrace, queries, errors, alerts)
+#   automatically uploaded after run completes
+```
+
+View your project:
+```bash
+trickle cloud projects
+#   my-api — 10 files, 45KB, updated today
+
+trickle cloud share
+#   ✓ Share link created
+#   URL: https://cloud.trickle.dev/api/v1/shared/abc123
+#   Expires: 7 days
+```
+
+Share the URL with your team — anyone can view the dashboard without authentication. The hosted dashboard shows:
+- Alert summary (critical/warning/ok)
+- Runtime errors with stack traces
+- Performance hotspots with bar charts
+- Database queries sorted by duration
+- Observed functions with types
+
+Pull data to another machine:
+```bash
+# On any machine with the same project name
+trickle cloud pull
+# → downloads all data to .trickle/
+trickle status
+# → shows the full picture
+```
+
+Self-host the cloud backend:
+```bash
+# Docker
+docker run -p 4888:4888 -v trickle-data:/data trickle-backend
+
+# Or fly.io
+cd packages/backend && fly deploy
+```
+
 ## Comparison with Datadog
 
 | Feature | Datadog | trickle |
 |---------|---------|---------|
 | Setup | Dashboard config, agent install, API keys | `trickle run app.py` |
-| Pricing | $23/host/month | Free (open source) |
+| Pricing | $23/host/month | Free (open source) + self-hostable |
 | Variable values | No | Yes — every assignment |
 | Function signatures | No | Yes — with param types |
 | N+1 detection | Manual query analysis | Automatic |
 | Auto-fix | No | Yes — `trickle heal` |
-| AI agent access | Limited API | 15 MCP tools |
+| AI agent access | Limited API | 18 MCP tools |
 | Code changes | SDK instrumentation | Zero |
+| Cloud dashboard | Hosted SaaS | Self-hosted or cloud.trickle.dev |
+| Team sharing | Paid feature | Free — shareable links |
 | Local dashboard | No | `trickle dashboard-local` |
 | Production mode | Always on | Configurable sampling |
+| Data ownership | Datadog's servers | Your infrastructure |
