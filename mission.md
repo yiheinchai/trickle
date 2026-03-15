@@ -9,48 +9,12 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Added `trickle monitor` — anomaly detection with actionable alerts. Detects slow queries, N+1 patterns, errors, memory issues, slow functions, deep call stacks. Each alert has severity + fix suggestion. New MCP tool: get_alerts (13 tools total).
+Observability platform complete. 10 data types, 15 MCP tools, 15+ auto-patched drivers across JS + Python. Updated README with full feature matrix.
 
-Added memory profiling (profile.jsonl) — RSS + heap snapshots. Published Python 0.2.3, CLI 0.1.94.
+Pipeline: trickle run → monitor → heal → verify
+Features: dashboard, webhook alerts, watch mode, production sampling, distributed tracing
 
-Building toward replacing Datadog:
-- Data collection: 9 data types (variables, functions, call trace, DB queries, HTTP, WebSocket, console, errors, memory)
-- Anomaly detection: `trickle monitor` with N+1, slow query, error, memory alerts
-- Agent access: 13 MCP tools with `get_alerts` as entry point
-- Dashboard: `trickle dashboard-local` — self-contained HTML dashboard with dark theme, no backend needed
-
-Done: Webhook alerts, watch mode, production deployment mode (TRICKLE_PRODUCTION=1, TRICKLE_SAMPLE_RATE).
-
-Datadog replacement stack complete:
-- Data collection (9 types, 15+ drivers)
-- Anomaly detection (trickle monitor)
-- Alerting (webhook/Slack, watch mode)
-- Dashboard (trickle dashboard-local)
-- Production mode (sampling, no var tracing)
-- Agent access (13 MCP tools)
-
-Done: `trickle heal` — agent auto-remediation with contextual fix plans. 14 MCP tools (get_heal_plans). CLI 0.1.97.
-
-Datadog replacement is now feature-complete:
-- Data collection → Anomaly detection → Alerting → Dashboard → Heal plans → Agent access
-- 14 MCP tools, 9 data types, 15+ auto-patched drivers, production mode
-
-Done: `trickle verify` — before/after metric comparison for fix verification. CLI 0.1.98.
-
-Complete auto-remediation loop:
-  trickle run → trickle verify --baseline → trickle heal → agent fixes → trickle run → trickle verify ✓
-
-Done: Distributed tracing with trace ID propagation (X-Trickle-Trace-Id headers). 15 MCP tools. Python 0.2.5, CLI 0.1.99.
-
-Complete observability platform:
-- 10 data types (+ traces.jsonl for distributed spans)
-- 15 MCP tools for agent access
-- 15+ auto-patched drivers (JS + Python)
-- Full remediation loop: run → monitor → heal → verify
-- Production mode with sampling
-- Dashboard, webhook alerts, watch mode
-
-Next: Cloud dashboard for team sharing
+Next: Cloud dashboard for team sharing, test on real production workloads
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
