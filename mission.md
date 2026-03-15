@@ -3,16 +3,19 @@ Think of 1 item to work to improve the developer experience with trickle.
 For now, i want you to specifically focus on:
 <higher directive>
 Create the best documentations to ever exist. Currently documentation is very outdated, and old. Each usecase needs to be updated. Build the documentation for both humans and for AI agents.
+
+document is atrocious. i had a backend nodejs developer (aws lambdas) trying to run a vitest. no idea what to do. documentation is no good enough if real users don't even know what to do and how to use trickle
+
+this is just an example, you need to follow through and empathise with the user in the customer journey and think about each piece of information they need
 </higher directive>
 
 <focus point>
-Shipped: Complete rewrite of AI agent usecase doc (8 use cases, 26 MCP tools, on-call loop
-workflow, real output examples). Updated tool counts across all docs. Enhanced trickle doctor
-with root causes and recommended actions.
+Shipped: Rewrote AI agent usecase (complete), javascript-developer testing section (3 options:
+trickle test, vitest plugin, trickle run), backend-api-developer (added debugging, testing,
+verification use cases). Enhanced trickle doctor with root causes + recommended actions.
 
-Next: Continue updating remaining usecase docs (backend-api, python-developer, fullstack,
-frontend, devops-ci, qa-engineer) to reference modern features (flamegraph, explain, test,
-summary, root causes).
+Still need to update: python-developer.md, fullstack-developer.md, README.md backend section.
+The README "Backend / API Developers" section still only mentions codegen — needs debugging/testing.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
