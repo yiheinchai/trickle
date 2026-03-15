@@ -116,7 +116,7 @@ function writeErrorToFile(error: unknown, input: Record<string, unknown>, routeN
     let errorLine: number | undefined;
     for (const sl of stackLines.slice(1)) {
       const m = sl.match(/\((.+):(\d+):\d+\)/) || sl.match(/at (.+):(\d+):\d+/);
-      if (m && !m[1].includes('node_modules') && !m[1].includes('node:') && !m[1].includes('trickle')) {
+      if (m && !m[1].includes('node_modules') && !m[1].includes('node:') && !m[1].includes('trickle-observe')) {
         errorFile = m[1];
         errorLine = parseInt(m[2]);
         break;
