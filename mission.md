@@ -8,12 +8,11 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-Browser-side React variable tracing now works via WebSocket bridge (Vite HMR). Next areas:
-- Test on large real-world React + Vite codebases (e.g. Excalidraw, cal.com) to find edge cases in the transform
-- Add for-loop variable tracing (for...of, for...in) — Python traces these but JS doesn't yet
-- Add function parameter tracing — Python captures function args, JS only captures declarations
+Browser-side React variable tracing works via WebSocket bridge. For-loop vars and function params now traced. Next areas:
 - Handle reassignments (x = newValue) not just declarations — important for seeing data flow through mutations
 - Consider adding a Next.js client-side transport (webpack HMR or fetch-based) so client components also capture data in the browser
+- Improve VSCode extension display for React-specific data (render counts, state updates, hook invocations) — ensure hints are positioned correctly for JSX
+- Test end-to-end with a real browser session on a complex React app and verify all hints display correctly in VSCode
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
