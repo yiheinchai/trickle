@@ -563,7 +563,41 @@ async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
     return;
   }
 
-  // Generic webhook (works with Discord, PagerDuty, custom endpoints)
+  // PagerDuty Events API v2
+  if (url.includes('pagerduty.com') || url.includes('events.pagerduty')) {
+    const routingKey = process.env.PAGERDUTY_ROUTING_KEY || url.split('/').pop() || '';
+    const severity = critical.length > 0 ? 'critical' : 'warning';
+    const summary = `trickle: ${critical.length} critical, ${warnings.length} warnings — ${alerts.slice(0, 3).map(a => a.message).join('; ').substring(0, 200)}`;
+
+    try {
+      const res = await fetch('https://events.pagerduty.com/v2/enqueue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          routing_key: routingKey,
+          event_action: 'trigger',
+          payload: {
+            summary,
+            severity,
+            source: 'trickle',
+            component: process.cwd().split('/').pop() || 'app',
+            custom_details: {
+              alerts: alerts.map(a => ({ severity: a.severity, category: a.category, message: a.message })),
+              critical_count: critical.length,
+              warning_count: warnings.length,
+            },
+          },
+        }),
+      });
+      if (res.ok) console.log(chalk.green(`  ✓ Incident sent to PagerDuty`));
+      else console.log(chalk.yellow(`  ⚠ PagerDuty responded with ${res.status}`));
+    } catch (err: any) {
+      console.log(chalk.yellow(`  ⚠ Failed to send to PagerDuty: ${err.message}`));
+    }
+    return;
+  }
+
+  // Generic webhook (works with Discord, custom endpoints)
   const text = [
     `trickle monitor: ${critical.length} critical, ${warnings.length} warnings`,
     ...alerts.slice(0, 10).map(a => {
