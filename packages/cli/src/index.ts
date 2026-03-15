@@ -502,6 +502,16 @@ program
     });
   });
 
+// trickle agent
+program
+  .command("agent [command...]")
+  .description("Autonomous debugging agent — runs app, detects issues, generates analysis report with fix recommendations")
+  .option("--fix", "Include fix recommendations in the report")
+  .action(async (command: string[], opts) => {
+    const { runAgent } = await import("./commands/agent");
+    await runAgent({ command: command.length > 0 ? command.join(' ') : undefined, fix: opts.fix });
+  });
+
 // trickle ci
 program
   .command("ci [command...]")
