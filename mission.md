@@ -6,18 +6,17 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.167. 31 MCP tools. Shipped PagerDuty Events API v2 integration — auto-detected
-from webhook URL, sends incidents with severity, component, and alert details.
+CLI 0.1.168. 31 MCP tools. Shipped Microsoft Teams webhook (MessageCard format).
 
-Complete integration ecosystem:
+Complete integration ecosystem (15 platforms):
 - CI/CD: GitHub Actions, GitLab CI
-- Chat: Slack (Block Kit), Discord
+- Chat: Slack (Block Kit), Discord, Microsoft Teams (MessageCard)
 - Tickets: Jira, Linear, GitHub Issues
-- Alerting: PagerDuty, webhooks
+- Alerting: PagerDuty, generic webhooks
 - Observability: Grafana (OTLP), Prometheus, SigNoz, Jaeger
 - MCP: 31 tools for AI agents
 
-Next: Bitbucket Pipelines, OpsGenie, Teams webhook, multi-service dependency map.
+All webhook types auto-detected from URL. Next: OpsGenie, Bitbucket Pipelines, Datadog export.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
