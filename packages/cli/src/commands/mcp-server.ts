@@ -319,6 +319,24 @@ function getAlerts(): unknown {
   return { alerts };
 }
 
+function getDistributedTraces(): unknown {
+  const file = path.join(findTrickleDir(), "traces.jsonl");
+  if (!fs.existsSync(file)) return { traces: "No distributed traces captured. The app may not make cross-service HTTP calls." };
+  const spans: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { spans.push(JSON.parse(line)); } catch {}
+  }
+  if (spans.length === 0) return { traces: "No trace spans recorded." };
+  // Group by traceId
+  const byTrace = new Map<string, unknown[]>();
+  for (const span of spans as any[]) {
+    const tid = span.traceId || 'unknown';
+    if (!byTrace.has(tid)) byTrace.set(tid, []);
+    byTrace.get(tid)!.push(span);
+  }
+  return { traces: Object.fromEntries(byTrace), spanCount: spans.length, traceCount: byTrace.size };
+}
+
 function getPerformanceProfile(): unknown {
   const file = path.join(findTrickleDir(), "profile.jsonl");
   if (!fs.existsSync(file)) return { profile: "No performance profile captured. Run the app with trickle first." };
@@ -489,6 +507,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_distributed_traces",
+    description: "Get distributed traces showing request flow across microservices. Each trace has spans with service name, operation, timing, and parent-child relationships via trace IDs.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_performance_profile",
     description: "Get memory usage profile — RSS and heap snapshots at start/end of execution. Use to identify memory leaks or high memory usage.",
     inputSchema: { type: "object", properties: {} },
@@ -564,6 +587,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
             break;
           }
           case "get_websocket_events": result = getWebSocketEvents(); break;
+          case "get_distributed_traces": result = getDistributedTraces(); break;
           case "get_performance_profile": result = getPerformanceProfile(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;

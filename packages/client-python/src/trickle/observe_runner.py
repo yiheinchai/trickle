@@ -96,6 +96,14 @@ def main() -> None:
     except Exception:
         pass
 
+    # Initialize distributed trace context
+    try:
+        from trickle.trace_context import init_trace_context, patch_requests_propagation
+        init_trace_context()
+        patch_requests_propagation()
+    except Exception:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _production = _os2.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")
