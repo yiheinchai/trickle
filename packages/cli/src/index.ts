@@ -548,6 +548,12 @@ program
 
 // trickle cloud
 const cloudCmd = program.command("cloud").description("Cloud sync — share observability data with your team");
+cloudCmd.command("login").description("Authenticate with a trickle cloud server")
+  .option("--url <url>", "Cloud server URL")
+  .action(async (opts) => {
+    const { cloudLogin } = await import("./commands/cloud");
+    await cloudLogin(opts);
+  });
 cloudCmd.command("push").description("Upload .trickle/ data to the cloud").action(async () => {
   const { cloudPush } = await import("./commands/cloud");
   await cloudPush();
@@ -556,9 +562,13 @@ cloudCmd.command("pull").description("Download latest data from the cloud").acti
   const { cloudPull } = await import("./commands/cloud");
   await cloudPull();
 });
-cloudCmd.command("share").description("Generate a shareable bundle of observability data").action(async () => {
+cloudCmd.command("share").description("Create a shareable dashboard link").action(async () => {
   const { cloudShare } = await import("./commands/cloud");
   await cloudShare();
+});
+cloudCmd.command("projects").description("List all cloud projects").action(async () => {
+  const { cloudProjects } = await import("./commands/cloud");
+  await cloudProjects();
 });
 cloudCmd.command("status").description("Check cloud sync status").action(async () => {
   const { cloudStatus } = await import("./commands/cloud");

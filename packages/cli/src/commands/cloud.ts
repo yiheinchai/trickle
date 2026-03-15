@@ -2,20 +2,61 @@
  * trickle cloud — upload/download observability data to a shared cloud endpoint.
  *
  * Commands:
- *   trickle cloud push              Upload .trickle/ data to the cloud
- *   trickle cloud pull              Download latest data from the cloud
- *   trickle cloud share             Generate a shareable link to the dashboard
- *   trickle cloud status            Check cloud sync status
- *
- * Requires TRICKLE_CLOUD_URL and TRICKLE_CLOUD_TOKEN env vars.
+ *   trickle cloud login              Generate API key and save config
+ *   trickle cloud push               Upload .trickle/ data to the cloud
+ *   trickle cloud pull               Download latest data from the cloud
+ *   trickle cloud share              Create a shareable dashboard link
+ *   trickle cloud status             Check cloud sync status
+ *   trickle cloud projects           List all projects
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 
-const CLOUD_URL = process.env.TRICKLE_CLOUD_URL || 'https://cloud.trickle.dev';
-const CLOUD_TOKEN = process.env.TRICKLE_CLOUD_TOKEN || '';
+// ── Config ──
+
+interface CloudConfig {
+  url: string;
+  token: string;
+}
+
+function getConfigPath(): string {
+  return path.join(process.env.HOME || '~', '.trickle', 'cloud.json');
+}
+
+function loadConfig(): CloudConfig {
+  const configPath = getConfigPath();
+  const envUrl = process.env.TRICKLE_CLOUD_URL;
+  const envToken = process.env.TRICKLE_CLOUD_TOKEN;
+
+  let fileConfig: Partial<CloudConfig> = {};
+  try {
+    if (fs.existsSync(configPath)) {
+      fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch {}
+
+  return {
+    url: envUrl || fileConfig.url || 'https://cloud.trickle.dev',
+    token: envToken || fileConfig.token || '',
+  };
+}
+
+function saveConfig(config: Partial<CloudConfig>): void {
+  const configPath = getConfigPath();
+  const dir = path.dirname(configPath);
+  fs.mkdirSync(dir, { recursive: true });
+
+  let existing: any = {};
+  try {
+    if (fs.existsSync(configPath)) {
+      existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch {}
+
+  fs.writeFileSync(configPath, JSON.stringify({ ...existing, ...config }, null, 2), 'utf-8');
+}
 
 function findTrickleDir(): string {
   return process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
@@ -38,6 +79,69 @@ function readDataFiles(trickleDir: string): Record<string, string> {
   return files;
 }
 
+async function cloudFetch(urlPath: string, config: CloudConfig, options: RequestInit = {}): Promise<Response> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+  if (config.token) {
+    headers['Authorization'] = `Bearer ${config.token}`;
+  }
+  return fetch(`${config.url}${urlPath}`, { ...options, headers });
+}
+
+// ── Commands ──
+
+export async function cloudLogin(opts: { url?: string }): Promise<void> {
+  const config = loadConfig();
+  const url = opts.url || config.url;
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud login'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  // Generate a new API key
+  console.log(`  Server: ${chalk.cyan(url)}`);
+  console.log(`  Generating API key...`);
+
+  try {
+    const res = await fetch(`${url}/api/v1/keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: `cli-${Date.now()}` }),
+    });
+
+    if (!res.ok) {
+      console.log(chalk.red(`  Failed: ${res.status} ${res.statusText}`));
+      return;
+    }
+
+    const data = await res.json() as any;
+    saveConfig({ url, token: data.key });
+
+    console.log(chalk.green(`  ✓ Logged in successfully`));
+    console.log(`  Key: ${chalk.bold(data.prefix + '...')} (saved to ${chalk.gray(getConfigPath())})`);
+    console.log('');
+    console.log(chalk.gray('  You can now use:'));
+    console.log(chalk.gray('    trickle cloud push    — upload observability data'));
+    console.log(chalk.gray('    trickle cloud pull    — download project data'));
+    console.log(chalk.gray('    trickle cloud share   — create shareable dashboard'));
+  } catch (err: any) {
+    if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
+      console.log(chalk.yellow(`  Cannot reach ${url}`));
+      console.log(chalk.gray('  Make sure the trickle backend is running:'));
+      console.log(chalk.gray(`    TRICKLE_CLOUD=1 npx trickle-backend`));
+      console.log(chalk.gray('  Or set a custom URL:'));
+      console.log(chalk.gray(`    trickle cloud login --url http://your-server:4888`));
+    } else {
+      console.log(chalk.red(`  Error: ${err.message}`));
+    }
+  }
+
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
 export async function cloudPush(): Promise<void> {
   const trickleDir = findTrickleDir();
   if (!fs.existsSync(trickleDir)) {
@@ -45,9 +149,9 @@ export async function cloudPush(): Promise<void> {
     return;
   }
 
-  if (!CLOUD_TOKEN) {
-    console.log(chalk.yellow('  Set TRICKLE_CLOUD_TOKEN to authenticate with the cloud.'));
-    console.log(chalk.gray('  Get a token at https://cloud.trickle.dev/settings'));
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
     return;
   }
 
@@ -60,12 +164,8 @@ export async function cloudPush(): Promise<void> {
   console.log(`  Uploading ${fileCount} data files...`);
 
   try {
-    const res = await fetch(`${CLOUD_URL}/api/v1/push`, {
+    const res = await cloudFetch('/api/v1/push', config, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${CLOUD_TOKEN}`,
-      },
       body: JSON.stringify({
         project: path.basename(process.cwd()),
         files,
@@ -75,16 +175,16 @@ export async function cloudPush(): Promise<void> {
 
     if (res.ok) {
       const data = await res.json() as any;
-      console.log(chalk.green(`  ✓ Uploaded ${fileCount} files`));
+      console.log(chalk.green(`  ✓ Uploaded ${data.files} files (${formatBytes(data.bytes)})`));
       if (data.url) console.log(`  Dashboard: ${chalk.cyan(data.url)}`);
-      if (data.shareId) console.log(`  Share ID: ${chalk.bold(data.shareId)}`);
     } else {
-      console.log(chalk.red(`  ✗ Upload failed: ${res.status} ${res.statusText}`));
+      const err = await res.json().catch(() => ({})) as any;
+      console.log(chalk.red(`  ✗ Upload failed: ${res.status} — ${err.error || res.statusText}`));
     }
   } catch (err: any) {
     if (err.cause?.code === 'ECONNREFUSED' || err.message?.includes('fetch failed')) {
-      console.log(chalk.yellow(`  Cloud service not available at ${CLOUD_URL}`));
-      console.log(chalk.gray('  The cloud dashboard is coming soon. For now, use trickle dashboard-local.'));
+      console.log(chalk.yellow(`  Cloud service not available at ${config.url}`));
+      console.log(chalk.gray('  For local dashboards, use: trickle dashboard-local'));
     } else {
       console.log(chalk.red(`  ✗ Error: ${err.message}`));
     }
@@ -95,19 +195,20 @@ export async function cloudPush(): Promise<void> {
 }
 
 export async function cloudPull(): Promise<void> {
-  if (!CLOUD_TOKEN) {
-    console.log(chalk.yellow('  Set TRICKLE_CLOUD_TOKEN to authenticate.'));
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
     return;
   }
+
+  const project = path.basename(process.cwd());
 
   console.log('');
   console.log(chalk.bold('  trickle cloud pull'));
   console.log(chalk.gray('  ' + '─'.repeat(50)));
 
   try {
-    const res = await fetch(`${CLOUD_URL}/api/v1/pull?project=${encodeURIComponent(path.basename(process.cwd()))}`, {
-      headers: { 'Authorization': `Bearer ${CLOUD_TOKEN}` },
-    });
+    const res = await cloudFetch(`/api/v1/pull?project=${encodeURIComponent(project)}`, config);
 
     if (res.ok) {
       const data = await res.json() as any;
@@ -119,6 +220,10 @@ export async function cloudPull(): Promise<void> {
         count++;
       }
       console.log(chalk.green(`  ✓ Downloaded ${count} files`));
+      console.log(chalk.gray('  Run trickle status to see what was pulled.'));
+    } else if (res.status === 404) {
+      console.log(chalk.yellow(`  No data found for project "${project}"`));
+      console.log(chalk.gray('  Push data first: trickle cloud push'));
     } else {
       console.log(chalk.red(`  ✗ Download failed: ${res.status}`));
     }
@@ -131,43 +236,89 @@ export async function cloudPull(): Promise<void> {
 }
 
 export async function cloudShare(): Promise<void> {
-  const trickleDir = findTrickleDir();
-  if (!fs.existsSync(trickleDir)) {
-    console.log(chalk.yellow('  No .trickle/ directory found.'));
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
     return;
   }
+
+  const project = path.basename(process.cwd());
 
   console.log('');
   console.log(chalk.bold('  trickle cloud share'));
   console.log(chalk.gray('  ' + '─'.repeat(50)));
 
-  // Generate a local share: pack all data into a single JSON file
-  const files = readDataFiles(trickleDir);
-  const bundle = {
-    version: 1,
-    project: path.basename(process.cwd()),
-    timestamp: Date.now(),
-    files,
-  };
+  try {
+    const res = await cloudFetch('/api/v1/share', config, {
+      method: 'POST',
+      body: JSON.stringify({ project, expiresInHours: 168 }), // 7 days
+    });
 
-  const sharePath = path.join(trickleDir, 'share-bundle.json');
-  fs.writeFileSync(sharePath, JSON.stringify(bundle), 'utf-8');
-  const sizeMb = (fs.statSync(sharePath).size / 1024 / 1024).toFixed(1);
+    if (res.ok) {
+      const data = await res.json() as any;
+      console.log(chalk.green(`  ✓ Share link created`));
+      console.log(`  URL: ${chalk.cyan(data.url)}`);
+      if (data.expiresAt) {
+        console.log(chalk.gray(`  Expires: ${new Date(data.expiresAt).toLocaleDateString()}`));
+      }
+    } else if (res.status === 404) {
+      console.log(chalk.yellow(`  Project "${project}" not found. Push data first: trickle cloud push`));
+    } else {
+      console.log(chalk.red(`  ✗ Failed: ${res.status}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
 
-  console.log(`  Bundle: ${chalk.bold(path.relative(process.cwd(), sharePath))} (${sizeMb}MB)`);
-  console.log(chalk.gray('  Share this file with your team, or upload to cloud:'));
-  console.log(chalk.gray('    trickle cloud push'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
+export async function cloudProjects(): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud projects'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  try {
+    const res = await cloudFetch('/api/v1/projects', config);
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      if (data.projects.length === 0) {
+        console.log(chalk.gray('  No projects yet. Run trickle cloud push to create one.'));
+      } else {
+        for (const p of data.projects) {
+          const size = formatBytes(p.size);
+          const updated = new Date(p.updatedAt).toLocaleDateString();
+          console.log(`  ${chalk.bold(p.name)} — ${p.files} files, ${size}, updated ${updated}`);
+        }
+      }
+    } else {
+      console.log(chalk.red(`  ✗ Failed: ${res.status}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+
   console.log(chalk.gray('  ' + '─'.repeat(50)));
   console.log('');
 }
 
 export async function cloudStatus(): Promise<void> {
+  const config = loadConfig();
   const trickleDir = findTrickleDir();
+
   console.log('');
   console.log(chalk.bold('  trickle cloud status'));
   console.log(chalk.gray('  ' + '─'.repeat(50)));
-  console.log(`  Cloud URL: ${chalk.gray(CLOUD_URL)}`);
-  console.log(`  Token: ${CLOUD_TOKEN ? chalk.green('configured') : chalk.yellow('not set')}`);
+  console.log(`  Cloud URL: ${chalk.gray(config.url)}`);
+  console.log(`  Auth: ${config.token ? chalk.green('configured') : chalk.yellow('not set — run trickle cloud login')}`);
   console.log(`  Local data: ${fs.existsSync(trickleDir) ? chalk.green('available') : chalk.yellow('none')}`);
 
   if (fs.existsSync(trickleDir)) {
@@ -175,6 +326,26 @@ export async function cloudStatus(): Promise<void> {
     console.log(`  Files: ${Object.keys(files).length}`);
   }
 
+  // Check connectivity
+  if (config.token) {
+    try {
+      const res = await fetch(`${config.url}/api/health`, { signal: AbortSignal.timeout(3000) });
+      if (res.ok) {
+        console.log(`  Server: ${chalk.green('connected')}`);
+      } else {
+        console.log(`  Server: ${chalk.red('error ' + res.status)}`);
+      }
+    } catch {
+      console.log(`  Server: ${chalk.yellow('unreachable')}`);
+    }
+  }
+
   console.log(chalk.gray('  ' + '─'.repeat(50)));
   console.log('');
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 1024) return `${bytes || 0}B`;
+  if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`;
+  return `${(bytes / 1048576).toFixed(1)}MB`;
 }
