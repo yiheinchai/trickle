@@ -18,12 +18,12 @@ Full agent observability stack now covers both JS and Python:
 - Error context with nearby variables
 - Database queries (JS: pg, mysql2, better-sqlite3 | Python: sqlite3, psycopg2, pymysql)
 
-Added: Function execution timing (durationMs) in Python observations — agents can identify perf bottlenecks.
+Added: Function execution timing (durationMs) in Python observations. Improved CLAUDE.md template with step-by-step debugging workflow, all 9 MCP tools, data table.
 
 Next for agent TAM:
-1. Redis/MongoDB tracing
-2. Agent-optimized CLAUDE.md templates
-3. Call graph visualization from observation data
+1. Redis/MongoDB tracing for broader database coverage
+2. Call graph visualization from observation data
+3. Python HTTP request tracing (requests/httpx library patching)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
