@@ -6,7 +6,7 @@ Improving the developer experience in real codebases, test diverse codebases fro
 </general directive>
 
 <focus point>
-Fixed numpy scalar display and TypeScript compiler helper noise filtering. Tested on sklearn ML pipeline (Python) and compiled TypeScript Express API (Node.js). Continue testing on diverse codebases to find more pain points — particularly around TypeScript source map support for line number accuracy.
+Added source map support for compiled TypeScript — when running `trickle run node dist/app.js`, line numbers now correctly reference the original .ts source file instead of compiled .js output. Tested with tsc and esbuild outputs on multi-file TS projects. Also added esbuild helper filtering. Continue testing on diverse codebases — next areas to explore: class field declarations (esbuild modern target), bundled multi-file outputs, and React Native Metro transformer source maps.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
