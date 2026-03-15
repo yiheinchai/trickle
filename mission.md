@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-React inline hints feature is comprehensive: declarations, destructuring, for-loops, params, reassignments, catch clauses, JSX expression values, React renders/hooks/state — all with live-updating values, working for Vite (HMR WebSocket) and Next.js (fetch transport + auto ingest server). JSX expressions traced via comma operator ({user.name}, {count}, ternaries). Tested on 2700+ files. Next areas:
-- Improve onboarding DX — consider auto-detecting Vite/Next.js and suggesting setup
+React inline hints feature is comprehensive with JSX expression tracing, live-updating values, Vite HMR + Next.js fetch transport. trickle init now auto-detects Vite/Next.js and configures projects automatically. Tested on 2700+ files. Next areas:
 - Consider adding React DevTools-style component tree visualization using the captured render data
 - Explore tracing custom hook return values with richer type info
+- Add support for Remix and other React meta-frameworks
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
