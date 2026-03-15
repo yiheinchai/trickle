@@ -266,7 +266,64 @@ function getFunctionSignatures(): unknown {
 
 function getErrors(): unknown {
   const errors = loadErrors();
-  return { errors: errors.length > 0 ? errors : "No errors recorded." };
+  if (errors.length === 0) return { errors: "No errors recorded." };
+
+  // Enrich errors with nearby variable values for debugging context
+  const vars = loadVars();
+
+  // Group variables by module for function-based matching
+  const varsByModule = new Map<string, typeof vars>();
+  for (const v of vars) {
+    const mod = v.module || '';
+    if (!varsByModule.has(mod)) varsByModule.set(mod, []);
+    varsByModule.get(mod)!.push(v);
+  }
+
+  const enriched = (errors as any[]).map(err => {
+    const errFunc = err.function || '';
+    const errModule = err.module || '';
+
+    // Strategy 1: Match variables from same module (try multiple module name formats)
+    const moduleNames = [errModule];
+    if (errModule === '__main__') {
+      // Entry file may use the filename as module name in variable tracing
+      for (const [mod] of varsByModule) {
+        if (mod && mod !== '__main__' && !mod.includes('.')) moduleNames.push(mod);
+      }
+    }
+
+    let matchedVars: typeof vars = [];
+    for (const mod of moduleNames) {
+      matchedVars = varsByModule.get(mod) || [];
+      if (matchedVars.length > 0) break;
+    }
+
+    let context = matchedVars
+      .slice(0, 10)
+      .map(v => ({
+        name: v.varName,
+        line: v.line,
+        type: typeNodeToCompact(v.type),
+        value: v.sample,
+      }));
+
+    // Strategy 2: If no module match, use all vars (for small programs)
+    if (context.length === 0 && vars.length > 0) {
+      context = vars.slice(0, 10).map(v => ({
+        name: v.varName,
+        line: v.line,
+        type: typeNodeToCompact(v.type),
+        value: v.sample,
+      }));
+    }
+
+    return {
+      ...err,
+      variableContext: context.length > 0 ? context : undefined,
+    };
+  });
+
+  return { errors: enriched };
 }
 
 function getDatabaseQueries(): unknown {
