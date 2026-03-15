@@ -174,6 +174,13 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
     if (varName === '__trickle_mod' || varName === '__trickle_wrap' || varName === '__trickle_tv') continue;
     if (varName.startsWith('__trickle')) continue;
     if (varName === '_a' || varName === '_b' || varName === '_c') continue; // TS compiled vars
+    // Skip TS compiler helpers and module internals
+    if (varName === '__createBinding' || varName === '__setModuleDefault' || varName === '__importStar' || varName === '__importDefault') continue;
+    if (varName === '__decorate' || varName === '__metadata' || varName === '__param' || varName === '__awaiter') continue;
+    if (varName === 'ownKeys' || varName === 'desc' || varName === '_') continue;
+    // Skip React Refresh / HMR internals
+    if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
+    if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;
 
     // Check if this is a require() call — skip those (they're imports, not interesting values)
     const restOfLine = source.slice(vmatch.index + vmatch[0].length - 1, vmatch.index + vmatch[0].length + 200);

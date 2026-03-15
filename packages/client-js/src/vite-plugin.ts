@@ -255,8 +255,11 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
 
     // Skip trickle internals
     if (varName.startsWith('__trickle')) continue;
-    // Skip TS compiled vars
+    // Skip TS compiled vars and helpers
     if (varName === '_a' || varName === '_b' || varName === '_c') continue;
+    if (varName === '__createBinding' || varName === '__setModuleDefault' || varName === '__importStar' || varName === '__importDefault') continue;
+    if (varName === '__decorate' || varName === '__metadata' || varName === '__param' || varName === '__awaiter') continue;
+    if (varName === 'ownKeys' || varName === 'desc') continue;
     // Skip React Refresh / HMR internals (Vite, webpack, Next.js inject these)
     if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
     if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;
@@ -491,6 +494,8 @@ export function findReassignments(source: string): Array<{ lineEnd: number; varN
     if (varName === '_a' || varName === '_b' || varName === '_c') continue;
     // Skip 'this', 'self', 'super' (not reassignable in practice)
     if (varName === 'this' || varName === 'super') continue;
+    // Skip TS compiler helpers and module internals
+    if (varName === 'ownKeys' || varName === 'desc') continue;
     // Skip React Refresh / HMR internals and discard variables
     if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker') continue;
     if (varName === '_s' || varName === '_c2' || varName === '_s2' || varName === '_') continue;
