@@ -9,12 +9,19 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Complete observability platform: 12 data types, 18 MCP tools, 15+ drivers. Full JS + Python parity.
+Complete Datadog-replacement observability platform shipped.
 
-Commands: run, monitor, heal, verify, doctor, agent, ci, cloud, dashboard-local, status
-CLI 0.1.108. Validated full agent pipeline end-to-end.
+Stats: 12 data types, 18 MCP tools, 15+ auto-patched drivers, full JS + Python parity.
+CLI commands: run, monitor, heal, verify, doctor, agent, ci, cloud, dashboard-local, status.
+Usecases updated: ai-agent.md, observability-platform.md, devops-ci.md, README.
+GitHub Actions workflow template added.
 
-Next: Build cloud.trickle.dev backend, Go/Rust language support
+All validated on real multifile Python + JS + TS codebases.
+
+Next priorities:
+1. Build cloud.trickle.dev backend service (team sharing, hosted dashboards)
+2. Go language support (expand TAM to Go backend developers)
+3. Rust language support
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
