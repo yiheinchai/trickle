@@ -6,11 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-30 MCP tools! CLI 0.1.156. Shipped anomaly detection — learns normal latency baselines,
-alerts on deviations >2σ for both functions and queries. Also shipped per-request tracing
-(JS AsyncLocalStorage + Python contextvars) and get_request_trace MCP tool.
+CLI 0.1.157. 30 MCP tools. Shipped request waterfall (trickle waterfall) — Jaeger-like
+interactive HTML timeline showing per-request function calls and queries with timing bars.
+Also shipped anomaly detection, per-request tracing, diff-runs, fix suggestions.
 
-Next: request waterfall HTML view, SLO burn rate alerting, cost estimation per function.
+Next: SLO burn rate alerting, cost estimation per function, request waterfall MCP tool.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
