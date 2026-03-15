@@ -599,6 +599,127 @@ function findCatchVars(source: string): Array<{ bodyStart: number; varNames: str
   return results;
 }
 
+/**
+ * Find simple JSX text expressions and return insertions for tracing.
+ * Only traces simple expressions in text content positions (after > or between tags):
+ *   <p>{count}</p>              → trace count
+ *   <span>{user.name}</span>    → trace user.name
+ *   <div>{a + b}</div>          → trace a + b (simple binary)
+ *   <p>{x ? 'a' : 'b'}</p>     → trace ternary
+ * Skips: attribute expressions, .map() calls, JSX elements, spread, complex calls.
+ * Uses comma operator: {(__trickle_tv(expr, name, line), expr)} — safe, returns original value.
+ */
+function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd: number; exprText: string; lineNo: number }> {
+  const results: Array<{ exprStart: number; exprEnd: number; exprText: string; lineNo: number }> = [];
+
+  // Find JSX text expressions: characters `>` followed (with optional whitespace/text) by `{expr}`
+  // We look for `{` that follows `>` (possibly with whitespace or text between)
+  // and is NOT preceded by `=` (which would be an attribute value)
+  const jsxExprRegex = /\{/g;
+  let match;
+
+  while ((match = jsxExprRegex.exec(source)) !== null) {
+    const bracePos = match.index;
+
+    // Skip if inside a string or comment
+    // Simple check: look at the character before `{`
+    const charBefore = bracePos > 0 ? source[bracePos - 1] : '';
+
+    // Skip if this is an attribute value: preceded by `=` (with optional whitespace)
+    const beforeSlice = source.slice(Math.max(0, bracePos - 5), bracePos).trimEnd();
+    if (beforeSlice.endsWith('=')) continue;
+
+    // Skip if this looks like a template literal expression `${`
+    if (charBefore === '$') continue;
+
+    // Skip if preceded by `(` or `,` (function arguments, not JSX)
+    if (charBefore === '(' || charBefore === ',') continue;
+
+    // Must be in a JSX context: look backward for `>` or `}` (closing tag bracket or prev expression)
+    // before hitting structural JS characters like `{`, `(`, `;`
+    let inJsx = false;
+    let scanPos = bracePos - 1;
+    while (scanPos >= 0) {
+      const ch = source[scanPos];
+      if (ch === '>') { inJsx = true; break; }
+      if (ch === '}') { inJsx = true; break; } // After a previous JSX expression
+      if (ch === '{' || ch === '(' || ch === ';') break;
+      // `=` only breaks if NOT preceded by other text (could be JSX text like "count = 5")
+      if (ch === '=' && scanPos > 0 && /\s/.test(source[scanPos - 1])) {
+        // Check if this `=` is a JSX attribute assignment: look further back for tag
+        const attrCheck = source.slice(Math.max(0, scanPos - 30), scanPos).trim();
+        if (/^[a-zA-Z]/.test(attrCheck)) break; // Likely an attribute
+      }
+      if (ch === '\n') {
+        // Check context of previous lines
+        const lineAbove = source.slice(Math.max(0, scanPos - 100), scanPos);
+        if (/<|>|\}/.test(lineAbove)) { inJsx = true; break; }
+        break;
+      }
+      scanPos--;
+    }
+    if (!inJsx) continue;
+
+    // Find the matching closing `}` for this expression
+    let depth = 1;
+    let pos = bracePos + 1;
+    while (pos < source.length && depth > 0) {
+      const ch = source[pos];
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+      else if (ch === '"' || ch === "'" || ch === '`') {
+        const q = ch; pos++;
+        while (pos < source.length && source[pos] !== q) {
+          if (source[pos] === '\\') pos++;
+          pos++;
+        }
+      }
+      pos++;
+    }
+    if (depth !== 0) continue;
+
+    const exprEnd = pos - 1; // position of closing `}`
+    const exprText = source.slice(bracePos + 1, exprEnd).trim();
+
+    // Skip empty expressions
+    if (!exprText) continue;
+
+    // Skip complex expressions that we don't want to trace:
+    // - JSX elements: contains `<` (could be a component)
+    // - .map/.filter/.reduce calls (return arrays of elements)
+    // - Spread: starts with `...`
+    // - Arrow functions: contains `=>`
+    // - Already traced: starts with `__trickle`
+    if (exprText.includes('<') || exprText.includes('=>')) continue;
+    if (exprText.startsWith('...')) continue;
+    if (exprText.startsWith('__trickle')) continue;
+    if (/\.(map|filter|reduce|forEach|flatMap)\s*\(/.test(exprText)) continue;
+    // Skip function calls with parens (complex expressions) — but allow property access
+    // Allow: user.name, count, x ? 'a' : 'b', a + b
+    // Skip: fn(), obj.method(), Component()
+    if (/\w\s*\(/.test(exprText) && !exprText.includes('?')) continue;
+
+    // Only trace if it's a "simple" expression:
+    // - Identifier: count, name
+    // - Property access: user.name, item.price.formatted
+    // - Simple ternary: x ? 'a' : 'b'
+    // - Simple arithmetic: count * 2, price + tax
+    const isSimple = /^[a-zA-Z_$][a-zA-Z0-9_$]*(\.[a-zA-Z_$][a-zA-Z0-9_$]*)*$/.test(exprText) || // identifier/property
+      /^[a-zA-Z_$]/.test(exprText); // starts with identifier (covers ternary, arithmetic)
+    if (!isSimple) continue;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < bracePos; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ exprStart: bracePos + 1, exprEnd, exprText, lineNo });
+  }
+
+  return results;
+}
+
 function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
   const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
 
@@ -1250,7 +1371,10 @@ export function transformEsmSource(
   // Find function parameter names for tracing
   const funcParamInsertions = traceVars ? findFunctionParams(source, isReactFile) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
+  // Find JSX text expressions for tracing (React files only)
+  const jsxExprInsertions = (traceVars && isReactFile) ? findJsxExpressions(source) : [];
+
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && jsxExprInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -1318,7 +1442,7 @@ export function transformEsmSource(
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
-  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
+  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [];
 
   if (isSSR) {
@@ -1420,7 +1544,7 @@ export function transformEsmSource(
   }
 
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Map();`,
@@ -1627,6 +1751,21 @@ export function transformEsmSource(
     allInsertions.push({
       position: bodyStart,
       code: `\ntry{${calls}}catch(__e){}\n`,
+    });
+  }
+
+  // JSX expression insertions: wrap with comma operator to trace without changing value
+  // {expr} → {(__trickle_tv(expr, "expr", lineNo), expr)}
+  for (const { exprStart, exprEnd, exprText, lineNo } of jsxExprInsertions) {
+    // Use a display name: truncate long expressions, use the raw text
+    const displayName = exprText.length > 30 ? exprText.slice(0, 27) + '...' : exprText;
+    allInsertions.push({
+      position: exprStart,
+      code: `(__trickle_tv(`,
+    });
+    allInsertions.push({
+      position: exprEnd,
+      code: `,${JSON.stringify(displayName)},${lineNo}),${exprText})`,
     });
   }
 
