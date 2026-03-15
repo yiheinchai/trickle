@@ -1,9 +1,13 @@
+import * as fs from 'fs';
+import * as pathMod from 'path';
 import { TypeNode, IngestPayload, WrapOptions } from './types';
 import { inferType } from './type-inference';
 import { hashType } from './type-hash';
 import { TypeCache } from './cache';
 import { enqueue } from './transport';
 import { detectEnvironment } from './env-detect';
+import { withRequestContext } from './request-context';
+import { traceCall, traceReturn } from './call-trace';
 
 const expressCache = new TypeCache();
 
@@ -95,6 +99,51 @@ function sanitizeSample(value: unknown, depth: number = 3): unknown {
 }
 
 /**
+ * Write an error record to .trickle/errors.jsonl so that `trickle monitor`
+ * and `trickle heal` can detect runtime errors from Express handlers.
+ */
+function writeErrorToFile(error: unknown, input: Record<string, unknown>, routeName: string): void {
+  try {
+    const err = error instanceof Error ? error : new Error(String(error));
+    const isLambda = !!process.env.AWS_LAMBDA_FUNCTION_NAME;
+    const defaultDir = isLambda ? '/tmp/.trickle' : pathMod.join(process.cwd(), '.trickle');
+    const dir = process.env.TRICKLE_LOCAL_DIR || defaultDir;
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+
+    // Extract file and line from stack trace
+    const stackLines = (err.stack || '').split('\n');
+    let errorFile: string | undefined;
+    let errorLine: number | undefined;
+    for (const sl of stackLines.slice(1)) {
+      const m = sl.match(/\((.+):(\d+):\d+\)/) || sl.match(/at (.+):(\d+):\d+/);
+      if (m && !m[1].includes('node_modules') && !m[1].includes('node:') && !m[1].includes('trickle')) {
+        errorFile = m[1];
+        errorLine = parseInt(m[2]);
+        break;
+      }
+    }
+
+    const record = {
+      kind: 'error',
+      error: err.message,
+      type: err.constructor?.name || 'Error',
+      message: err.message,
+      file: errorFile,
+      line: errorLine,
+      stack: stackLines.slice(0, 6).join('\n'),
+      route: routeName,
+      request: input,
+      timestamp: new Date().toISOString(),
+    };
+
+    const errorsFile = pathMod.join(dir, 'errors.jsonl');
+    fs.appendFileSync(errorsFile, JSON.stringify(record) + '\n');
+  } catch {
+    // Never crash the user's app
+  }
+}
+
+/**
  * Emit a type payload for a single Express route invocation.
  */
 function emitExpressPayload(
@@ -104,6 +153,7 @@ function emitExpressPayload(
   input: Record<string, unknown>,
   output: unknown,
   error?: unknown,
+  durationMs?: number,
 ): void {
   try {
     const functionKey = `express::${functionName}`;
@@ -132,6 +182,10 @@ function emitExpressPayload(
       sampleOutput: error ? undefined : sanitizeSample(output),
     };
 
+    if (durationMs !== undefined) {
+      payload.durationMs = Math.round(durationMs * 100) / 100;
+    }
+
     if (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       payload.error = {
@@ -140,6 +194,8 @@ function emitExpressPayload(
         stackTrace: err.stack,
         argsSnapshot: sanitizeSample(input),
       };
+      // Also write to errors.jsonl for monitor/heal detection
+      writeErrorToFile(error, input, functionName);
     }
 
     enqueue(payload);
@@ -163,8 +219,29 @@ function wrapExpressHandler(
       return handler.call(this, req, res, next);
     }
 
+    const self = this;
+
+    // Wrap entire handler execution in request context so downstream calls get a request ID
+    let returnValue: any;
+    withRequestContext(req, () => {
+      returnValue = _executeHandler(self, handler, req, res, next, routeName, opts);
+    });
+    return returnValue;
+  };
+
+  function _executeHandler(
+    self: any,
+    handler: Function,
+    req: any,
+    res: any,
+    next: any,
+    routeName: string,
+    opts: ExpressInstrumentOpts,
+  ): any {
     const input = extractRequestInput(req);
     let captured = false;
+    const startTime = performance.now();
+    const callId = traceCall(routeName, 'express');
 
     // Intercept res.json()
     const originalJson = res.json;
@@ -172,7 +249,9 @@ function wrapExpressHandler(
       res.json = function (data: any) {
         if (!captured) {
           captured = true;
-          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, data);
+          const durationMs = performance.now() - startTime;
+          traceReturn(callId, routeName, 'express', durationMs);
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, data, undefined, durationMs);
         }
         res.json = originalJson; // restore
         return originalJson.call(res, data);
@@ -185,9 +264,11 @@ function wrapExpressHandler(
       res.send = function (data: any) {
         if (!captured) {
           captured = true;
+          const durationMs = performance.now() - startTime;
+          traceReturn(callId, routeName, 'express', durationMs);
           // Only capture non-string data as typed output; strings are usually HTML
           const output = typeof data === 'string' ? { __html: true } : data;
-          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, output);
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, output, undefined, durationMs);
         }
         res.send = originalSend; // restore
         return originalSend.call(res, data);
@@ -198,7 +279,9 @@ function wrapExpressHandler(
     const wrappedNext = function (err?: any) {
       if (err && !captured) {
         captured = true;
-        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+        const durationMs = performance.now() - startTime;
+        traceReturn(callId, routeName, 'express', durationMs, (err instanceof Error ? err : new Error(String(err))).message);
+        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err, durationMs);
       }
       if (typeof next === 'function') {
         return next(err);
@@ -206,14 +289,16 @@ function wrapExpressHandler(
     };
 
     try {
-      const result = handler.call(this, req, res, wrappedNext);
+      const result = handler.call(self, req, res, wrappedNext);
 
       // Handle async handlers that return a promise
       if (result && typeof result === 'object' && typeof result.then === 'function') {
         return result.catch((err: unknown) => {
           if (!captured) {
             captured = true;
-            emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+            const durationMs = performance.now() - startTime;
+            traceReturn(callId, routeName, 'express', durationMs, (err instanceof Error ? err : new Error(String(err))).message);
+            emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err, durationMs);
           }
           // Re-throw so Express error handling picks it up
           throw err;
@@ -224,11 +309,13 @@ function wrapExpressHandler(
     } catch (err) {
       if (!captured) {
         captured = true;
-        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err);
+        const durationMs = performance.now() - startTime;
+        traceReturn(callId, routeName, 'express', durationMs, (err instanceof Error ? err : new Error(String(err))).message);
+        emitExpressPayload(routeName, opts.environment, opts.maxDepth, input, undefined, err, durationMs);
       }
       throw err;
     }
-  };
+  }
 
   // Preserve function metadata
   Object.defineProperty(wrapped, 'name', { value: handler.name || routeName, configurable: true });
@@ -335,17 +422,9 @@ export function trickleMiddleware(
     }
 
     // Wrap in request context for per-request correlation
-    try {
-      const { withRequestContext } = require('./request-context');
-      withRequestContext(req, () => {
-        _handleRequest(req, res, next, opts, debug);
-      });
-      return;
-    } catch {
-      // Fall through to non-context version
-    }
-
-    _handleRequest(req, res, next, opts, debug);
+    withRequestContext(req, () => {
+      _handleRequest(req, res, next, opts, debug);
+    });
   };
 }
 
@@ -355,6 +434,9 @@ function _handleRequest(req: any, res: any, next: any, opts: any, debug: boolean
     }
 
     let captured = false;
+    const startTime = performance.now();
+    const prelimRouteName = `${req.method || 'UNKNOWN'} ${req.originalUrl || req.url || '/'}`;
+    const callId = traceCall(prelimRouteName, 'express');
 
     // We derive the route name lazily once the response is being sent,
     // because req.route is only populated after the handler matches.
@@ -366,7 +448,7 @@ function _handleRequest(req: any, res: any, next: any, opts: any, debug: boolean
       } catch {
         // ignore
       }
-      return `${req.method || 'UNKNOWN'} ${req.originalUrl || req.url || '/'}`;
+      return prelimRouteName;
     }
 
     const input = extractRequestInput(req);
@@ -378,12 +460,14 @@ function _handleRequest(req: any, res: any, next: any, opts: any, debug: boolean
         if (!captured) {
           captured = true;
           const routeName = getRouteName();
+          const durationMs = performance.now() - startTime;
+          traceReturn(callId, routeName, 'express', durationMs);
           if (debug) {
             console.log(`[trickle/middleware] Captured res.json for ${routeName}`);
           }
           // Re-extract input here because body parsers may have run since middleware was entered
           const latestInput = extractRequestInput(req);
-          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, data);
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, data, undefined, durationMs);
         }
         res.json = originalJson;
         return originalJson.call(res, data);
@@ -399,12 +483,14 @@ function _handleRequest(req: any, res: any, next: any, opts: any, debug: boolean
         if (!captured) {
           captured = true;
           const routeName = getRouteName();
+          const durationMs = performance.now() - startTime;
+          traceReturn(callId, routeName, 'express', durationMs);
           if (debug) {
             console.log(`[trickle/middleware] Captured res.send for ${routeName}`);
           }
           const latestInput = extractRequestInput(req);
           const output = typeof data === 'string' ? { __html: true } : data;
-          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, output);
+          emitExpressPayload(routeName, opts.environment, opts.maxDepth, latestInput, output, undefined, durationMs);
         }
         res.send = originalSend;
         return originalSend.call(res, data);

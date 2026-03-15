@@ -28,7 +28,7 @@ let traceFile: string | null = null;
 let callCounter = 0;
 let currentCallId = 0; // 0 = top level
 const callStack: number[] = [0];
-const MAX_TRACE_EVENTS = 500;
+const MAX_TRACE_EVENTS = 1000;
 let eventCount = 0;
 
 function getTraceFile(): string {
@@ -36,9 +36,17 @@ function getTraceFile(): string {
   const dir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
   try { fs.mkdirSync(dir, { recursive: true }); } catch {}
   traceFile = path.join(dir, 'calltrace.jsonl');
-  try { fs.writeFileSync(traceFile, ''); } catch {}
+  // Only create the file if it doesn't already exist — another module instance
+  // (e.g. the observe hook) may have already initialised it.
+  try {
+    fs.writeFileSync(traceFile, '', { flag: 'wx' });
+  } catch {
+    // File already exists — that's fine
+  }
   return traceFile;
 }
+
+let _initialized = false;
 
 function writeEvent(event: CallEvent): void {
   if (eventCount >= MAX_TRACE_EVENTS) return;
@@ -99,6 +107,11 @@ export function traceReturn(
 }
 
 export function initCallTrace(): void {
-  // Ensure trace file is initialized
-  getTraceFile();
+  if (_initialized) return;
+  _initialized = true;
+  // Truncate the file on explicit init (only the observe hook calls this)
+  const dir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  traceFile = path.join(dir, 'calltrace.jsonl');
+  try { fs.writeFileSync(traceFile, ''); } catch {}
 }
