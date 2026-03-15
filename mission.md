@@ -40,7 +40,17 @@ Done: `trickle verify` — before/after metric comparison for fix verification. 
 Complete auto-remediation loop:
   trickle run → trickle verify --baseline → trickle heal → agent fixes → trickle run → trickle verify ✓
 
-Next: Cloud dashboard for team sharing, distributed tracing across services
+Done: Distributed tracing with trace ID propagation (X-Trickle-Trace-Id headers). 15 MCP tools. Python 0.2.5, CLI 0.1.99.
+
+Complete observability platform:
+- 10 data types (+ traces.jsonl for distributed spans)
+- 15 MCP tools for agent access
+- 15+ auto-patched drivers (JS + Python)
+- Full remediation loop: run → monitor → heal → verify
+- Production mode with sampling
+- Dashboard, webhook alerts, watch mode
+
+Next: Cloud dashboard for team sharing
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
