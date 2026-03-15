@@ -145,14 +145,18 @@ export function explain(targetFile: string, opts?: { dir?: string }): ExplainRes
   let hasExpressRoutes = false;
   if (result.exists) {
     const src = fs.readFileSync(absPath, 'utf-8');
-    hasExpressRoutes = /\.(get|post|put|delete|patch|all|use)\s*\(\s*['"`\/]/.test(src);
+    // Detect Express routes (app.get("/path")) or FastAPI routes (@app.get("/path"))
+    hasExpressRoutes = /\.(get|post|put|delete|patch|all|use)\s*\(\s*['"`\/]/.test(src) ||
+      /@\w+\.(get|post|put|delete|patch)\s*\(\s*['"`\/]/.test(src);
   }
 
   for (const obs of observations) {
     if (!obs.functionName) continue;
-    // Match by module name, OR include Express routes if file defines them
+    // Match by module name, OR include HTTP route handlers if file defines them
+    // Express uses module "express", FastAPI/uvicorn uses IP address or hostname
+    const isHttpRoute = /^(GET|POST|PUT|DELETE|PATCH)\s/.test(obs.functionName);
     const isMatch = moduleMatchesFile(obs.module, targetFile) ||
-      (hasExpressRoutes && obs.module === 'express' && /^(GET|POST|PUT|DELETE|PATCH)\s/.test(obs.functionName));
+      (hasExpressRoutes && isHttpRoute);
     if (isMatch) {
       const key = `${obs.module}.${obs.functionName}`;
       const existing = fileFuncs.get(key);
