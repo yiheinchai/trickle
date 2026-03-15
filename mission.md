@@ -6,9 +6,9 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.142. Fixed trickle test not expanding shell globs (e.g., `src/*.test.ts`) — found
-by testing on json-server from GitHub. Also shipped status suggestions, next steps hints.
-26 MCP tools, all docs complete.
+CLI 0.1.143. Updated trickle init output to show modern commands (summary, explain, test,
+flamegraph, doctor) instead of outdated ones. Also fixed glob expansion in trickle test.
+26 MCP tools, all docs complete, all user-facing messages consistent.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
