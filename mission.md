@@ -10,13 +10,14 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-26 MCP tools. Errors now include variable context (values at error location).
-Shipped: guided agent workflows, flamegraph, Python decorator capture, error enrichment.
+26 MCP tools. Automatic root cause analysis now in summary — derives null_reference,
+n_plus_one, slow_function, memory_growth, and logged_errors with evidence + suggested fixes.
+Errors enriched with variable context. Guided agent workflows. Flamegraph. Python decorator fix.
 
 Next priorities:
 1. Test on a real open-source Django project from GitHub
 2. Distributed tracing improvements (cross-service flamegraphs)
-3. Improve the summary to include a "root cause" field derived from errors + context
+3. Add CLAUDE.md auto-generation to trickle init with MCP server config instructions
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
