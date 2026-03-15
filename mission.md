@@ -6,16 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.152. Shipped trickle fix + get_fix_suggestions MCP tool (#27) — generates actual
-code patches for N+1 queries (batch SQL), null refs (guard checks), slow functions (caching).
+CLI 0.1.153. Shipped trickle diff-runs — compare runtime behavior between runs (new/removed
+functions, query changes, performance regressions, error changes, verdict). Also shipped
+trickle fix (code patches), OTLP export, Prometheus, Slack/Discord webhooks, GitHub PR comments.
 
-27 MCP tools. All major integrations done (OTLP, Prometheus, Slack, Discord, GitHub PR).
-
-Next TAM opportunities to research:
-1. Session replay / request tracing (follow a single HTTP request through the full stack)
-2. Cost attribution (show which functions/queries cost the most in cloud spend)
-3. AI-powered anomaly detection (baseline normal behavior, alert on deviations)
-4. Team dashboards with real-time streaming (replace Datadog dashboards)
+27 MCP tools. Next: session replay (per-request tracing), anomaly detection, team dashboards.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
