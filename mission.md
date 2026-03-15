@@ -6,12 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-Shipped: trickle demo (CLI 0.1.171) — self-running 60-second showcase. Also shipped auto-detect
-entry point for `trickle run`.
+CLI 0.1.172. Dashboard rewritten with Datadog-style log explorer UI: search bar, tab navigation
+(Overview/Functions/Queries/Logs/Errors/CallTrace/Variables), faceted filtering, expandable rows,
+badge counts, auto-refresh every 5s. Data loaded via JSON API for full interactivity.
 
-Current task: Improve dashboard-local to match Datadog log explorer — needs search/filter,
-expandable rows, faceted filtering, time-based views. Dashboard-local.ts is 232 lines, needs
-major rewrite. Starting next cycle.
+31 MCP tools, 16 integrations. Next: column sorting, time range filtering, chart visualizations.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
