@@ -40,6 +40,7 @@ import {
   findReassignments,
   findForLoopVars,
   findCatchVars,
+  findFunctionBodyBrace,
 } from './vite-plugin';
 
 const M = Module as any;
@@ -370,9 +371,10 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     // Skip common false positives
     if (name === 'require' || name === 'exports' || name === 'module') continue;
 
-    // Find the opening brace of the function body
+    // Find the opening brace of the function body, correctly skipping
+    // default parameter values like `headers = {}` which contain braces
     const afterMatch = match.index + match[0].length;
-    const openBrace = source.indexOf('{', afterMatch);
+    const openBrace = findFunctionBodyBrace(source, afterMatch);
     if (openBrace === -1) continue;
 
     // Extract parameter names from the source between ( and {

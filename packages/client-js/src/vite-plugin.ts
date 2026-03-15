@@ -134,7 +134,7 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
  * scans forward matching parens to find the closing `)`, then finds the `{` after it.
  * Returns -1 if not found.
  */
-function findFunctionBodyBrace(source: string, afterOpenParen: number): number {
+export function findFunctionBodyBrace(source: string, afterOpenParen: number): number {
   let depth = 1;
   let pos = afterOpenParen;
   // Skip the parameter list (matching parens)
