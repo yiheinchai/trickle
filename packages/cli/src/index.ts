@@ -482,6 +482,22 @@ nextCommand(program);
 // trickle python [setup]
 pythonCommand(program);
 
+// trickle monitor
+program
+  .command("monitor")
+  .description("Analyze runtime data for performance issues, errors, and anomalies — generates actionable alerts for agents")
+  .option("--slow-query <ms>", "Slow query threshold in ms", "100")
+  .option("--slow-function <ms>", "Slow function threshold in ms", "1000")
+  .option("--memory <mb>", "Memory threshold in MB", "512")
+  .action(async (opts) => {
+    const { runMonitor } = await import("./commands/monitor");
+    runMonitor({
+      slowQueryMs: parseInt(opts.slowQuery),
+      slowFunctionMs: parseInt(opts.slowFunction),
+      memoryThresholdMb: parseInt(opts.memory),
+    });
+  });
+
 // trickle annotate <file>
 program
   .command("annotate <file>")

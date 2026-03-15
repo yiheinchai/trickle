@@ -302,6 +302,23 @@ function getWebSocketEvents(): unknown {
   return { events };
 }
 
+function getAlerts(): unknown {
+  // Run monitor analysis to generate fresh alerts
+  try {
+    const { runMonitor } = require('./monitor');
+    runMonitor({ dir: findTrickleDir() });
+  } catch {}
+
+  const file = path.join(findTrickleDir(), "alerts.jsonl");
+  if (!fs.existsSync(file)) return { alerts: "No alerts. Run `trickle monitor` or the app with trickle first." };
+  const alerts: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { alerts.push(JSON.parse(line)); } catch {}
+  }
+  if (alerts.length === 0) return { alerts: "No issues detected — all clear." };
+  return { alerts };
+}
+
 function getPerformanceProfile(): unknown {
   const file = path.join(findTrickleDir(), "profile.jsonl");
   if (!fs.existsSync(file)) return { profile: "No performance profile captured. Run the app with trickle first." };
@@ -462,6 +479,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_alerts",
+    description: "Get actionable alerts — slow queries, N+1 patterns, errors, memory issues, slow functions. Each alert includes a severity level and a fix suggestion. Use this as the FIRST tool when debugging.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_performance_profile",
     description: "Get memory usage profile — RSS and heap snapshots at start/end of execution. Use to identify memory leaks or high memory usage.",
     inputSchema: { type: "object", properties: {} },
@@ -525,6 +547,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_errors": result = getErrors(); break;
           case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_call_trace": result = getCallTrace(); break;
+          case "get_alerts": result = getAlerts(); break;
           case "get_websocket_events": result = getWebSocketEvents(); break;
           case "get_performance_profile": result = getPerformanceProfile(); break;
           case "get_console_output": result = getConsoleOutput(); break;
