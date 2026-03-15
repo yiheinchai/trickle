@@ -166,6 +166,9 @@ import time as _trickle_time
 def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
     try:
+        # Skip dataclass Field descriptors (not useful runtime values)
+        if type(_val).__name__ == 'Field' and hasattr(_val, 'default_factory'):
+            return
         _ck = {filename!r} + ':' + str(_line) + ':' + _name
         # Per-line sample count limit: stop after N samples to avoid loop spam
         _cnt = _trickle_tv_count.get(_ck, 0)

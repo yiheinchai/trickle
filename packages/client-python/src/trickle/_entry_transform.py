@@ -112,6 +112,10 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
                 os.makedirs(local_dir, exist_ok=True)
                 vars_file = os.path.join(local_dir, "variables.jsonl")
 
+            # Skip dataclass Field descriptors (not useful runtime values)
+            if type(value).__name__ == 'Field' and hasattr(value, 'default_factory'):
+                return
+
             type_node = infer_type(value, max_depth=3)
             type_hash = json.dumps(type_node, sort_keys=True)[:32]
 
@@ -427,6 +431,9 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "def _trickle_tv(_val, _name, _line, _func=None):",
             "    global _trickle_tv_file",
             "    try:",
+            "        # Skip dataclass Field descriptors (not useful runtime values)",
+            "        if type(_val).__name__ == 'Field' and hasattr(_val, 'default_factory'):",
+            "            return",
             "        # Per-line sample count limit: stop after N samples to avoid loop spam",
             f"        _ck = {filename!r} + ':' + str(_line) + ':' + _name",
             "        _cnt = _trickle_tv_count.get(_ck, 0)",
