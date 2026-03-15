@@ -116,12 +116,12 @@ Returns structured JSON that agents can parse:
 
 ## Agent Workflow
 
-1. **Understand the code** → Agent runs `trickle explain <file>` to see functions, call graph, queries, variables, errors
-2. **Run tests** → Agent runs `trickle test` to get structured pass/fail with runtime context at failure points
-3. **Get full picture** → Agent calls `get_last_run_summary` for a comprehensive overview in one MCP call
-4. **Identify root cause** → Agent sees runtime values, N+1 patterns, slow queries, errors with context
-5. **Fix the code** → Agent applies changes based on runtime data
-6. **Verify the fix** → Agent runs `trickle test` again to confirm pass/fail
+1. **Detect issue** → `get_last_run_summary` or `get_alerts` shows N+1 queries, errors, slow functions
+2. **Understand the code** → `explain_file` shows functions, call graph, queries, variables, errors for a file
+3. **Save baseline** → `save_baseline` saves current metrics before making changes
+4. **Fix the code** → Agent applies changes based on runtime data and heal plan recommendations
+5. **Re-run** → `refresh_runtime_data` or `run_tests` captures fresh data after the fix
+6. **Verify the fix** → `compare_with_baseline` shows "Fix verified — 3 metrics improved, 0 regressed"
 
 This reduces debugging from multiple "add log → run → read output" cycles to structured, actionable data.
 
@@ -194,7 +194,7 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 }
 ```
 
-**21 MCP tools available:**
+**23 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
@@ -217,6 +217,8 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 | `get_http_requests` | HTTP fetch calls with status + latency |
 | `explain_file` | Understand a file via runtime data — functions, call graph, queries, variables, errors |
 | `run_tests` | Run tests with observability — structured pass/fail with runtime context at failures |
+| `save_baseline` | Save current metrics as baseline before making changes |
+| `compare_with_baseline` | Compare current metrics against baseline — shows improvements/regressions |
 | `check_data_freshness` | Check if runtime data exists and how old it is |
 | `refresh_runtime_data` | Re-run the app to capture fresh data (returns summary) |
 
