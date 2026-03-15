@@ -563,6 +563,33 @@ async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
     return;
   }
 
+  // OpsGenie Alert API
+  if (url.includes('opsgenie.com') || url.includes('api.opsgenie.com')) {
+    const apiKey = process.env.OPSGENIE_API_KEY || '';
+    const summary = `trickle: ${critical.length} critical, ${warnings.length} warnings`;
+    const priority = critical.length > 0 ? 'P1' : warnings.length > 0 ? 'P3' : 'P5';
+
+    try {
+      const res = await fetch('https://api.opsgenie.com/v2/alerts', {
+        method: 'POST',
+        headers: { 'Authorization': `GenieKey ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: summary,
+          description: alerts.slice(0, 5).map(a => `${a.severity}: ${a.message}`).join('\n'),
+          priority,
+          source: 'trickle',
+          tags: ['trickle', ...alerts.map(a => a.category).filter((v, i, a) => a.indexOf(v) === i)],
+          details: { alerts: JSON.stringify(alerts.slice(0, 10)) },
+        }),
+      });
+      if (res.ok) console.log(chalk.green(`  ✓ Alert sent to OpsGenie`));
+      else console.log(chalk.yellow(`  ⚠ OpsGenie responded with ${res.status}`));
+    } catch (err: any) {
+      console.log(chalk.yellow(`  ⚠ Failed to send to OpsGenie: ${err.message}`));
+    }
+    return;
+  }
+
   // Microsoft Teams webhook (Adaptive Cards)
   if (url.includes('webhook.office.com') || url.includes('microsoft.com')) {
     const color = critical.length > 0 ? 'attention' : warnings.length > 0 ? 'warning' : 'good';
