@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Updated README with AI agent section, new commands in quick reference, and architecture diagram showing errors.jsonl + agent integration. Full agent stack shipped: CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema (OpenAI/Anthropic/MCP). README, use cases (ai-agent.md, ai-developer.md), and documentation all updated. Continue expanding TAM — consider database/ORM query tracing, new language support, or building an MCP server that wraps trickle context.
+MCP server shipped — `trickle mcp-server` starts an MCP server with 4 tools (get_runtime_context, get_annotated_source, get_function_signatures, get_errors). Claude Code can connect directly and query runtime data as tools. Full agent stack: MCP server, CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema. README updated with MCP config snippet. Continue expanding TAM — consider database/ORM query tracing, new language support, or performance profiling.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -203,6 +203,12 @@ trickle init                     # creates CLAUDE.md with agent instructions
 trickle context src/api.ts:25    # values near a specific line
 trickle context --json           # structured output for programmatic use
 trickle tool-schema --format openai  # generate LLM tool calling schemas
+trickle mcp-server               # MCP server for direct agent integration
+```
+
+**MCP Integration** — add trickle as an MCP server so Claude can query runtime data directly:
+```json
+{ "mcpServers": { "trickle": { "command": "npx", "args": ["trickle-cli", "mcp-server"] } } }
 ```
 
 **[Full AI Agent Guide →](usecases/ai-agent.md)** | **[LLM Tool Schema Guide →](usecases/ai-developer.md)**
@@ -266,6 +272,7 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle context <file>` | Runtime context for AI agent debugging |
 | `trickle context --annotated` | Source code with inline runtime values |
 | `trickle tool-schema` | Generate LLM tool calling schemas |
+| `trickle mcp-server` | MCP server for direct AI agent integration |
 | `trickle functions` | List all observed functions |
 | `trickle overview` | Compact view of all routes and types |
 | `trickle vars` | Show traced variables with types |
