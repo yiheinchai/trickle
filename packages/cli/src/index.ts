@@ -502,6 +502,21 @@ program
     });
   });
 
+// trickle ci
+program
+  .command("ci [command...]")
+  .description("CI/CD integration — run app, detect issues, output GitHub/GitLab annotations, exit non-zero on critical")
+  .option("--fail-on-warning", "Also fail on warnings (default: only critical)")
+  .option("--format <format>", "Output format: github, gitlab, json, text (auto-detected)")
+  .action(async (command: string[], opts) => {
+    const { runCi } = await import("./commands/ci");
+    await runCi({
+      command: command.length > 0 ? command.join(' ') : undefined,
+      failOnWarning: opts.failOnWarning,
+      format: opts.format,
+    });
+  });
+
 // trickle doctor
 program
   .command("doctor")
