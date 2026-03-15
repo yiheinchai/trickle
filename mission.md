@@ -35,7 +35,12 @@ Datadog replacement is now feature-complete:
 - Data collection → Anomaly detection → Alerting → Dashboard → Heal plans → Agent access
 - 14 MCP tools, 9 data types, 15+ auto-patched drivers, production mode
 
-Next: Cloud dashboard for team sharing, multi-service tracing
+Done: `trickle verify` — before/after metric comparison for fix verification. CLI 0.1.98.
+
+Complete auto-remediation loop:
+  trickle run → trickle verify --baseline → trickle heal → agent fixes → trickle run → trickle verify ✓
+
+Next: Cloud dashboard for team sharing, distributed tracing across services
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
