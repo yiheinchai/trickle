@@ -6,11 +6,10 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-Fixed: All 18 usecase docs now linked from README. Added JavaScript/TypeScript Developer,
-React, Next.js, React Native, AWS Lambda, SRE sections. Also fixed trickle test showing
-PASS when suites fail to load (CLI 0.1.139) — found by testing on real Express TS project.
+Shipped: "Next steps" hints after every trickle run (summary, explain, flamegraph, test).
+First-time users now see exactly what to do after capturing data. CLI 0.1.140.
 
-26 MCP tools, CLI 0.1.139, all docs complete and linked.
+26 MCP tools, all 18 usecase docs linked from README, all docs rewritten.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
