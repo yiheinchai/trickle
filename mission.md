@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-MCP server now has 6 tools — added check_data_freshness (reports data age/count, suggests run command) and refresh_runtime_data (runs app with trickle to capture fresh data). Agents can now autonomously: check if data exists → refresh if needed → query runtime context → debug. Full agent stack complete and autonomous. Continue expanding TAM — consider database/ORM tracing, new languages, or performance profiling.
+Added function execution timing (durationMs) to observations — agents can now identify performance bottlenecks alongside type info. Full feature set: MCP server (6 tools), CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema (OpenAI/Anthropic/MCP), function timing. Continue expanding TAM — consider database/ORM tracing, new language support, or deeper performance analytics.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
