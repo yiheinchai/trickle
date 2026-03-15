@@ -280,7 +280,18 @@ program
   .description("Generate all output formats into a .trickle/ directory at once")
   .option("-d, --dir <path>", "Output directory (default: .trickle)")
   .option("--env <env>", "Filter by environment")
+  .option("--otlp [endpoint]", "Export to OpenTelemetry (OTLP) format — send to Grafana/SigNoz/Jaeger")
+  .option("--service-name <name>", "Service name for OTLP export")
   .action(async (opts) => {
+    if (opts.otlp !== undefined) {
+      const { exportOtlp } = await import("./commands/otlp-export");
+      await exportOtlp({
+        endpoint: typeof opts.otlp === 'string' ? opts.otlp : undefined,
+        json: opts.otlp === true,
+        serviceName: opts.serviceName,
+      });
+      return;
+    }
     await exportCommand(opts);
   });
 
