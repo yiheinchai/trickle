@@ -1,0 +1,31 @@
+app = "trickle-cloud"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "4888"
+  TRICKLE_DB_PATH = "/data/trickle.db"
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 4888
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[mounts]
+  source = "trickle_data"
+  destination = "/data"
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
