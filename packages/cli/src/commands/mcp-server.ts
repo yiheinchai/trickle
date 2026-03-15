@@ -302,6 +302,17 @@ function getWebSocketEvents(): unknown {
   return { events };
 }
 
+function getPerformanceProfile(): unknown {
+  const file = path.join(findTrickleDir(), "profile.jsonl");
+  if (!fs.existsSync(file)) return { profile: "No performance profile captured. Run the app with trickle first." };
+  const events: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { events.push(JSON.parse(line)); } catch {}
+  }
+  if (events.length === 0) return { profile: "No profile events recorded." };
+  return { profile: events };
+}
+
 function getConsoleOutput(): unknown {
   const file = path.join(findTrickleDir(), "console.jsonl");
   if (!fs.existsSync(file)) return { output: "No console output captured. Run the app with trickle first." };
@@ -451,6 +462,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_performance_profile",
+    description: "Get memory usage profile — RSS and heap snapshots at start/end of execution. Use to identify memory leaks or high memory usage.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_console_output",
     description: "Get console.log/error/warn output from the last application run. Shows what the app printed to stdout/stderr.",
     inputSchema: { type: "object", properties: {} },
@@ -510,6 +526,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_database_queries": result = getDatabaseQueries(); break;
           case "get_call_trace": result = getCallTrace(); break;
           case "get_websocket_events": result = getWebSocketEvents(); break;
+          case "get_performance_profile": result = getPerformanceProfile(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;

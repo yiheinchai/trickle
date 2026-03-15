@@ -89,6 +89,13 @@ def main() -> None:
     from trickle.call_trace import init_call_trace
     init_call_trace()
 
+    # Start memory profiling
+    try:
+        from trickle.profile_observer import start_profiling
+        start_profiling()
+    except Exception:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")
