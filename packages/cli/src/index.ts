@@ -502,6 +502,15 @@ program
     });
   });
 
+// trickle status
+program
+  .command("status")
+  .description("Quick overview of available observability data — file counts, freshness, size")
+  .action(async () => {
+    const { runStatus } = await import("./commands/status");
+    runStatus();
+  });
+
 // trickle agent
 program
   .command("agent [command...]")
