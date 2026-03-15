@@ -15,7 +15,9 @@ Pipeline: run → monitor → heal → verify. Dashboard, webhook alerts, produc
 
 Validated on real APIs (Python + JS + TS). All bugs fixed.
 
-Next: Cloud dashboard for team sharing, Go/Rust language support
+Done: JS memory profiling, JS distributed tracing, trickle cloud (push/pull/share/status). Full JS/Python parity. CLI 0.1.102.
+
+Next: Build cloud.trickle.dev backend service, Go/Rust language support
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
