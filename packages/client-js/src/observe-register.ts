@@ -391,6 +391,11 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
     const restOfLine = source.slice(vmatch.index + vmatch[0].length - 1, vmatch.index + vmatch[0].length + 200);
     if (/^\s*require\s*\(/.test(restOfLine)) continue;
 
+    // Skip variable declarations inside for-loop headers (for (let x = ...; ...; ...))
+    // The semicolon inside for(...) is NOT a statement end
+    const beforeDecl = source.slice(Math.max(0, vmatch.index - 50), vmatch.index);
+    if (/\bfor\s*\(\s*$/.test(beforeDecl)) continue;
+
     // Calculate line number (count newlines before this position)
     // Subtract lineOffset to map compiled line numbers back to original source lines
     let lineNo = 1;
@@ -419,8 +424,17 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
       } else if (ch === '\n' && depth === 0) {
         // For semicolon-free code, the newline is the end
         // But only if the next non-whitespace isn't a continuation (., +, etc.)
+        // AND the previous non-whitespace isn't an operator expecting more (=, +, -, etc.)
         const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
         if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          // Also check if the line ends with an operator that expects a value on the next line
+          const prevOnLine = source.slice(source.lastIndexOf('\n', pos - 1) + 1, pos).trimEnd();
+          const lastChar = prevOnLine[prevOnLine.length - 1];
+          if (lastChar && '=+-*/%&|^~<>?:,({['.includes(lastChar)) {
+            // Line ends with operator — this is a continuation, don't end the statement
+            pos++;
+            continue;
+          }
           foundEnd = pos;
           break;
         }
@@ -627,8 +641,12 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     while ((methodMatch = methodRegex.exec(classBody)) !== null) {
       const isStatic = !!methodMatch[1];
       const methodName = methodMatch[2];
-      // Skip constructor and private methods
+      // Skip constructor, private methods, and JS keywords that look like method calls
       if (methodName === 'constructor' || methodName.startsWith('_')) continue;
+      if (['if', 'else', 'for', 'while', 'do', 'switch', 'case', 'return', 'throw',
+           'try', 'catch', 'finally', 'with', 'new', 'delete', 'typeof', 'void',
+           'yield', 'await', 'import', 'export', 'super', 'this', 'class',
+           'break', 'continue', 'debugger', 'in', 'of', 'instanceof'].includes(methodName)) continue;
       // Extract param names
       const mParamStr = methodMatch[3].trim();
       const mParamNames = mParamStr
