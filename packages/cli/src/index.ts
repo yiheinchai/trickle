@@ -703,8 +703,14 @@ program
   .description("APM-style metrics — latency percentiles (p50/p95/p99), throughput, error rates, query performance")
   .option("--json", "Output structured JSON for agent consumption")
   .option("--html", "Serve interactive APM dashboard in the browser")
-  .option("-p, --port <port>", "Port for HTML dashboard", "4322")
+  .option("--prometheus", "Start Prometheus /metrics endpoint for Grafana scraping")
+  .option("-p, --port <port>", "Port for HTML dashboard or Prometheus endpoint", "4322")
   .action(async (opts) => {
+    if (opts.prometheus) {
+      const { startPrometheusServer } = await import("./commands/prometheus");
+      startPrometheusServer(parseInt(opts.port) || 9464);
+      return;
+    }
     const { runMetrics } = await import("./commands/metrics");
     runMetrics({ json: opts.json, html: opts.html, port: parseInt(opts.port) });
   });
