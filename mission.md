@@ -20,8 +20,11 @@ Recent fixes:
 - Fixed codegen duplicate overloads and type name mismatches in .d.ts output
 - Fixed massive Python startup overhead: type inference no longer cold-imports
   torch/sklearn/pandas/datasets (2000x improvement, 550x→3.5x total overhead)
+- Fixed lazy type resolvers caching negative results — torch tensors now show
+  shapes (Tensor[1, 16, 64]) instead of Any. Validated on nanoGPT.
+- Codegen: variant overloads now reference named Output interfaces
 
-All validated on real multifile Python + JS + TS codebases including Express and sqlite3 apps.
+All validated on real codebases: nanoGPT (ML), Express (JS), multifile Python APIs.
 
 Next priorities:
 1. Build cloud.trickle.dev backend service (team sharing, hosted dashboards)
