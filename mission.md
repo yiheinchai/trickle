@@ -4,11 +4,24 @@ For now, i want you to specifically focus on:
 <general directive>
 Make a big push of increasing the feature set of trickle to expand the target audience and the TAM. Make sure to update the readme and usecases accordingly.
 
-Particularly, build for agents. Trickle should provide cached runtime information for agents to be able to debug applications autonomously, and show a marked improvement in agentic performance.
+Particularly, build for AI agents as the primary user.
 </general directive>
 
 <focus point>
-Database tracing now covers PostgreSQL (pg), MySQL (mysql2), and SQLite (better-sqlite3) — auto-patches drivers to capture SQL queries, timing, row counts, columns. MCP server has 9 tools. Full observability: variables, functions+timing, HTTP+status, console output, errors, database queries. Continue expanding TAM — consider adding Redis/MongoDB support, Python database tracing, or new language support.
+Added Python database query tracing (sqlite3, psycopg2, pymysql, mysql.connector). Auto-patches drivers to capture SQL queries, timing, row counts, columns to .trickle/queries.jsonl. Works with the MCP server's get_database_queries tool.
+
+Full agent observability stack now covers both JS and Python:
+- Variables + types + sample values
+- Function signatures + timing
+- HTTP requests + status codes
+- Console output
+- Error context with nearby variables
+- Database queries (JS: pg, mysql2, better-sqlite3 | Python: sqlite3, psycopg2, pymysql)
+
+Next for agent TAM:
+1. Execution trace / call graph — agents need function call order for debugging
+2. Redis/MongoDB tracing
+3. Agent-optimized CLAUDE.md templates
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
