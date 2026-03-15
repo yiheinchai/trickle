@@ -606,6 +606,15 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle waterfall
+program
+  .command("waterfall")
+  .description("Generate interactive request waterfall timeline (Jaeger-like view)")
+  .action(async () => {
+    const { runWaterfall } = await import("./commands/waterfall");
+    runWaterfall({});
+  });
+
 // trickle anomaly
 program
   .command("anomaly")
