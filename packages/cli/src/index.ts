@@ -512,6 +512,21 @@ program
     runHeal({ json: opts.json });
   });
 
+// trickle verify
+program
+  .command("verify")
+  .description("Verify a fix by comparing current metrics with a saved baseline — closes the detect→heal→verify loop")
+  .option("--baseline", "Save current metrics as baseline (run before fixing)")
+  .option("--compare", "Compare current metrics with saved baseline (run after fixing)")
+  .action(async (opts) => {
+    const { saveBaseline, compareWithBaseline } = await import("./commands/verify");
+    if (opts.baseline) {
+      saveBaseline({});
+    } else {
+      compareWithBaseline({});
+    }
+  });
+
 // trickle dashboard --local
 program
   .command("dashboard-local")
