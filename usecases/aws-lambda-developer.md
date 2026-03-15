@@ -1,8 +1,43 @@
 # AWS Lambda Developer
 
+## Quick Start: Debug Lambda Handlers Locally
+
+```bash
+npm install -g trickle-cli && npm install trickle-observe
+
+# Run your tests with observability
+trickle test                           # auto-detects jest/vitest/mocha
+trickle test "npx vitest run"          # vitest specifically
+trickle test "npx jest"                # jest specifically
+
+# See what happened
+trickle summary                        # errors, queries, root causes
+trickle explain handler.js             # functions, call graph, data flow, variables
+trickle flamegraph                     # performance hotspots
+
+# For vitest inline type hints:
+# Add to vitest.config.ts:
+#   import { tricklePlugin } from 'trickle-observe/vite-plugin';
+#   export default defineConfig({ plugins: [tricklePlugin()] });
+```
+
+Example output from `trickle explain handler.js`:
+```
+Functions:
+  → createUser(event: { body: string }) -> { statusCode: number, body: string }  (5ms)
+  → getUser(event: { pathParameters: { id: string } }) -> { statusCode: 404, ... }
+  → listUsers(event: {}) -> { statusCode: 200, body: "[{\"id\":1,...}]" }
+
+Variables:
+  L14 body: { name: "Alice", email: "alice@test.com" }
+  L27 user: null   ← why the 404 happened!
+
+Database Queries: INSERT INTO users, SELECT * FROM users WHERE id = ?
+```
+
 ## Who they are
 
-Backend engineers deploying Node.js/TypeScript functions to AWS Lambda. They struggle with observability because Lambda's ephemeral, frozen processes make traditional debugging (breakpoints, long-running servers) impossible. CloudWatch Logs exist, but adding structured logging is boilerplate.
+Backend engineers deploying Node.js/TypeScript functions to AWS Lambda. They struggle with observability because Lambda's ephemeral, frozen processes make traditional debugging impossible.
 
 ## Pain points without trickle
 
