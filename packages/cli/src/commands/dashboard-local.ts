@@ -238,7 +238,7 @@ tr:hover{background:#161b22}
 </div>
 <div class="content" id="content"></div>
 <script>
-let DATA={};let currentTab='overview';let searchQuery='';
+let DATA={};let currentTab='overview';let searchQuery='';let sortCol='';let sortDir=1;
 async function load(){const r=await fetch('/api/data');DATA=await r.json();
 document.getElementById('fn-count').textContent=DATA.functions?.length||0;
 document.getElementById('q-count').textContent=DATA.queries?.length||0;
@@ -280,7 +280,8 @@ else if(type==='variables'){cols=['Variable','Line','Module','Type','Value'];row
 const facets=getFacets(filtered,type);
 c.innerHTML='<div class="facets">'+facets+'</div>'+
 '<div style="color:#8b949e;font-size:12px;margin-bottom:8px">'+filtered.length+' / '+items.length+' items</div>'+
-(filtered.length>0?'<table><tr>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr>'+
+if(sortCol){const si=cols.indexOf(sortCol);if(si>=0){filtered.sort((a,b)=>{const av=getSortVal(a,type,si);const bv=getSortVal(b,type,si);if(typeof av==='number'&&typeof bv==='number')return(av-bv)*sortDir;return String(av).localeCompare(String(bv))*sortDir;});}}
+(filtered.length>0?'<table><tr>'+cols.map(c=>'<th onclick="sortBy(\\''+c+'\\')">'+c+(sortCol===c?(sortDir>0?' ▲':' ▼'):'')+'</th>').join('')+'</tr>'+
 filtered.slice(0,100).map(r=>'<tr class="expandable" onclick="toggleRow(this)">'+rowFn(r)+'</tr><tr class="expanded-row" style="display:none"><td colspan="'+cols.length+'"><div class="expanded-content">'+JSON.stringify(r,null,2)+'</div></td></tr>').join('')+'</table>':'<div class="empty">No data</div>');}
 function typeStr(t){if(!t)return'?';if(t.kind==='primitive')return t.name||'?';if(t.kind==='object')return t.class_name||'object';if(t.kind==='array')return typeStr(t.element)+'[]';return t.kind||'?';}
 function getFacets(items,type){const counts={};
@@ -291,6 +292,15 @@ else return'';
 return Object.entries(counts).map(([k,v])=>'<span class="facet" onclick="filterFacet(this,\\''+k+'\\')">'+k+' ('+v+')</span>').join('');}
 function filterFacet(el,val){const active=el.classList.toggle('active');
 if(active){searchQuery=val;document.getElementById('search').value=val;}else{searchQuery='';document.getElementById('search').value='';}render();}
+function sortBy(col){if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}render();}
+function getSortVal(r,type,colIdx){
+if(type==='functions')return[r.functionName,r.module,r.durationMs||0,(r.paramNames||[]).join(',')][colIdx];
+if(type==='queries')return[r.driver||'',r.query||'',r.durationMs||0,r.rowCount||0,r.requestId||''][colIdx];
+if(type==='logs')return[(r.level||'').toLowerCase(),r.logger||'',r.message||'',r.timestamp||0][colIdx];
+if(type==='errors')return[r.type||'',r.message||'',r.file||'',r.line||0][colIdx];
+if(type==='calltrace')return[r.function||'',r.module||'',r.durationMs||0,r.depth||0,r.error||''][colIdx];
+if(type==='variables')return[r.varName||'',r.line||0,r.module||'',typeStr(r.type),JSON.stringify(r.sample)||''][colIdx];
+return'';}
 function toggleRow(tr){const next=tr.nextElementSibling;next.style.display=next.style.display==='none'?'':'none';}
 document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
 document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));t.classList.add('active');
