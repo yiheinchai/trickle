@@ -36,6 +36,7 @@ import { runCommand } from "./commands/run";
 import { annotateCommand } from "./commands/annotate";
 import { stubsCommand } from "./commands/stubs";
 import { varsCommand } from "./commands/vars";
+import { layersCommand } from "./commands/layers";
 import { lambdaCommand } from "./commands/lambda";
 import { toolSchemaCommand } from "./commands/tool-schema";
 import { contextCommand } from "./commands/context";
@@ -471,6 +472,17 @@ program
   .option("--tensors", "Show only tensor/ndarray variables")
   .action(async (opts) => {
     await varsCommand(opts);
+  });
+
+// trickle layers
+program
+  .command("layers")
+  .description("Per-layer activation and gradient breakdown for nn.Sequential models — see what each layer does")
+  .option("-f, --file <file>", "Filter by source file path")
+  .option("-w, --watch", "Watch mode: refresh on file changes")
+  .option("--json", "Output structured JSON for agent consumption")
+  .action(async (opts) => {
+    await layersCommand(opts);
   });
 
 // trickle lambda [setup|layer|pull]
