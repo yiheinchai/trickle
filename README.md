@@ -319,6 +319,8 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle metrics` | APM-style latency percentiles (p50/p95/p99), error rates, query perf |
 | `trickle metrics --html` | Interactive APM dashboard in the browser |
 | `trickle metrics --json` | Structured metrics for agent consumption |
+| `trickle slo init` | Create .trickle/slos.json with default SLO definitions |
+| `trickle slo check` | Check SLO compliance (exit 1 if breached — CI-ready) |
 | `trickle dashboard-local` | Self-contained HTML dashboard (no backend needed) |
 | **Debugging** | |
 | `trickle context <file>` | Runtime context for AI agent debugging |

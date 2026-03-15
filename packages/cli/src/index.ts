@@ -639,6 +639,19 @@ program
     runMetrics({ json: opts.json, html: opts.html, port: parseInt(opts.port) });
   });
 
+// trickle slo
+const sloCmd = program.command("slo").description("SLO monitoring — define and track Service Level Objectives");
+sloCmd.command("init").description("Create .trickle/slos.json with default SLO definitions").action(async () => {
+  const { initSlos } = await import("./commands/slo");
+  initSlos();
+});
+sloCmd.command("check").description("Check SLO compliance against current data (exit 1 if breached)")
+  .option("--json", "Output structured JSON")
+  .action(async (opts: any) => {
+    const { checkSloCommand } = await import("./commands/slo");
+    checkSloCommand({ json: opts.json });
+  });
+
 // trickle heal
 program
   .command("heal")

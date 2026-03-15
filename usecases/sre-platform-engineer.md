@@ -139,7 +139,27 @@ Production mode:
 trickle monitor --webhook https://hooks.slack.com/services/... --watch
 ```
 
-## Use Case 7: Team Management (RBAC)
+## Use Case 7: SLO Monitoring
+
+```bash
+# Define SLOs
+trickle slo init
+# → Creates .trickle/slos.json with defaults:
+#   - 99% of requests < 500ms
+#   - 99% availability (error rate < 1%)
+#   - 95% of queries < 100ms
+
+# Check compliance
+trickle slo check
+#   ✓ Request Latency — Target: 99%  |  Actual: 100%  |  Budget: 100%
+#   ✗ Error Rate — Target: 99%  |  Actual: 93.3%  |  Budget: 0%
+#   ✓ Query Latency — Target: 95%  |  Actual: 100%  |  Budget: 100%
+
+# CI integration (exit 1 on breach)
+trickle slo check --json  # structured output for automation
+```
+
+## Use Case 8: Team Management (RBAC)
 
 ```bash
 # Create a team for your org

@@ -30,10 +30,12 @@ Log aggregation: winston, pino, bunyan (JS); loguru, structlog (Python) auto-pat
 
 APM metrics: trickle metrics — p50/p95/p99 latency, error rates, query perf, HTML dashboard.
 
+SLO monitoring: trickle slo init/check — latency, error rate, query SLOs with budget tracking, CI exit codes.
+
 Next priorities:
 1. Deploy cloud.trickle.dev to fly.io
 2. PostgreSQL migration for cloud scale
-3. SLO monitoring (latency/error SLOs with budget tracking)
+3. Distributed tracing improvements (cross-service flame graphs)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
