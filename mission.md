@@ -6,13 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.163. 30 MCP tools. Integrated changelog + security scan into CI PR comments.
-When trickle ci runs in GitHub Actions, PR comments now include: observability summary,
-root causes, N+1 patterns, API changelog (breaking changes), and security findings.
+CLI 0.1.164. 31 MCP tools. Added check_slos MCP tool for SLO compliance checking with
+error budget tracking. CI PR comments now include changelog + security scan.
 
-This session shipped 25+ features across CLI, JS client, and Python client.
-
-Next: SLO burn rate alerting, multi-service dependency map, real-time streaming dashboard.
+25+ features shipped this session. Next: multi-service dependency map, real-time streaming
+dashboard, GitLab CI integration, Jira/Linear ticket creation from alerts.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
