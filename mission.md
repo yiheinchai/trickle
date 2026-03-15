@@ -10,7 +10,16 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-As a key point for the agent first approach, i want you to use trickle when developing trickle (since you are an agent), and you will be able to identify any pain points in the process.
+Shipped: Critical fix — Express apps no longer crash with trickle. wrapFunction now preserves
+all function properties (app.get, app.listen, etc.). Also shipped get_new_alerts MCP tool
+and watch-alerts CLI for production monitoring. 24 MCP tools total.
+
+Tested on: Todo API (Express+SQLite+Jest), FastAPI+SQLite, nanoGPT (partial — numpy issue).
+
+Next priorities:
+1. Fix Jest/Vitest worker process instrumentation (tests show 0 observability data)
+2. Test on more real-world open-source projects
+3. Performance profiling: flamegraph generation from call traces
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
