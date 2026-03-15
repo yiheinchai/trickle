@@ -4,11 +4,11 @@ For now, i want you to specifically focus on:
 <general directive>
 Make a big push of increasing the feature set of trickle to expand the target audience and the TAM. Make sure to update the readme and usecases accordingly.
 
-Particularly, build for agents. Trickle should provide cached runtime information for agents to be able to debug applications autonomously, and how a marked improvement in agentic performance.
+Particularly, build for agents. Trickle should provide cached runtime information for agents to be able to debug applications autonomously, and show a marked improvement in agentic performance.
 </general directive>
 
 <focus point>
-MCP server now has 7 tools including get_http_requests. HTTP fetch tracing captures status codes and timing. Full agent stack: MCP (7 tools), CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema (OpenAI/Anthropic/MCP), function + HTTP timing. Continue expanding TAM — consider new language support, database query tracing, or building more integrations.
+Added console output capture for both JS and Python — console.log/print output saved to .trickle/console.jsonl. MCP server now has 8 tools including get_console_output and get_http_requests. Full agent debugging data: variables, functions (with timing), HTTP requests (with latency), console output, errors. Both JS and Python capture all data symmetrically. Continue expanding TAM.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
