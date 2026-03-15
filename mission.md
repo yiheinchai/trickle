@@ -6,12 +6,13 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-Python 0.2.23. Shipped Python per-request correlation via contextvars — Flask auto-patched,
-FastAPI/Django middleware available. DB queries now include requestId for per-request tracing.
+Per-request tracing validated end-to-end on Express todo API: 8 requests, each with correlated
+queries. get_request_trace MCP tool returns all queries for a single request. Works for both
+JS (AsyncLocalStorage) and Python (contextvars).
 
-29 MCP tools. Per-request tracing works for both JS (AsyncLocalStorage) and Python (contextvars).
+29 MCP tools. CLI 0.1.155, JS 0.2.115, Python 0.2.23.
 
-Next: anomaly detection baselines, rate limiting alerts, test the request tracing end-to-end.
+Next: anomaly detection (baseline normal latency, alert on deviations), request waterfall view.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
