@@ -6,11 +6,10 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.144. Validated Django ORM tracing on real Django project (5 tests, 289 queries, 6 logs,
-N+1 patterns detected in Django internals). Also tested on httpbin (56 pytest tests), CRA
-React, json-server, Express TS boilerplate. All bugs found have been fixed.
+CLI 0.1.145. Added Django/unittest + Node.js test runner output parsing. Fixed spurious
+failure on passing tests. Fixed glob expansion. All found by testing on real projects.
 
-26 MCP tools, all docs complete. Tested on 11+ real projects across JS/TS/Python/Django.
+26 MCP tools, all docs complete. Tested on 11+ real projects. Platform is stable and mature.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
