@@ -578,13 +578,25 @@ export function findReassignments(source: string): Array<{ lineEnd: number; varN
     const beforeOnLine = source.slice(lineStart, match.index).trim();
     if (beforeOnLine.endsWith(':') || beforeOnLine.endsWith(',')) continue;
 
+    // Skip comma-separated multi-variable declaration continuations:
+    //   var X = 'foo',
+    //       Y = 'bar';  ← Y looks like a reassignment but is actually a declaration
+    // Detect by checking if the previous non-empty line ends with ','
+    if (beforeOnLine.length === 0) {
+      const prevLineEnd = source.lastIndexOf('\n', lineStart - 1);
+      if (prevLineEnd >= 0) {
+        const prevLine = source.slice(source.lastIndexOf('\n', prevLineEnd - 1) + 1, prevLineEnd).trimEnd();
+        if (prevLine.endsWith(',')) continue;
+      }
+    }
+
     // Calculate line number
     let lineNo = 1;
     for (let i = 0; i < match.index; i++) {
       if (source[i] === '\n') lineNo++;
     }
 
-    // Find end of statement (same logic as findVarDeclarations)
+    // Find end of statement
     const startPos = match.index + match[0].length - 1;
     let pos = startPos;
     let depth = 0;
@@ -603,6 +615,19 @@ export function findReassignments(source: string): Array<{ lineEnd: number; varN
       } else if (ch === '\n' && depth === 0) {
         const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
         if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          // Check if a recent non-empty line ends with an operator
+          let checkPos2 = pos;
+          let lastCh2 = '';
+          for (let back = 0; back < 5; back++) {
+            const prevNL2 = source.lastIndexOf('\n', checkPos2 - 1);
+            const prevLine2 = source.slice(prevNL2 + 1, checkPos2).trimEnd();
+            if (prevLine2.length > 0) { lastCh2 = prevLine2[prevLine2.length - 1]; break; }
+            checkPos2 = prevNL2;
+            if (prevNL2 <= 0) break;
+          }
+          if (lastCh2 && '=+-*/%&|^~<>?:,({['.includes(lastCh2)) {
+            pos++; continue;
+          }
           foundEnd = pos;
           break;
         }
@@ -613,6 +638,21 @@ export function findReassignments(source: string): Array<{ lineEnd: number; varN
           if (source[pos] === '\\') { pos++; }
           else if (source[pos] === quote) break;
           pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] !== '/' && source[pos + 1] !== '*') {
+        // Possible regex literal
+        let rp = pos - 1;
+        while (rp >= 0 && (source[rp] === ' ' || source[rp] === '\t')) rp--;
+        const rpCh = rp >= 0 ? source[rp] : '';
+        if ('=(!,;:?[{&|^~+-><%'.includes(rpCh) || source.slice(Math.max(0, rp - 5), rp + 1).match(/\b(return|typeof|instanceof|in|of|void|delete|throw|new|case)\s*$/)) {
+          pos++;
+          while (pos < source.length) {
+            if (source[pos] === '\\') pos++;
+            else if (source[pos] === '[') { pos++; while (pos < source.length && source[pos] !== ']') { if (source[pos] === '\\') pos++; pos++; } }
+            else if (source[pos] === '/') break;
+            pos++;
+          }
+          while (pos + 1 < source.length && /[gimsuy]/.test(source[pos + 1])) pos++;
         }
       } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
         while (pos < source.length && source[pos] !== '\n') pos++;

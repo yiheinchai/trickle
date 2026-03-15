@@ -334,6 +334,21 @@ function findClosingBrace(source: string, openBrace: number): number {
       pos += 2;
       while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
       pos++; // skip past /
+    } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] !== '/' && source[pos + 1] !== '*') {
+      // Possible regex literal — check preceding context
+      let p = pos - 1;
+      while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+      const prevCh = p >= 0 ? source[p] : '';
+      if ('=(!,;:?[{&|^~+-><%'.includes(prevCh) || source.slice(Math.max(0, p - 5), p + 1).match(/\b(return|typeof|instanceof|in|of|void|delete|throw|new|case)\s*$/)) {
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') pos++;
+          else if (source[pos] === '[') { pos++; while (pos < source.length && source[pos] !== ']') { if (source[pos] === '\\') pos++; pos++; } }
+          else if (source[pos] === '/') break;
+          pos++;
+        }
+        while (pos + 1 < source.length && /[gimsuy]/.test(source[pos + 1])) pos++;
+      }
     }
     pos++;
   }
@@ -427,9 +442,20 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
         // AND the previous non-whitespace isn't an operator expecting more (=, +, -, etc.)
         const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
         if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
-          // Also check if the line ends with an operator that expects a value on the next line
-          const prevOnLine = source.slice(source.lastIndexOf('\n', pos - 1) + 1, pos).trimEnd();
-          const lastChar = prevOnLine[prevOnLine.length - 1];
+          // Also check if a recent line ends with an operator that expects a value on the next line
+          // Walk backwards through empty lines to find the last non-empty line
+          let checkPos = pos;
+          let lastChar = '';
+          for (let back = 0; back < 5; back++) {
+            const prevNL = source.lastIndexOf('\n', checkPos - 1);
+            const prevLine = source.slice(prevNL + 1, checkPos).trimEnd();
+            if (prevLine.length > 0) {
+              lastChar = prevLine[prevLine.length - 1];
+              break;
+            }
+            checkPos = prevNL;
+            if (prevNL <= 0) break;
+          }
           if (lastChar && '=+-*/%&|^~<>?:,({['.includes(lastChar)) {
             // Line ends with operator — this is a continuation, don't end the statement
             pos++;
@@ -446,6 +472,30 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
           if (source[pos] === '\\') { pos++; }
           else if (source[pos] === quote) break;
           pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] !== '/' && source[pos + 1] !== '*') {
+        // Possible regex literal — check if the preceding non-whitespace indicates regex context
+        // (after =, (, ,, ;, !, &, |, ^, ~, ?, :, [, {, return, typeof, etc.)
+        let p = pos - 1;
+        while (p >= 0 && (source[p] === ' ' || source[p] === '\t')) p--;
+        const prevCh = p >= 0 ? source[p] : '';
+        if ('=(!,;:?[{&|^~+-><%'.includes(prevCh) || source.slice(Math.max(0, p - 5), p + 1).match(/\b(return|typeof|instanceof|in|of|void|delete|throw|new|case)\s*$/)) {
+          // This is a regex literal — skip to the closing /
+          pos++; // skip past opening /
+          while (pos < source.length) {
+            if (source[pos] === '\\') { pos++; } // skip escaped char
+            else if (source[pos] === '[') {
+              // Character class — skip to ]
+              pos++;
+              while (pos < source.length && source[pos] !== ']') {
+                if (source[pos] === '\\') pos++;
+                pos++;
+              }
+            } else if (source[pos] === '/') break;
+            pos++;
+          }
+          // Skip regex flags
+          while (pos + 1 < source.length && /[gimsuy]/.test(source[pos + 1])) pos++;
         }
       } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
         // Skip line comment
