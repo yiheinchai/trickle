@@ -158,6 +158,7 @@ function detectFrameworkFromCommand(command: string): string {
   if (command.includes('jest')) return 'jest';
   if (command.includes('mocha')) return 'mocha';
   if (command.includes('pytest') || command.includes('python -m pytest')) return 'pytest';
+  if (command.includes('manage.py test')) return 'django';
   if (command.includes('node --test')) return 'node-test';
   if (command.includes('npm test')) return 'npm';
   return 'unknown';
@@ -355,9 +356,35 @@ function parseGenericOutput(output: string, exitCode: number): { suites: TestSui
   const failMatch = output.match(/(\d+)\s+(?:failing|failed|fail)/i);
   const skipMatch = output.match(/(\d+)\s+(?:pending|skipped|skip)/i);
 
-  const passed = parseInt(passMatch?.[1] || '0');
-  const failed = parseInt(failMatch?.[1] || '0');
-  const skipped = parseInt(skipMatch?.[1] || '0');
+  let passed = parseInt(passMatch?.[1] || '0');
+  let failed = parseInt(failMatch?.[1] || '0');
+  let skipped = parseInt(skipMatch?.[1] || '0');
+
+  // Python unittest format: "Ran N tests in Xs" + "OK" or "FAILED (failures=N, errors=N)"
+  if (passed === 0 && failed === 0) {
+    const ranMatch = output.match(/Ran\s+(\d+)\s+tests?\s+in/);
+    if (ranMatch) {
+      const total = parseInt(ranMatch[1]);
+      const failedMatch = output.match(/FAILED\s*\((?:failures=(\d+))?(?:,?\s*errors=(\d+))?\)/);
+      if (failedMatch) {
+        const failures = parseInt(failedMatch[1] || '0');
+        const errors = parseInt(failedMatch[2] || '0');
+        failed = failures + errors;
+        passed = total - failed;
+      } else if (/\nOK\s*$/m.test(output) || /\nOK\n/.test(output)) {
+        passed = total;
+      }
+    }
+  }
+
+  // Node.js built-in test runner: "# pass N" / "# fail N"
+  if (passed === 0 && failed === 0) {
+    const nodePass = output.match(/# pass\s+(\d+)/);
+    const nodeFail = output.match(/# fail\s+(\d+)/);
+    if (nodePass) passed = parseInt(nodePass[1]);
+    if (nodeFail) failed = parseInt(nodeFail[1]);
+  }
+
   const total = passed + failed + skipped || (exitCode === 0 ? 1 : 0);
 
   return {
