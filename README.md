@@ -1,17 +1,72 @@
 # trickle
 
-**Runtime type observability for JavaScript and Python.** Run your code, get types — in your IDE, automatically.
+**Runtime observability for JavaScript and Python.** See what your code actually does — functions, variables, database queries, errors, performance — with zero code changes.
 
-```
-# One command. Types appear in VSCode as your code runs.
-trickle run python app.py
+## Getting Started (2 minutes)
+
+### Install
+
+```bash
+npm install -g trickle-cli
+npm install trickle-observe       # JS/TS projects
+pip install trickle-observe       # Python projects
 ```
 
-Trickle observes your running code and captures the actual types flowing through your functions and variables. No manual type annotations, no guessing — just run your code and get full type information in your IDE.
+### Run your app
+
+```bash
+trickle run node app.js           # Node.js / Express
+trickle run python app.py         # Python / Flask / FastAPI
+trickle run npx tsx src/index.ts  # TypeScript
+trickle run uvicorn app:app       # ASGI servers
+trickle run python manage.py runserver  # Django
+```
+
+### See what happened
+
+```bash
+trickle summary                   # complete overview: errors, queries, root causes
+trickle explain src/api.ts        # understand a file: functions, call graph, data flow
+trickle flamegraph                # where is time being spent?
+trickle doctor                    # health check with recommended next actions
+```
+
+### Run tests with observability
+
+```bash
+trickle test                      # auto-detects jest, vitest, pytest, mocha
+trickle test "npx vitest run"     # or specify your test command
+trickle test "npx jest"
+trickle test "python -m pytest"
+```
+
+### For vitest/jest: inline type hints in test files
+
+```typescript
+// vitest.config.ts (or vite.config.ts)
+import { defineConfig } from 'vitest/config';
+import { tricklePlugin } from 'trickle-observe/vite-plugin';
+
+export default defineConfig({
+  plugins: [tricklePlugin()],
+});
+```
+
+Run `npx vitest run` — inline variable hints appear in both source files and test files.
+
+### For AI agents (Claude Code, Cursor)
+
+```bash
+trickle init    # creates CLAUDE.md + .claude/settings.json with 26 MCP tools
+```
+
+The agent can now use `get_recommended_actions`, `get_last_run_summary`, `explain_file`, `run_tests`, `get_flamegraph`, and 21 more tools.
+
+---
 
 ## Who is this for?
 
-Pick your role. Each guide has install instructions, quick start, and real-world use cases.
+Pick your role for a detailed guide with use cases.
 
 ### ML Engineers / Data Scientists
 
