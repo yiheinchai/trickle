@@ -10,14 +10,7 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-Shipped: Production monitoring (get_new_alerts MCP tool + trickle watch-alerts CLI).
-24 MCP tools total. Full on-call agent loop complete:
-  monitor (get_new_alerts) → detect → understand (explain_file) → baseline → fix → verify
-
-Next priorities:
-1. Test on large open-source projects (Django, Next.js repos from GitHub)
-2. Cross-process instrumentation for subprocess-based workers
-3. Performance profiling improvements (flamegraph generation from call traces)
+As a key point for the agent first approach, i want you to use trickle when developing trickle (since you are an agent), and you will be able to identify any pain points in the process.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
