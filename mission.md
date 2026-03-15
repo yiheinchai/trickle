@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Added webpack/rollup multi-source bundle support — source maps with webpack:// protocol URLs are now correctly resolved, and each variable in a bundle traces to its correct original source file (e.g., utils.ts vs index.ts from a single bundle.js). Also added webpack internal variable filtering. Previously: source map support for tsc/esbuild, class field fix, per-line sample limiting. Continue testing on diverse codebases — next areas: Python decorator/async tracing, rollup bundles, and testing on larger real-world open source projects.
+Fixed SyntaxError on real-world codebases (tested on commander.js): multi-line variable declarations (`const x =\n  value`) and for-loop initializer declarations (`for (let x = val; ...`) no longer cause transform failures. Also added JS keyword filtering for class method regex. Previously: source map support (tsc/esbuild/webpack), class field fix, per-line sample limiting, webpack multi-source bundles. Continue testing on more diverse real-world codebases to find remaining edge cases.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
