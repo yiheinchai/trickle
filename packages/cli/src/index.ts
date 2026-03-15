@@ -288,9 +288,32 @@ program
   .description("Generate all output formats into a .trickle/ directory at once")
   .option("-d, --dir <path>", "Output directory (default: .trickle)")
   .option("--env <env>", "Filter by environment")
+  .option("--csv [dir]", "Export all observed data as CSV files (default output: .trickle/csv/)")
   .option("--otlp [endpoint]", "Export to OpenTelemetry (OTLP) format — send to Grafana/SigNoz/Jaeger")
   .option("--service-name <name>", "Service name for OTLP export")
   .action(async (opts) => {
+    if (opts.csv !== undefined) {
+      const path = await import("path");
+      const chalk = (await import("chalk")).default;
+      const { exportToCsvFiles } = await import("./commands/dashboard-local");
+      const trickleDir = path.resolve(".trickle");
+      const csvDir = typeof opts.csv === 'string' ? path.resolve(opts.csv) : path.resolve(".trickle", "csv");
+      const results = exportToCsvFiles(trickleDir, csvDir);
+      console.log("");
+      console.log(chalk.bold("  trickle export --csv"));
+      console.log(chalk.gray("  " + "─".repeat(50)));
+      if (results.length === 0) {
+        console.log(chalk.yellow("  No data to export. Run your app with trickle first."));
+      } else {
+        for (const r of results) {
+          console.log(chalk.green("  ✓ ") + chalk.bold(path.basename(r.file)) + chalk.gray(` (${r.rows} rows)`));
+        }
+        console.log("");
+        console.log(chalk.green(`  ${results.length} CSV files`) + chalk.gray(` → ${csvDir}`));
+      }
+      console.log("");
+      return;
+    }
     if (opts.otlp !== undefined) {
       const { exportOtlp } = await import("./commands/otlp-export");
       await exportOtlp({

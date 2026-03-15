@@ -2,16 +2,21 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Do market research, see what features are needed and pain points, and build those features to capture more TAM.
+Trickle's strategic moat is zero-code, local-first runtime observability that works for both humans AND AI agents. The market is splitting into expensive enterprise APM (Datadog, New Relic) and LLM-specific observability (Langfuse, LangSmith, Helicone). Trickle sits in the underserved middle: general-purpose runtime understanding for individual developers and small teams, with first-class AI agent integration. Double down on this position by: (1) making trickle the default "eyes" for AI coding agents — if an agent uses trickle, it writes better code faster, (2) extending auto-instrumentation to capture LLM/AI calls (OpenAI, Anthropic, etc.) with zero code changes, competing with Langfuse/LangSmith on DX, and (3) ensuring rock-solid reliability on real-world codebases so developers trust it in production. Every feature should pass the test: "does this help a developer (or their AI agent) understand their running code faster?"
 </higher directive>
 
 <focus point>
-CLI 0.1.174. Dashboard overview now has chart visualizations:
-- Function timing bar chart (gradient bars, sorted by duration)
-- Query latency histogram (5 buckets: <1ms to >50ms, color-coded)
-Plus column sorting, search, tabs, facets, expandable rows, auto-refresh.
+CLI 0.1.176. Priority areas ranked by impact on TAM capture:
 
-31 MCP tools, 16 integrations. Next: export to CSV, live streaming mode, pagination.
+1. **LLM/AI call auto-instrumentation** — Add zero-code capture of OpenAI, Anthropic, and other LLM API calls in both JS and Python. Record prompts, completions, token counts, latency, cost, and model metadata into .trickle/llm.jsonl. This lets trickle compete with Langfuse/LangSmith/Helicone on the fastest-growing observability segment while keeping trickle's zero-code DX advantage.
+
+2. **Agent workflow tracing** — Extend tracing to capture multi-step AI agent workflows (tool calls, reasoning chains, delegation between agents). Trickle's MCP integration already makes it agent-native; adding agent-aware tracing makes it indispensable.
+
+3. **Real-world reliability hardening** — Test trickle against 10+ popular open-source repos (Express apps, FastAPI services, Next.js apps, PyTorch training scripts, LangChain agents). Fix every instrumentation failure found.
+
+4. **Export and interoperability** — SHIPPED: CSV export from dashboard (per-tab Export CSV button, /api/csv/:type endpoint, `trickle export --csv` CLI), paginated tables (25/50/100/250 per page). Fixed dashboard table rendering bug. Still TODO: OpenTelemetry GenAI semantic conventions for LLM span export.
+
+5. **Live streaming mode** — Real-time tail of observations in the dashboard (WebSocket-based). Critical for debugging long-running processes and agent workflows.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
