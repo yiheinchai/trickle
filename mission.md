@@ -19,7 +19,9 @@ Done: Full JS/Python parity (memory, traces, env). Cloud CLI. `trickle doctor` +
 
 Complete platform: 11 data types, 17 MCP tools, 15+ drivers, run → monitor → heal → verify → cloud.
 
-Next: Build cloud.trickle.dev backend, Go/Rust support, log aggregation
+Done: Structured log aggregation (logs.jsonl) + get_logs MCP tool. 18 MCP tools. 12 data types.
+
+Next: Build cloud.trickle.dev backend, Go/Rust language support
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
