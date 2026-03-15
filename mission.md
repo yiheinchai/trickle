@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Added source map support for compiled TypeScript, fixed class field SyntaxError in esbuild, and added per-line sample count limiting (max 5 per variable) to prevent loop variable spam — a 100-iteration loop now produces ~20 trace entries instead of 500+. All changes applied consistently across JS and Python tracers. Continue testing on diverse codebases — next areas: bundled multi-file outputs (webpack/rollup), Python decorator tracing, and testing on larger real-world open source projects.
+Added webpack/rollup multi-source bundle support — source maps with webpack:// protocol URLs are now correctly resolved, and each variable in a bundle traces to its correct original source file (e.g., utils.ts vs index.ts from a single bundle.js). Also added webpack internal variable filtering. Previously: source map support for tsc/esbuild, class field fix, per-line sample limiting. Continue testing on diverse codebases — next areas: Python decorator/async tracing, rollup bundles, and testing on larger real-world open source projects.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
