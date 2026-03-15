@@ -1,0 +1,177 @@
+# Observability Platform: Replace Datadog with Agent-Powered Debugging
+
+You're running a production application and need full observability — but Datadog costs $23/host/month and the dashboards take hours to set up. Trickle gives you the same visibility with zero configuration, plus AI agents that automatically detect and fix issues.
+
+## Install
+
+```bash
+npm install -g trickle-cli
+pip install trickle-observe    # for Python apps
+npm install trickle-observe    # for Node.js apps
+```
+
+## Quick Start
+
+```bash
+# One command captures everything
+trickle run python app.py
+# or
+trickle run node server.js
+```
+
+That's it. No code changes, no config files, no dashboard setup. Trickle auto-patches your database drivers, HTTP clients, and WebSocket connections.
+
+---
+
+## What Gets Captured (Automatically)
+
+| Data Type | What | Drivers Auto-Patched |
+|-----------|------|---------------------|
+| Variables | Every variable assignment with type + value | — |
+| Functions | Signatures, params, return types, execution time | — |
+| Call Trace | Which function called which, parent-child flow | — |
+| DB Queries | SQL text, timing, row counts, columns | pg, mysql2, sqlite3, psycopg2, pymysql, redis, pymongo |
+| HTTP Requests | URL, method, status, latency, response shape | requests, httpx, fetch |
+| WebSocket | Messages sent/received, connect/close events | ws, socket.io |
+| Console Output | All stdout/stderr with timestamps | — |
+| Errors | Stack trace + variable values at crash site | — |
+| Memory | RSS + heap snapshots at start/end | — |
+| Distributed Traces | Cross-service request flow via trace IDs | X-Trickle-Trace-Id headers |
+
+## Use Case 1: Detect N+1 Queries
+
+```bash
+trickle run python app.py
+trickle monitor
+```
+
+Output:
+```
+  trickle monitor
+  ──────────────────────────────────────────────────
+  1 critical issue(s)
+    ✗ N+1 query pattern: "SELECT * FROM users WHERE id = ?" executed 10 times
+      → Use a JOIN or batch query instead
+  1 warning(s)
+    ⚠ Slow function: get_dashboard took 234ms
+      → Profile get_dashboard — check database calls inside
+  ──────────────────────────────────────────────────
+```
+
+No manual query profiling needed. Trickle detects the pattern automatically.
+
+## Use Case 2: Auto-Fix with AI Agent
+
+```bash
+# 1. Save baseline
+trickle verify --baseline
+
+# 2. Get fix plan
+trickle heal --json
+```
+
+The heal plan includes the detected issue, relevant queries, call trace, and a specific fix recommendation:
+
+```json
+{
+  "alert": { "severity": "critical", "category": "n_plus_one" },
+  "context": {
+    "queries": [5 matching queries],
+    "callTrace": [execution flow showing the loop]
+  },
+  "recommendation": "Replace the N+1 pattern with a batch query using IN clause",
+  "confidence": "high"
+}
+```
+
+Your AI agent reads this, applies the fix, then verifies:
+
+```bash
+# 3. After fix, re-run and compare
+trickle run python app.py
+trickle verify
+```
+
+```
+  N+1 Queries        1 →      0   ↓ 1
+  Max Function (ms)  234 →    12   ↓ 222
+  ✓ Fix verified — 2 metric(s) improved
+```
+
+## Use Case 3: Webhook Alerts (Like PagerDuty)
+
+```bash
+trickle monitor --webhook https://hooks.slack.com/services/... --watch
+```
+
+Sends Slack alerts whenever new issues are detected. The `--watch` flag continuously monitors for changes.
+
+## Use Case 4: Local Dashboard (Like Datadog UI)
+
+```bash
+trickle dashboard-local
+```
+
+Opens a dark-themed HTML dashboard at `http://localhost:4321` showing:
+- Alert summary cards (critical/warning/ok)
+- Function timing table (sorted by duration)
+- Database query table (sorted by duration)
+- Memory profile (RSS/heap at start/end)
+- Error list with stack traces
+
+Also serves a JSON API at `/api/data` for custom integrations.
+
+## Use Case 5: Production Deployment
+
+```bash
+# Low overhead: sample 1% of calls, disable variable tracing
+TRICKLE_PRODUCTION=1 TRICKLE_SAMPLE_RATE=0.01 trickle run python app.py
+```
+
+In production mode:
+- Variable tracing disabled (zero overhead for most code)
+- Only 1% of function calls get full type observation
+- Errors are **always** captured regardless of sample rate
+- Database queries, HTTP requests, and console output still traced
+
+## Use Case 6: Distributed Tracing
+
+```bash
+# Service A
+TRICKLE_SERVICE_NAME=user-api trickle run python user_service.py
+
+# Service B
+TRICKLE_SERVICE_NAME=order-api trickle run python order_service.py
+```
+
+Trickle automatically injects `X-Trickle-Trace-Id` headers into outgoing HTTP requests, linking observations across services.
+
+## Use Case 7: MCP Server for Agent Access
+
+```json
+{
+  "mcpServers": {
+    "trickle": {
+      "command": "npx",
+      "args": ["trickle-cli", "mcp-server"]
+    }
+  }
+}
+```
+
+15 tools available — agents can query any aspect of your application's runtime behavior without adding console.log or re-running code.
+
+## Comparison with Datadog
+
+| Feature | Datadog | trickle |
+|---------|---------|---------|
+| Setup | Dashboard config, agent install, API keys | `trickle run app.py` |
+| Pricing | $23/host/month | Free (open source) |
+| Variable values | No | Yes — every assignment |
+| Function signatures | No | Yes — with param types |
+| N+1 detection | Manual query analysis | Automatic |
+| Auto-fix | No | Yes — `trickle heal` |
+| AI agent access | Limited API | 15 MCP tools |
+| Code changes | SDK instrumentation | Zero |
+| Local dashboard | No | `trickle dashboard-local` |
+| Production mode | Always on | Configurable sampling |
