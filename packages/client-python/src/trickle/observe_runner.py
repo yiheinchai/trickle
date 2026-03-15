@@ -111,6 +111,13 @@ def main() -> None:
     except Exception:
         pass
 
+    # Install structured log observer
+    try:
+        from trickle.log_observer import install_log_observer
+        install_log_observer()
+    except Exception:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _production = _os2.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")

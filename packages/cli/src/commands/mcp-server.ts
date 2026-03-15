@@ -527,6 +527,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_logs",
+    description: "Get structured log entries from Python's logging module — level, logger name, message, file, line, extra fields, and exceptions. Like Datadog log aggregation.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_console_output",
     description: "Get console.log/error/warn output from the last application run. Shows what the app printed to stdout/stderr.",
     inputSchema: { type: "object", properties: {} },
@@ -623,6 +628,19 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
             break;
           }
           case "get_performance_profile": result = getPerformanceProfile(); break;
+          case "get_logs": {
+            const logsFile = path.join(findTrickleDir(), "logs.jsonl");
+            if (!fs.existsSync(logsFile)) {
+              result = { logs: "No structured logs captured. The app may not use Python's logging module." };
+            } else {
+              const logs: unknown[] = [];
+              for (const line of fs.readFileSync(logsFile, "utf-8").split("\n").filter(Boolean)) {
+                try { logs.push(JSON.parse(line)); } catch {}
+              }
+              result = logs.length > 0 ? { logs } : { logs: "No log entries recorded." };
+            }
+            break;
+          }
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
