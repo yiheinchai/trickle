@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Added auto error capture — when Node.js crashes with uncaught exception, trickle writes error context + nearby variable values to .trickle/errors.jsonl. Agents run `trickle context <file> --annotated` after a crash and immediately see source code with values showing what caused the error. Full agent stack: CLAUDE.md generation, trickle context (plain/compact/annotated/json), error capture, tool-schema. Continue expanding TAM — consider adding Python error capture, database/ORM query tracing, or new language support.
+Python error capture now matches Node.js — both write crash context + nearby variable values to .trickle/errors.jsonl. Full agent debugging stack complete: CLAUDE.md generation (trickle init), trickle context (plain/compact/annotated/json), auto error capture (JS + Python), tool-schema (OpenAI/Anthropic/MCP). Continue expanding TAM — consider database/ORM query tracing, new language support (Go/Ruby), or deeper IDE integration.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
