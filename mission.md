@@ -14,7 +14,7 @@ The reliability stack is nearly complete. One gap remains, plus new growth oppor
 
 2. **Agent memory observability** — Agent memory is now a first-class primitive (Mem0 shows 26% accuracy gains, Zep/LangGraph established). Nobody observes memory operations. Add zero-code tracing of memory reads/writes/updates for Mem0 and LangGraph memory stores. Capture: what was stored, what was retrieved, retrieval relevance, memory staleness. Write to `.trickle/memory.jsonl`. This opens a new category trickle can own.
 
-3. **Agentic DevOps observability** — GitLab 18.8 GA with 7 AI agents across the SDLC, Azure "Agentic DevOps Solutions" as product category, FinOps agents optimizing cloud spend. These agent workflows need observability but aren't covered by LLM-specific tools. Trickle's general-purpose runtime tracing already captures function calls, DB queries, and HTTP requests — position this as "observability for DevOps agents" with a use case doc and CLI examples.
+3. **Agentic DevOps observability** — SHIPPED: New use case doc `usecases/agentic-devops.md` with 6 scenarios: CI/CD agent observation, reliability benchmarking, security scanning, FinOps cost control, compliance audit, CI quality gates. Positions trickle as the observability layer for DevOps agents.
 
 4. **Prompt caching observability upgrade** — Anthropic added automatic caching with workspace-level isolation; Bedrock added 1-hour TTL. Upgrade trickle's cache analysis to detect provider-reported cache tokens (Anthropic now returns `cache_creation_input_tokens` and `cache_read_input_tokens`). Show actual cache hit rate vs the current latency-based heuristic. Integrate with cost-report to show dollars saved by caching.
 
