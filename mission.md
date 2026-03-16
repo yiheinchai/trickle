@@ -14,7 +14,7 @@ Priority areas ranked by competitive urgency:
 
 2. **OpenAI Agents SDK tracing** — SHIPPED: Zero-code tracing via TracingProcessor interface + add_trace_processor(). Captures AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, GuardrailSpanData with timing/tokens. Events use `framework: "openai-agents"`. Trickle now traces ALL major agent frameworks: LangChain + CrewAI + Claude Agent SDK + OpenAI Agents SDK.
 
-3. **Silent failure detection** — The #1 unsolved agent problem: agents select wrong tools, retrieve wrong docs, but return HTTP 200 with confident-sounding answers. Only 3% of developers "highly trust" AI output. Build automatic detection of: repeated tool retries, tool selection that ignores available context, cost spikes vs output quality, and response confidence scoring. Surface these as warnings in dashboard and `trickle monitor`. This is the "why" debugger.
+3. **Silent failure detection** — SHIPPED: `trickle monitor` now detects LLM and agent anomalies: (a) high LLM error rate, (b) cost spikes (single call >50% of total), (c) excessive token usage (>10K/call), (d) tool retry loops (same tool 3+ times), (e) tool execution errors, (f) agent workflow failures, (g) slow agent runs (>30s). All with actionable suggestions. Alerts written to alerts.jsonl for dashboard and agent consumption.
 
 4. **Per-agent cost roll-up** — Cost-report exists but doesn't break down by agent/workflow. Production agents burn 5-10M tokens/month at 1K users/day. Add per-agent, per-task cost attribution in agent trace view. Show which agent decisions drove cost — enabling developers to optimize the expensive paths.
 

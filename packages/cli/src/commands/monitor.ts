@@ -435,6 +435,121 @@ function analyzeCallTrace(trickleDir: string, rules: RulesConfig): Alert[] {
   return alerts;
 }
 
+function analyzeLlmCalls(trickleDir: string): Alert[] {
+  const alerts: Alert[] = [];
+  const llmFile = path.join(trickleDir, 'llm.jsonl');
+  if (!fs.existsSync(llmFile)) return [];
+  const calls = readJsonl(llmFile) as any[];
+  if (calls.length === 0) return [];
+
+  // 1. High error rate
+  const errors = calls.filter(c => c.error);
+  if (errors.length > 0 && errors.length / calls.length > 0.3) {
+    alerts.push({
+      kind: 'alert', severity: 'critical', category: 'llm_errors',
+      message: `High LLM error rate: ${errors.length}/${calls.length} calls failed (${Math.round(errors.length / calls.length * 100)}%)`,
+      details: { errorCount: errors.length, totalCalls: calls.length },
+      timestamp: Date.now(),
+      suggestion: `Check API keys, rate limits, and model availability. Common errors: ${[...new Set(errors.slice(0, 3).map(e => (e.error || '').substring(0, 50)))].join('; ')}`,
+    });
+  }
+
+  // 2. Cost spike — single call > 50% of total
+  const totalCost = calls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
+  if (totalCost > 0) {
+    const maxCall = calls.reduce((max: any, c: any) => (c.estimatedCostUsd || 0) > (max.estimatedCostUsd || 0) ? c : max, calls[0]);
+    if (maxCall.estimatedCostUsd > totalCost * 0.5 && calls.length > 2) {
+      alerts.push({
+        kind: 'alert', severity: 'warning', category: 'llm_cost_spike',
+        message: `Single LLM call consumed ${Math.round(maxCall.estimatedCostUsd / totalCost * 100)}% of total cost ($${maxCall.estimatedCostUsd.toFixed(4)} of $${totalCost.toFixed(4)})`,
+        details: { model: maxCall.model, tokens: maxCall.totalTokens, cost: maxCall.estimatedCostUsd, input: (maxCall.inputPreview || '').substring(0, 80) },
+        timestamp: Date.now(),
+        suggestion: `Review this prompt for unnecessary length. Consider using a cheaper model (e.g., gpt-4o-mini instead of gpt-4o).`,
+      });
+    }
+  }
+
+  // 3. Excessive token usage per call (> 10K tokens)
+  const highTokenCalls = calls.filter(c => (c.totalTokens || 0) > 10000);
+  if (highTokenCalls.length > 0) {
+    alerts.push({
+      kind: 'alert', severity: 'warning', category: 'llm_high_tokens',
+      message: `${highTokenCalls.length} LLM call(s) used >10K tokens`,
+      details: { calls: highTokenCalls.map((c: any) => ({ model: c.model, tokens: c.totalTokens, input: (c.inputPreview || '').substring(0, 50) })) },
+      timestamp: Date.now(),
+      suggestion: `Large prompts increase cost and latency. Consider chunking input, using summarization, or reducing context window.`,
+    });
+  }
+
+  return alerts;
+}
+
+function analyzeAgentEvents(trickleDir: string): Alert[] {
+  const alerts: Alert[] = [];
+  const agentsFile = path.join(trickleDir, 'agents.jsonl');
+  if (!fs.existsSync(agentsFile)) return [];
+  const events = readJsonl(agentsFile) as any[];
+  if (events.length === 0) return [];
+
+  // 1. Repeated tool retries — same tool called 3+ times in a row
+  const toolCalls = events.filter(e => e.event === 'tool_start' || e.event === 'tool_end');
+  const toolNames = toolCalls.filter(e => e.event === 'tool_start').map(e => e.tool || '');
+  for (let i = 0; i < toolNames.length - 2; i++) {
+    if (toolNames[i] === toolNames[i + 1] && toolNames[i] === toolNames[i + 2] && toolNames[i]) {
+      alerts.push({
+        kind: 'alert', severity: 'warning', category: 'agent_tool_retry',
+        message: `Tool "${toolNames[i]}" called 3+ times in a row — possible retry loop`,
+        details: { tool: toolNames[i], consecutiveCalls: 3 },
+        timestamp: Date.now(),
+        suggestion: `The agent may be retrying a failing tool. Check if the tool input is correct or if the agent misunderstands the tool's capabilities.`,
+      });
+      break; // Only report once
+    }
+  }
+
+  // 2. Tool errors
+  const toolErrors = events.filter(e => e.event === 'tool_error');
+  if (toolErrors.length > 0) {
+    alerts.push({
+      kind: 'alert', severity: toolErrors.length >= 3 ? 'critical' : 'warning', category: 'agent_tool_errors',
+      message: `${toolErrors.length} tool execution error(s) during agent run`,
+      details: { errors: toolErrors.slice(0, 5).map((e: any) => ({ tool: e.tool, error: (e.error || '').substring(0, 100) })) },
+      timestamp: Date.now(),
+      suggestion: `Agent tools are failing. Check tool implementations and ensure inputs match expected schemas.`,
+    });
+  }
+
+  // 3. Agent errors / crew failures
+  const agentErrors = events.filter(e => e.event === 'crew_error' || e.event === 'chain_error' || e.event === 'agent_error');
+  if (agentErrors.length > 0) {
+    for (const err of agentErrors.slice(0, 3)) {
+      alerts.push({
+        kind: 'alert', severity: 'critical', category: 'agent_failure',
+        message: `Agent workflow failed: ${(err.error || err.chain || 'unknown error').substring(0, 100)}`,
+        details: { event: err.event, framework: err.framework, error: err.error },
+        timestamp: Date.now(),
+        suggestion: `Use \`trickle why\` to trace the causal chain leading to this failure.`,
+      });
+    }
+  }
+
+  // 4. Long agent runs (> 30s)
+  const crewEnds = events.filter(e => e.event === 'crew_end' && e.durationMs);
+  for (const run of crewEnds) {
+    if (run.durationMs > 30000) {
+      alerts.push({
+        kind: 'alert', severity: 'warning', category: 'agent_slow',
+        message: `Agent run took ${(run.durationMs / 1000).toFixed(1)}s — consider optimizing`,
+        details: { framework: run.framework, durationMs: run.durationMs },
+        timestamp: Date.now(),
+        suggestion: `Long agent runs increase cost and user wait time. Check for unnecessary tool calls or verbose prompts.`,
+      });
+    }
+  }
+
+  return alerts;
+}
+
 export function runMonitor(opts: MonitorOptions): Alert[] {
   const trickleDir = findTrickleDir(opts.dir);
   if (!fs.existsSync(trickleDir)) {
@@ -453,6 +568,8 @@ export function runMonitor(opts: MonitorOptions): Alert[] {
     ...analyzeMemory(trickleDir, memoryThresholdMb, rules),
     ...analyzeFunctions(trickleDir, slowFunctionMs, rules),
     ...analyzeCallTrace(trickleDir, rules),
+    ...analyzeLlmCalls(trickleDir),
+    ...analyzeAgentEvents(trickleDir),
   ];
 
   // Write alerts to file for agent consumption
