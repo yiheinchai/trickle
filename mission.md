@@ -6,16 +6,16 @@ Trickle's strategic moat is zero-code, local-first runtime observability for bot
 </higher directive>
 
 <focus point>
-CLI 0.1.181, client-js 0.2.121, client-python 0.2.31. SHIPPED: LangChain agent tracing, MCP tool call tracing, LLM auto-instrumentation (OpenAI + Anthropic + Gemini).
+CLI 0.1.182, client-js 0.2.121, client-python 0.2.31. SHIPPED: Agent trace visualization, LangChain agent tracing, MCP tool call tracing, LLM auto-instrumentation.
 
-Just shipped: **LangChain agent workflow auto-tracing** — zero-code capture of agent steps. Patches CallbackManager.configure() to auto-inject a trickle callback handler as an inheritable handler. Captures: chain_start/end, tool_start/end, agent_action/finish, llm_start/end — all with parent-child run_id relationships. Writes to .trickle/agents.jsonl. Live status shows agent event count.
+Just shipped: **Agent Trace tab in dashboard** — nested tree view of agent execution flow. Shows chains, tools, LLM calls, agent actions with parent-child nesting, durations, input/output previews, reasoning thoughts. Color-coded by event type (blue=chain, green=tool, yellow=action, purple=LLM, red=error). Built from agents.jsonl data with run_id→parentRunId tree construction. CSV export included.
 
 Priority areas:
-1. **Agent execution graph visualization** — visual DAG in dashboard showing LLM→tool→agent flow
-2. **More agent frameworks** — CrewAI, OpenAI Agents SDK auto-detection
-3. **A2A protocol observability** — trace Google's Agent-to-Agent protocol alongside MCP
-4. **WebSocket dashboard streaming** — real-time browser updates
-5. **More LLM providers** — Cohere, Mistral AI
+1. **More agent frameworks** — CrewAI, OpenAI Agents SDK auto-detection
+2. **A2A protocol observability** — trace Google's Agent-to-Agent protocol alongside MCP
+3. **WebSocket dashboard streaming** — real-time browser updates
+4. **More LLM providers** — Cohere, Mistral AI
+5. **Interactive trace details** — click nodes in trace view to expand inputs/outputs/timing
 </focus point>
 </focus point>
 

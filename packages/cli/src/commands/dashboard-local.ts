@@ -51,6 +51,7 @@ export function exportToCsvFiles(trickleDir: string, outDir: string): { file: st
     profile: 'profile.jsonl',
     llm: 'llm.jsonl',
     mcp: 'mcp.jsonl',
+    agents: 'agents.jsonl',
   };
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const results: { file: string; rows: number }[] = [];
@@ -296,6 +297,7 @@ tr:hover{background:#161b22}
   <div class="tab" data-tab="calltrace">Call Trace <span class="badge" id="ct-count">0</span></div>
   <div class="tab" data-tab="variables">Variables <span class="badge" id="v-count">0</span></div>
   <div class="tab" data-tab="llm">LLM Calls <span class="badge" id="llm-count">0</span></div>
+  <div class="tab" data-tab="trace">Agent Trace <span class="badge" id="trace-count">0</span></div>
 </div>
 <div class="content" id="content"></div>
 <script>
@@ -310,6 +312,7 @@ document.getElementById('e-count').textContent=DATA.errors?.length||0;
 document.getElementById('ct-count').textContent=DATA.calltrace?.length||0;
 document.getElementById('v-count').textContent=DATA.variables?.length||0;
 document.getElementById('llm-count').textContent=DATA.llm?.length||0;
+document.getElementById('trace-count').textContent=DATA.agents?.length||0;
 document.getElementById('timestamp').textContent=new Date().toLocaleString();
 render();}
 
@@ -342,7 +345,7 @@ function toCSV(items,type){
 }
 
 function downloadCSV(type){
-  const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,alerts:DATA.alerts,llm:DATA.llm};
+  const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,alerts:DATA.alerts,llm:DATA.llm,agents:DATA.agents};
   const items=(dataMap[type]||[]).filter(matchSearch);
   const csv=toCSV(items,type);
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
@@ -361,7 +364,8 @@ else if(currentTab==='logs')renderTable(c,DATA.logs||[],'logs');
 else if(currentTab==='errors')renderTable(c,DATA.errors||[],'errors');
 else if(currentTab==='calltrace')renderTable(c,DATA.calltrace||[],'calltrace');
 else if(currentTab==='variables')renderTable(c,DATA.variables||[],'variables');
-else if(currentTab==='llm')renderTable(c,DATA.llm||[],'llm');}
+else if(currentTab==='llm')renderTable(c,DATA.llm||[],'llm');
+else if(currentTab==='trace')renderTraceView(c);}
 
 function renderOverview(c){const a=DATA.alerts||[];const cr=a.filter(x=>x.severity==='critical').length;
 const w=a.filter(x=>x.severity==='warning').length;
@@ -402,6 +406,60 @@ else html+='<div class="empty">No query data</div>';
 html+='</div></div>';
 return html;
 }
+
+function renderTraceView(c){
+const events=DATA.agents||[];
+if(events.length===0){c.innerHTML='<div class="empty">No agent trace data. Run a LangChain agent with trickle to see the execution graph.</div>';return;}
+// Build tree from parent-child relationships
+const byId={};const roots=[];
+events.forEach(e=>{const id=e.runId;if(!byId[id])byId[id]={events:[],children:[]};byId[id].events.push(e);});
+events.forEach(e=>{if(e.parentRunId&&byId[e.parentRunId]){const pid=e.parentRunId;if(!byId[pid].children.includes(e.runId))byId[pid].children.push(e.runId);}});
+// Find roots (no parent or parent not in set)
+const childSet=new Set();
+Object.values(byId).forEach(n=>n.children.forEach(c=>childSet.add(c)));
+Object.keys(byId).forEach(id=>{if(!childSet.has(id))roots.push(id);});
+// Color map for event types
+const colors={chain_start:'#58a6ff',chain_end:'#58a6ff',tool_start:'#3fb950',tool_end:'#3fb950',action:'#d29922',finish:'#d29922',llm_end:'#bc8cff',llm_error:'#f85149',tool_error:'#f85149',chain_error:'#f85149'};
+const icons={chain_start:'\\u26D3',tool_start:'\\u2699',action:'\\u2692',finish:'\\u2714',llm_end:'\\u2728',chain_end:'\\u2714'};
+// Render tree recursively
+function renderNode(id,depth){
+const node=byId[id];if(!node)return'';
+const evts=node.events;
+const startEvt=evts.find(e=>e.event?.endsWith('_start'))||evts[0];
+const endEvt=evts.find(e=>e.event?.endsWith('_end'));
+const actionEvt=evts.find(e=>e.event==='action');
+const finishEvt=evts.find(e=>e.event==='finish');
+const errorEvt=evts.find(e=>e.event?.endsWith('_error'));
+const name=startEvt?.chain||startEvt?.tool||actionEvt?.tool||'unknown';
+const evt=startEvt?.event||actionEvt?.event||'unknown';
+const dur=endEvt?.durationMs;
+const input=startEvt?.toolInput||startEvt?.input||actionEvt?.toolInput||'';
+const output=endEvt?.output||finishEvt?.output||'';
+const thought=actionEvt?.thought||finishEvt?.thought||'';
+const error=errorEvt?.error||'';
+const color=colors[evt]||'#8b949e';
+const icon=icons[evt]||'\\u25CF';
+const pad=depth*24;
+let html='<div style="padding:4px 0 4px '+pad+'px;border-bottom:1px solid #21262d;font-size:13px">';
+html+='<span style="color:'+color+';margin-right:6px">'+icon+'</span>';
+html+='<span style="color:'+color+';font-weight:600">'+name+'</span>';
+if(dur)html+=' <span style="color:#8b949e;font-size:11px">'+dur.toFixed(1)+'ms</span>';
+if(error)html+=' <span class="tag tag-critical">error</span>';
+if(input)html+='<div style="color:#8b949e;font-size:11px;margin-left:'+(pad+20)+'px;margin-top:2px">\\u2192 '+input.substring(0,120)+'</div>';
+if(thought)html+='<div style="color:#d29922;font-size:11px;margin-left:'+(pad+20)+'px;font-style:italic">'+thought.substring(0,120)+'</div>';
+if(output)html+='<div style="color:#3fb950;font-size:11px;margin-left:'+(pad+20)+'px;margin-top:2px">\\u2190 '+output.substring(0,120)+'</div>';
+if(error)html+='<div style="color:#f85149;font-size:11px;margin-left:'+(pad+20)+'px">\\u2716 '+error.substring(0,120)+'</div>';
+html+='</div>';
+// Render children
+node.children.forEach(childId=>{html+=renderNode(childId,depth+1);});
+return html;}
+let html='<div style="margin-bottom:12px"><span style="color:#8b949e;font-size:12px">'+events.length+' agent events, '+roots.length+' root traces</span>';
+html+=' <button class="btn btn-export" onclick="downloadCSV(\\'agents\\')">Export CSV</button></div>';
+html+='<div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:12px">';
+if(roots.length===0){html+='<div class="empty">No trace roots found</div>';}
+else{roots.forEach(id=>{html+=renderNode(id,0);});}
+html+='</div>';
+c.innerHTML=html;}
 
 function renderTable(c,items,type){
 const filtered=items.filter(matchSearch);
@@ -446,7 +504,7 @@ function goPage(p){currentPage=p;renderTableKeep();}
 function changePageSize(n){pageSize=parseInt(n);currentPage=1;renderTableKeep();}
 function renderTableKeep(){
 const c=document.getElementById('content');
-const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,llm:DATA.llm};
+const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,llm:DATA.llm,agents:DATA.agents};
 if(dataMap[currentTab])renderTable(c,dataMap[currentTab]||[],currentTab);
 }
 
@@ -515,18 +573,19 @@ export function serveDashboard(opts: { port?: number; dir?: string }): void {
         variables: readJsonl(path.join(trickleDir, 'variables.jsonl')),
         llm: readJsonl(path.join(trickleDir, 'llm.jsonl')),
         mcp: readJsonl(path.join(trickleDir, 'mcp.jsonl')),
+        agents: readJsonl(path.join(trickleDir, 'agents.jsonl')),
       };
       res.end(JSON.stringify(data));
       return;
     }
     // CSV download endpoint: /api/csv/:type
-    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile|llm|mcp)$/);
+    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile|llm|mcp|agents)$/);
     if (csvMatch) {
       const type = csvMatch[1];
       const fileMap: Record<string, string> = {
         functions: 'observations.jsonl', queries: 'queries.jsonl', errors: 'errors.jsonl',
         calltrace: 'calltrace.jsonl', logs: 'logs.jsonl', variables: 'variables.jsonl',
-        alerts: 'alerts.jsonl', profile: 'profile.jsonl', llm: 'llm.jsonl', mcp: 'mcp.jsonl',
+        alerts: 'alerts.jsonl', profile: 'profile.jsonl', llm: 'llm.jsonl', mcp: 'mcp.jsonl', agents: 'agents.jsonl',
       };
       const items = readJsonl(path.join(trickleDir, fileMap[type]));
       const csv = jsonlToCsv(items);
