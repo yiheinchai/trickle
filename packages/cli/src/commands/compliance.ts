@@ -67,7 +67,7 @@ interface ComplianceReport {
   };
 }
 
-export function generateComplianceReport(opts: { json?: boolean; out?: string }): void {
+export async function generateComplianceReport(opts: { json?: boolean; out?: string }): Promise<void> {
   const dir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
 
   if (!fs.existsSync(dir)) {
@@ -130,7 +130,7 @@ export function generateComplianceReport(opts: { json?: boolean; out?: string })
     const { runSecurityScan } = require('./security');
     const origLog = console.log;
     console.log = () => {};
-    const result = runSecurityScan({ dir });
+    const result = await runSecurityScan({ dir });
     console.log = origLog;
     securityFindings = result.findings.map((f: any) => ({
       severity: f.severity, category: f.category,

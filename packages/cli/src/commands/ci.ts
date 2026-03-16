@@ -231,7 +231,7 @@ async function postPrComment(
       const { runSecurityScan } = require('./security');
       const origLog2 = console.log;
       console.log = () => {};
-      const secResult = runSecurityScan({ dir: trickleDir });
+      const secResult = await runSecurityScan({ dir: trickleDir });
       console.log = origLog2;
       if (secResult.findings.length > 0) {
         body += `### 🔒 Security\n\n`;

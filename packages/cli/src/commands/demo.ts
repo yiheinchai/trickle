@@ -134,7 +134,7 @@ export async function runDemo(): Promise<void> {
     const { runSecurityScan } = require('./security');
     const origLog = console.log;
     console.log = () => {};
-    const sec = runSecurityScan({ dir: path.join(demoDir, '.trickle') });
+    const sec = await runSecurityScan({ dir: path.join(demoDir, '.trickle') });
     console.log = origLog;
     if (sec.findings.length > 0) {
       for (const f of sec.findings.slice(0, 2)) {

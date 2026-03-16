@@ -700,7 +700,7 @@ program
   .option("--json", "Structured JSON output")
   .action(async (opts) => {
     const { runSecurityScan } = await import("./commands/security");
-    runSecurityScan({ json: opts.json });
+    await runSecurityScan({ json: opts.json });
   });
 
 // trickle deps

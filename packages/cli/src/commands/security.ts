@@ -54,7 +54,28 @@ const SQLI_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: 'OR 1=1', pattern: /OR\s+['"]?1['"]?\s*=\s*['"]?1/i },
   { name: 'Comment injection', pattern: /--\s*$|\/\*.*\*\//i },
   { name: 'DROP/DELETE without WHERE', pattern: /(?:DROP|DELETE\s+FROM)\s+\w+\s*(?:;|$)/i },
+  { name: 'Tautology (always true)', pattern: /WHERE\s+(?:1\s*=\s*1|true|''\s*=\s*'')/i },
+  { name: 'Stacked queries', pattern: /;\s*(?:SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\s/i },
+  { name: 'Sleep/benchmark injection', pattern: /(?:SLEEP|BENCHMARK|WAITFOR\s+DELAY|pg_sleep)\s*\(/i },
 ];
+
+// PII patterns — detect personal data in API responses
+const PII_PATTERNS: Array<{ name: string; pattern: RegExp; severity: SecurityFinding['severity'] }> = [
+  { name: 'Email address', pattern: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i, severity: 'info' },
+  { name: 'Phone number', pattern: /(?:\+?1[-.\s]?)?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}/, severity: 'info' },
+  { name: 'SSN', pattern: /\b\d{3}[-]?\d{2}[-]?\d{4}\b/, severity: 'critical' },
+  { name: 'Credit card number', pattern: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b/, severity: 'critical' },
+  { name: 'IP address', pattern: /\b(?:\d{1,3}\.){3}\d{1,3}\b/, severity: 'info' },
+  { name: 'Password hash', pattern: /\$2[aby]?\$\d{2}\$[./A-Za-z0-9]{53}/, severity: 'warning' },
+];
+
+// Sensitive field names that shouldn't appear in API responses
+const SENSITIVE_FIELDS = new Set([
+  'password', 'passwd', 'pwd', 'secret', 'token', 'api_key', 'apikey',
+  'api_secret', 'access_token', 'refresh_token', 'private_key',
+  'credit_card', 'card_number', 'cvv', 'cvc', 'ssn', 'social_security',
+  'pin', 'otp', 'auth_token', 'session_id', 'session_token',
+]);
 
 function scanValue(value: unknown, source: string, location: string): SecurityFinding[] {
   const findings: SecurityFinding[] = [];
@@ -80,13 +101,34 @@ function scanValue(value: unknown, source: string, location: string): SecurityFi
   return findings;
 }
 
+/**
+ * Recursively extract all field names from a JSON value.
+ */
+function extractFieldNames(obj: unknown, prefix = '', depth = 0): string[] {
+  if (depth > 3 || !obj || typeof obj !== 'object') return [];
+  const names: string[] = [];
+  if (Array.isArray(obj)) {
+    if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
+      names.push(...extractFieldNames(obj[0], prefix, depth + 1));
+    }
+  } else {
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      names.push(key);
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        names.push(...extractFieldNames(value, `${key}.`, depth + 1));
+      }
+    }
+  }
+  return names;
+}
+
 export interface SecurityResult {
   findings: SecurityFinding[];
   scanned: Record<string, number>;
   summary: { critical: number; warning: number; info: number };
 }
 
-export function runSecurityScan(opts?: { dir?: string; json?: boolean }): SecurityResult {
+export async function runSecurityScan(opts?: { dir?: string; json?: boolean }): Promise<SecurityResult> {
   const trickleDir = opts?.dir || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
   const findings: SecurityFinding[] = [];
   const scanned: Record<string, number> = { variables: 0, queries: 0, logs: 0, observations: 0 };
@@ -125,12 +167,94 @@ export function runSecurityScan(opts?: { dir?: string; json?: boolean }): Securi
     findings.push(...scanValue(l.message || l.msg, 'log', l.logger || l.name || 'log'));
   }
 
-  // Scan function observations (sample I/O)
+  // Scan function observations (sample I/O) — from local file AND backend
   const observations = readJsonl(path.join(trickleDir, 'observations.jsonl'));
+
+  // Also try to fetch from backend API for richer sample data
+  try {
+    const { getBackendUrl } = require('../config');
+    const backendUrl = getBackendUrl();
+    const res = await fetch(`${backendUrl}/api/mock-config`);
+    if (res.ok) {
+      const { routes } = await res.json() as { routes: Array<{ functionName: string; module: string; sampleInput: unknown; sampleOutput: unknown }> };
+      for (const r of routes) {
+        observations.push({
+          functionName: r.functionName,
+          module: r.module,
+          sampleInput: r.sampleInput,
+          sampleOutput: r.sampleOutput,
+        });
+      }
+    }
+  } catch {
+    // Backend not available — use local data only
+  }
+
   scanned.observations = observations.length;
   for (const o of observations) {
     if (o.sampleInput) findings.push(...scanValue(o.sampleInput, 'function_input', `${o.module}.${o.functionName}`));
     if (o.sampleOutput) findings.push(...scanValue(o.sampleOutput, 'function_output', `${o.module}.${o.functionName}`));
+  }
+
+  // ── PII in API responses ──
+  // Scan sample outputs for personal data that shouldn't be exposed
+  for (const o of observations) {
+    if (o.sampleOutput) {
+      const outputStr = typeof o.sampleOutput === 'string' ? o.sampleOutput : JSON.stringify(o.sampleOutput);
+      for (const pii of PII_PATTERNS) {
+        if (pii.pattern.test(outputStr)) {
+          // Skip email pattern for functions that are SUPPOSED to return emails (e.g., user profile)
+          if (pii.name === 'Email address' || pii.name === 'IP address') continue; // too noisy for info
+          findings.push({
+            severity: pii.severity,
+            category: 'pii_exposure',
+            message: `${pii.name} found in API response: ${o.functionName}`,
+            source: 'function_output',
+            location: `${o.module}.${o.functionName}`,
+            evidence: outputStr.substring(0, 60),
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  // ── Sensitive fields in API responses ──
+  // Detect when API responses contain password/token/secret fields
+  for (const o of observations) {
+    if (o.sampleOutput && typeof o.sampleOutput === 'object') {
+      const fields = extractFieldNames(o.sampleOutput);
+      for (const field of fields) {
+        if (SENSITIVE_FIELDS.has(field.toLowerCase())) {
+          findings.push({
+            severity: 'critical',
+            category: 'sensitive_field_exposure',
+            message: `API response "${o.functionName}" contains sensitive field "${field}"`,
+            source: 'function_output',
+            location: `${o.module}.${o.functionName}`,
+            evidence: `field: ${field}`,
+          });
+        }
+      }
+    }
+  }
+
+  // ── Overprivileged responses (excessive data exposure) ──
+  // Flag responses with unusually many fields (potential over-fetching)
+  for (const o of observations) {
+    if (o.sampleOutput && typeof o.sampleOutput === 'object' && !Array.isArray(o.sampleOutput)) {
+      const fields = extractFieldNames(o.sampleOutput);
+      if (fields.length > 20) {
+        findings.push({
+          severity: 'info',
+          category: 'excessive_data_exposure',
+          message: `API response "${o.functionName}" returns ${fields.length} fields — consider returning only what the client needs`,
+          source: 'function_output',
+          location: `${o.module}.${o.functionName}`,
+          evidence: `${fields.length} fields: ${fields.slice(0, 8).join(', ')}...`,
+        });
+      }
+    }
   }
 
   // ── Agent Security: The "Lethal Trifecta" ──
