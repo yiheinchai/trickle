@@ -1557,6 +1557,16 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // Claude Agent SDK
+    if (request.includes('claude-agent-sdk') && !expressPatched.has('claude-agent-sdk')) {
+      expressPatched.add('claude-agent-sdk');
+      try {
+        // The Claude Agent SDK uses hooks config — we can't easily patch
+        // from Module._load since it's ESM-only. Log detection for now.
+        if (debug) console.log('[trickle] Claude Agent SDK detected — use hooks for tracing');
+      } catch { /* not critical */ }
+    }
+
     // Google Gemini SDK
     if (request === '@google/genai' && !expressPatched.has('@google/genai')) {
       expressPatched.add('@google/genai');

@@ -10,7 +10,7 @@ CLI 0.1.184, client-js 0.2.121, client-python 0.2.31. 38 MCP tools. SHIPPED: Lan
 
 Priority areas ranked by competitive urgency:
 
-1. **Claude Agent SDK tracing** — Arize Phoenix just shipped Claude Agent SDK instrumentation. Trickle must have parity immediately. The SDK exposes hooks (PreToolUse, PostToolUse, subagent start/stop) that enable zero-code tracing. Claude Code is the #1 most-loved AI coding tool and Claude Agent SDK is how developers build agents on Anthropic's stack. Losing this to Phoenix would undermine trickle's "traces everything" positioning.
+1. **Claude Agent SDK tracing** — SHIPPED: Zero-code tracing via SDK hooks (PreToolUse, PostToolUse, PostToolUseFailure, SubagentStart, SubagentStop). Auto-injects hooks into ClaudeAgentOptions. Captures tool calls with input/output/duration, subagent lifecycle, and full agent run. Events use `framework: "claude-agent-sdk"`. Parity with Arize Phoenix achieved.
 
 2. **OpenAI Agents SDK tracing** — The SDK has `add_trace_processor()` API that accepts custom trace processors — a clean zero-code entry point. Capture agent handoffs, guardrails, tool calls, and custom events. Datadog already has native integration; trickle needs a free, local alternative. Combined with Claude Agent SDK (#1), this completes the Big 3: LangChain + CrewAI + OpenAI + Claude = every major agent framework.
 

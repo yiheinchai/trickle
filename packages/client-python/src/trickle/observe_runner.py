@@ -176,10 +176,17 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
-    # Patch LangChain/agent frameworks for workflow tracing
+    # Patch LangChain/CrewAI agent frameworks for workflow tracing
     try:
         from trickle.agent_observer import patch_agents
         patch_agents(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
+    # Patch Claude Agent SDK for agent workflow tracing
+    try:
+        from trickle.claude_agent_observer import patch_claude_agents
+        patch_claude_agents(debug=_debug)
     except Exception:
         pass  # Never block the user's app
 
