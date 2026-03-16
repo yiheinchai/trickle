@@ -377,6 +377,7 @@ c.innerHTML='<div class="stats">'+
 '<div class="stat"><div class="label">Logs</div><div class="val">'+(DATA.logs?.length||0)+'</div></div>'+
 '<div class="stat"><div class="label">Alerts</div><div class="val '+(cr>0?'red':w>0?'yellow':'green')+'">'+a.length+'</div></div>'+
 '<div class="stat"><div class="label">LLM Calls</div><div class="val">'+(DATA.llm?.length||0)+'</div></div>'+
+(function(){const llm=DATA.llm||[];const cost=llm.reduce((s,c)=>s+(c.estimatedCostUsd||0),0);return cost>0?'<div class="stat"><div class="label">LLM Cost</div><div class="val green">$'+cost.toFixed(4)+'</div></div>':'';})()+
 '</div>'+
 (a.length>0?'<h3 style="color:#58a6ff;margin:16px 0 8px">Alerts</h3><table><tr><th>Severity</th><th>Category</th><th>Message</th><th>Fix</th></tr>'+
 a.map(x=>'<tr><td><span class="tag tag-'+x.severity+'">'+x.severity+'</span></td><td>'+x.category+'</td><td>'+x.message+'</td><td style="color:#8b949e;font-size:12px">'+(x.suggestion||'')+'</td></tr>').join('')+'</table>':'')+

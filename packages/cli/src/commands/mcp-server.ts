@@ -791,6 +791,13 @@ const TOOLS = [
     description: "Get the agent execution trace — a timeline of all agent workflow events with parent-child relationships. Shows chain starts/ends, tool invocations, agent actions (with reasoning/thoughts), LLM calls, and errors. Each event has a runId and parentRunId for building the execution tree. Essential for debugging LangChain, CrewAI, or any agent framework.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "get_cost_report",
+    description: "Get LLM cost attribution — breakdown by provider and model with token counts, estimated costs, error rates, and monthly projection. Use this to understand WHERE money is being spent on LLM APIs and identify cost optimization opportunities. Shows the most expensive individual calls.",
+    inputSchema: { type: "object", properties: {
+      budget: { type: "number", description: "Optional budget in USD to check against" },
+    }},
+  },
 ];
 
 async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
@@ -1323,6 +1330,40 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               }
             } catch (e: any) {
               result = { error: `Failed to read MCP calls: ${e.message}` };
+            }
+            break;
+          }
+          case "get_cost_report": {
+            try {
+              const llmFile = require('path').join(findTrickleDir(), 'llm.jsonl');
+              const fs = require('fs');
+              if (!fs.existsSync(llmFile)) {
+                result = { error: "No LLM call data. Run your app with trickle to capture costs." };
+              } else {
+                const calls = fs.readFileSync(llmFile, 'utf-8').split('\n').filter(Boolean).map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+                const totalCost = calls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
+                const totalTokens = calls.reduce((s: number, c: any) => s + (c.totalTokens || 0), 0);
+                const byModel: Record<string, any> = {};
+                for (const c of calls) {
+                  const key = `${c.provider}/${c.model}`;
+                  if (!byModel[key]) byModel[key] = { calls: 0, tokens: 0, cost: 0, errors: 0 };
+                  byModel[key].calls++;
+                  byModel[key].tokens += c.totalTokens || 0;
+                  byModel[key].cost += c.estimatedCostUsd || 0;
+                  if (c.error) byModel[key].errors++;
+                }
+                const costlyCalls = calls.filter((c: any) => c.estimatedCostUsd > 0).sort((a: any, b: any) => b.estimatedCostUsd - a.estimatedCostUsd).slice(0, 5).map((c: any) => ({
+                  model: c.model, cost: c.estimatedCostUsd, tokens: c.totalTokens, input: (c.inputPreview || '').substring(0, 80),
+                }));
+                const budget = args.budget ? parseFloat(args.budget as string) : undefined;
+                result = {
+                  totalCost: Math.round(totalCost * 10000) / 10000, totalTokens, totalCalls: calls.length,
+                  byModel, costlyCalls,
+                  ...(budget ? { budget, budgetUsed: Math.round((totalCost / budget) * 1000) / 10 + '%', overBudget: totalCost > budget } : {}),
+                };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to generate cost report: ${e.message}` };
             }
             break;
           }

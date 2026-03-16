@@ -936,6 +936,17 @@ program
     llmCommand(opts);
   });
 
+// trickle cost-report
+program
+  .command("cost-report")
+  .description("LLM cost attribution — breakdown by provider, model, and function with monthly projection")
+  .option("--json", "Output raw JSON")
+  .option("--budget <usd>", "Check against a budget (e.g., --budget 10 for $10)")
+  .action(async (opts) => {
+    const { costReportCommand } = await import("./commands/cost-report");
+    costReportCommand(opts);
+  });
+
 // trickle mcp-calls
 program
   .command("mcp-calls")

@@ -14,7 +14,7 @@ Priority areas ranked by market impact:
 
 2. **OpenAI Agents SDK tracing** — OpenAI's SDK has built-in tracing but it's locked to their ecosystem. Developers using mixed providers (OpenAI + Anthropic + open-source models) need vendor-neutral tracing. Add zero-code interception of OpenAI's agent handoffs, guardrails, and tool calls.
 
-3. **Cost attribution and "why" debugging** — The #1 developer pain: surprise API bills ($30-$800/month) with no visibility into what drove costs, and 66% spending more time fixing near-correct AI output than writing from scratch. Add per-function and per-agent cost roll-up in the dashboard, token budget tracking, and decision path highlighting ("this agent chose tool X because of reasoning Y, which cost $Z").
+3. **Cost attribution** — SHIPPED: `trickle cost-report` command with cost breakdown by provider/model, monthly projection, budget checking (--budget flag), and most expensive calls. Dashboard overview shows LLM cost card. MCP server has `get_cost_report` tool (37 tools total). Still TODO: per-agent cost roll-up and decision path highlighting.
 
 4. **WebSocket dashboard streaming** — Real-time browser updates via WebSocket. The dashboard currently polls every 5 seconds via `/api/data`. Upgrade to push-based streaming for instant feedback during agent runs, server processes, and training loops.
 
