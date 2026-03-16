@@ -371,8 +371,14 @@ function generateRouteTestFile(routes: MockRoute[], framework: string, baseUrl: 
       lines.push("    });");
       lines.push("");
 
+      // POST typically returns 201, others return 200
+      // Use expect(res.ok) which covers 200-299 range
       lines.push("    expect(res.ok).toBe(true);");
-      lines.push(`    expect(res.status).toBe(200);`);
+      if (hasBody) {
+        lines.push("    expect(res.status === 200 || res.status === 201).toBe(true);");
+      } else {
+        lines.push(`    expect(res.status).toBe(200);`);
+      }
       lines.push("");
 
       lines.push("    const body = await res.json();");
@@ -770,18 +776,29 @@ function generateAssertions(obj: Record<string, unknown>, path: string, depth = 
   for (const [key, value] of Object.entries(obj)) {
     const propPath = `${path}.${key}`;
 
+    // Skip truncated values from sanitizeSample — they have wrong types
+    if (value === "[truncated]") {
+      assertions.push(`expect(${propPath}).toBeDefined();`);
+      continue;
+    }
+
     if (value === null) {
       assertions.push(`expect(${propPath}).toBeNull();`);
     } else if (Array.isArray(value)) {
       assertions.push(`expect(Array.isArray(${propPath})).toBe(true);`);
-      if (value.length > 0 && typeof value[0] === "object" && value[0] !== null) {
-        assertions.push(`expect(${propPath}.length).toBeGreaterThan(0);`);
-        const itemAssertions = generateAssertions(
-          value[0] as Record<string, unknown>,
-          `${propPath}[0]`,
-          depth + 1,
-        );
-        assertions.push(...itemAssertions);
+      if (value.length > 0) {
+        // Skip if first item is truncated
+        if (value[0] === "[truncated]") {
+          assertions.push(`expect(${propPath}.length).toBeGreaterThan(0);`);
+        } else if (typeof value[0] === "object" && value[0] !== null) {
+          assertions.push(`expect(${propPath}.length).toBeGreaterThan(0);`);
+          const itemAssertions = generateAssertions(
+            value[0] as Record<string, unknown>,
+            `${propPath}[0]`,
+            depth + 1,
+          );
+          assertions.push(...itemAssertions);
+        }
       }
     } else if (typeof value === "object") {
       assertions.push(`expect(typeof ${propPath}).toBe("object");`);
@@ -792,7 +809,12 @@ function generateAssertions(obj: Record<string, unknown>, path: string, depth = 
       );
       assertions.push(...nestedAssertions);
     } else if (typeof value === "string") {
-      assertions.push(`expect(typeof ${propPath}).toBe("string");`);
+      // Check if this looks like a truncated string from sanitizeSample
+      if (typeof value === "string" && (value as string).endsWith("...")) {
+        assertions.push(`expect(typeof ${propPath}).toBe("string");`);
+      } else {
+        assertions.push(`expect(typeof ${propPath}).toBe("string");`);
+      }
     } else if (typeof value === "number") {
       assertions.push(`expect(typeof ${propPath}).toBe("number");`);
     } else if (typeof value === "boolean") {

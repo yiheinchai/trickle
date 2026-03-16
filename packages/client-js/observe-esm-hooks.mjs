@@ -708,6 +708,8 @@ function transformSource(source, url, originalSource) {
           `const __rq_express = __cr_express(import.meta.url);`,
           `const __fwExpress = __rq_express('${fiPath}');`,
           `const ${fi.factoryName} = function(...args) { const a = __OrigExpress(...args); try { __fwExpress.${instrumentFn}(a, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(e) {} return a; };`,
+          `Object.keys(__OrigExpress).forEach(k => { ${fi.factoryName}[k] = __OrigExpress[k]; });`,
+          `Object.setPrototypeOf(${fi.factoryName}, Object.getPrototypeOf(__OrigExpress));`,
         );
         break;
       }

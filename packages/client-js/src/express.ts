@@ -72,7 +72,8 @@ function sanitizeSample(value: unknown, depth: number = 3): unknown {
   if (t === 'function') return `[Function: ${(value as Function).name || 'anonymous'}]`;
 
   if (Array.isArray(value)) {
-    return value.slice(0, 5).map(item => sanitizeSample(item, depth - 1));
+    // Preserve full depth for the first element (used for type assertions in test-gen)
+    return value.slice(0, 5).map((item, i) => sanitizeSample(item, i === 0 ? depth : depth - 1));
   }
 
   if (t === 'object') {
