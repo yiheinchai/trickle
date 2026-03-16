@@ -511,6 +511,7 @@ export function activate(context: vscode.ExtensionContext) {
   // Load variable data
   loadAllVariables();
   loadErrors();
+  loadAlerts();
 
   // Register hover provider for all common file types (JS/TS and Python)
   const selector: vscode.DocumentSelector = [
@@ -567,7 +568,7 @@ export function activate(context: vscode.ExtensionContext) {
       const debouncedErrorReload = () => {
         if (errorReloadTimer) clearTimeout(errorReloadTimer);
         clearTrickleDirCache();
-        errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
+        errorReloadTimer = setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300);
       };
 
       errWatcher.onDidChange(debouncedErrorReload);
@@ -581,6 +582,13 @@ export function activate(context: vscode.ExtensionContext) {
       });
       context.subscriptions.push(errWatcher);
       if (!errorFileWatcher) errorFileWatcher = errWatcher;
+
+      // Watch alerts.jsonl for security/agent alerts
+      const alertPattern = new vscode.RelativePattern(folder, '**/.trickle/alerts.jsonl');
+      const alertWatcher = vscode.workspace.createFileSystemWatcher(alertPattern);
+      alertWatcher.onDidChange(() => setTimeout(loadAlerts, 300));
+      alertWatcher.onDidCreate(() => setTimeout(loadAlerts, 300));
+      context.subscriptions.push(alertWatcher);
     }
   }
 
@@ -1203,6 +1211,66 @@ function loadErrors() {
     } catch {
       // File read error
     }
+  }
+}
+
+/**
+ * Load security alerts and agent warnings from alerts.jsonl.
+ * Surfaces them as VS Code diagnostics (yellow/red squiggles).
+ */
+function loadAlerts() {
+  const allAlertPaths: string[] = [];
+  for (const folder of (vscode.workspace.workspaceFolders || [])) {
+    const trickleDir = findNearestTrickleDirCached(folder.uri.fsPath);
+    if (trickleDir) {
+      const alertsPath = path.join(trickleDir, 'alerts.jsonl');
+      if (fs.existsSync(alertsPath)) allAlertPaths.push(alertsPath);
+    }
+  }
+
+  for (const alertsPath of allAlertPaths) {
+    try {
+      const content = fs.readFileSync(alertsPath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+      const workspaceRoot = path.dirname(path.dirname(alertsPath));
+
+      // Find active editor file to attach diagnostics
+      const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
+      if (!activeFile) continue;
+
+      const diags: vscode.Diagnostic[] = [];
+      for (const line of lines) {
+        try {
+          const alert = JSON.parse(line);
+          if (alert.kind !== 'alert') continue;
+          // Only surface critical and warning alerts as diagnostics
+          if (alert.severity !== 'critical' && alert.severity !== 'warning') continue;
+
+          // Skip non-security alerts that don't have actionable location
+          const isSecurityAlert = ['prompt_injection', 'privilege_escalation', 'data_exfiltration',
+            'secret', 'sql_injection', 'llm_errors', 'llm_cost_spike', 'agent_tool_retry',
+            'agent_tool_errors', 'agent_failure'].includes(alert.category);
+          if (!isSecurityAlert) continue;
+
+          const severity = alert.severity === 'critical'
+            ? vscode.DiagnosticSeverity.Error
+            : vscode.DiagnosticSeverity.Warning;
+
+          const message = `[trickle] ${alert.message}${alert.suggestion ? '\n💡 ' + alert.suggestion : ''}`;
+          const range = new vscode.Range(0, 0, 0, 1000); // Top of file
+          const diag = new vscode.Diagnostic(range, message, severity);
+          diag.source = 'trickle-security';
+          diags.push(diag);
+        } catch { /* skip malformed */ }
+      }
+
+      if (diags.length > 0 && activeFile) {
+        // Merge with existing diagnostics (don't overwrite error diagnostics)
+        const existing = diagnosticCollection.get(vscode.Uri.file(activeFile)) || [];
+        const merged = [...existing.filter(d => d.source !== 'trickle-security'), ...diags];
+        diagnosticCollection.set(vscode.Uri.file(activeFile), merged);
+      }
+    } catch { /* file read error */ }
   }
 }
 

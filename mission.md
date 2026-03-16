@@ -10,7 +10,7 @@ CLI 0.1.192, client-js 0.2.121, client-python 0.2.34. 37 MCP tools, 74 CLI comma
 
 Three chapters complete (see everything → catch every mistake → prove it's safe). Priority shifts to "meet developers where they are":
 
-1. **IDE-native runtime insights** — Honeycomb and Datadog are shipping IDE observability integrations. Trickle has a VSCode extension and 37 MCP tools but they're not deeply connected. Upgrade the VSCode extension to: (a) show inline eval scores next to functions, (b) surface security alerts as VS Code diagnostics (yellow/red squiggles), (c) display per-function cost in CodeLens, (d) show agent trace tree in a sidebar panel. Also ensure trickle's MCP server works seamlessly in Cursor (it already supports MCP natively). The developer shouldn't have to leave their editor to understand runtime behavior.
+1. **IDE-native runtime insights** — PARTIAL: VSCode extension now surfaces security alerts (prompt injection, privilege escalation, cost spikes, tool errors, agent failures) as VS Code diagnostics (yellow/red squiggles). Watches alerts.jsonl for real-time updates. TODO: inline eval scores, per-function cost CodeLens, agent trace sidebar panel.
 
 2. **Model tier / routing observability** — SHIPPED: cost-report now includes "Model Tier Analysis" classifying models into Frontier/Standard/Mini tiers. Shows per-tier cost%, call%, avg latency, error rate. Detects over-use of frontier models with optimization suggestion. Covers OpenAI (gpt-4/o1/o3), Anthropic (opus/sonnet/haiku), Gemini (pro/flash/lite). JSON output includes `byTier` for CI.
 
