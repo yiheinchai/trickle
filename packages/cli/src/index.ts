@@ -953,6 +953,19 @@ program
     whyCommand(query, opts);
   });
 
+// trickle cleanup
+program
+  .command("cleanup")
+  .description("Prune old .trickle/ data — manage retention for heavy workloads")
+  .option("--retain-days <days>", "Keep data from last N days (default: 7)")
+  .option("--retain-lines <lines>", "Keep only last N lines per file (overrides --retain-days)")
+  .option("--dry-run", "Show what would be removed without modifying files")
+  .option("--json", "Output structured JSON")
+  .action(async (opts) => {
+    const { cleanupCommand } = await import("./commands/cleanup");
+    cleanupCommand(opts);
+  });
+
 // trickle eval
 program
   .command("eval")

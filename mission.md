@@ -14,7 +14,7 @@ Three chapters complete (see everything → catch every mistake → prove it's s
 
 2. **Model tier / routing observability** — Enterprises now use tiered inference fabric (80% to cheap distilled models, 20% to frontier = 75% cost reduction). Add detection of model routing patterns in LLM traces: which model tier handled which request, quality comparison across tiers, cost savings attribution. Surface in cost-report as "Model Tier Analysis" showing per-tier cost, latency, and error rate. This is a new observability dimension nobody else tracks.
 
-3. **Smart data management** — A single AI agent generates 10-100x more data than traditional apps. Add intelligent sampling (`TRICKLE_SAMPLE_RATE`), configurable retention (auto-prune JSONL files older than N days), and trace summarization (compress verbose traces into key-decision-points). Without this, trickle will slow down on heavy agent workloads — and enterprises with $150K/month monitoring bills won't switch to a tool that also gets slow.
+3. **Smart data management** — SHIPPED: `trickle cleanup` with configurable retention. `--retain-days 7` prunes by timestamp, `--retain-lines 100` keeps last N lines per file. `--dry-run` shows impact without modifying. Cleans all JSONL files + snapshot/CSV dirs. TODO: auto-cleanup on run, TRICKLE_SAMPLE_RATE for JS client, trace summarization.
 
 4. **Cache hit/miss observability** — Prompt caching delivers 30-50% cost savings but nobody surfaces cache efficiency. Detect cached vs uncached LLM responses via latency bimodality and provider-reported cache tokens (OpenAI/Anthropic expose these). Show cache hit rate, cost saved, and bimodal latency distribution in cost-report and dashboard. Developers burning $5-25K/month need to know if caching works.
 
