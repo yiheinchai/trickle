@@ -953,6 +953,16 @@ program
     whyCommand(query, opts);
   });
 
+// trickle playback
+program
+  .command("playback")
+  .description("Replay agent execution step-by-step — chronological timeline of all decisions")
+  .option("--json", "Output structured JSON")
+  .action(async (opts) => {
+    const { playbackCommand } = await import("./commands/playback");
+    playbackCommand(opts);
+  });
+
 // trickle summarize
 program
   .command("summarize")

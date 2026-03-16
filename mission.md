@@ -6,19 +6,19 @@ Trickle has 81 CLI commands, 38 MCP tools, 4 agent framework tracers, security/c
 </higher directive>
 
 <focus point>
-CLI 0.1.201, client-js 0.2.122, client-python 0.2.36, VSCode 0.1.69. 38 MCP tools, 76+ CLI commands. Five growth items completed: real-world testing (4 codebases, 0 bugs), GitHub Action, VSCode CodeLens, demo update, package descriptions. Distribution items (#2 awesome-lists, #3 Dev.to/HN) are non-code marketing tasks for the user to execute.
+CLI 0.1.201, client-js 0.2.122, client-python 0.2.36, VSCode 0.1.69. 38 MCP tools, 81 CLI commands. SHIPPED: real-world testing (4 codebases), GitHub Action (action.yml), VSCode CodeLens (cost/eval/security), demo update, package descriptions, TRICKLE_TOKEN_BUDGET env var (partial). Distribution (awesome-lists, Dev.to/HN) are non-code marketing tasks for the user.
 
-Next priorities — deepening the product moat:
+Priorities — deepen the local-first moat that Braintrust can't replicate:
 
-1. **Mistral + Cohere LLM auto-instrumentation** — expand LLM provider coverage beyond top 3. Mistral is popular in EU/enterprise, Cohere for enterprise RAG. Follow the same pattern as OpenAI/Anthropic/Gemini: monkey-patch the SDK client, capture model/tokens/cost/latency.
+1. **`trickle benchmark`** — Run the same agent task N times, measure variance using pass@k (at least 1 succeeds) and pass^k (all succeed) metrics. Report consistency score, cost variance, latency distribution. Use mode-of-3 for LLM-as-judge scoring to reduce eval variance. This is the #1 gap — Anthropic's eval guide recommends multi-trial evaluation but no CLI tool automates it. Local-first advantage: run 10 trials locally for free; Braintrust charges per trace.
 
-2. **`trickle watch --dashboard`** — auto-open the browser dashboard when trickle run starts, with live updates via the existing polling. Currently `trickle dashboard-local` is a separate command; integrating it into the run flow makes the first experience more visual and immediate.
+2. **Graduated token budget enforcement** — Expand the existing TRICKLE_TOKEN_BUDGET to follow the recommended graduated response pattern: alert at 50%, throttle at 80% (switch to cheaper model tier), hard block at 100%. Add TRICKLE_COST_BUDGET for dollar-denominated limits. Surface budget status in live status display and dashboard. This prevents runaway costs during development — a problem every agent developer hits.
 
-3. **Structured output validation** — OpenAI/Anthropic support structured outputs (JSON mode). Detect when LLM returns malformed JSON or doesn't match the expected schema. Surface as a warning in `trickle monitor` and `trickle eval`.
+3. **Mistral + Cohere LLM auto-instrumentation** — Mistral v1.0 SDK just shipped (breaking changes, new syntax); Cohere API V2 aligned with industry patterns. Both growing in enterprise. Follow the same monkey-patch pattern. This maintains trickle's provider breadth advantage — Braintrust auto-instruments 4 languages but not necessarily all providers.
 
-4. **`trickle benchmark`** — run the same agent task N times, measure variance in cost/latency/output, report consistency score. Critical for production reliability: "Does my agent give the same answer when asked the same question twice?"
+4. **Structured output validation** — Structured output is now table stakes across all LLM providers (OpenAI, Anthropic, Gemini, Mistral, Cohere all support JSON mode). Detect when LLM returns malformed JSON or schema mismatches. Surface as a warning in `trickle monitor` and add a `structuredOutputScore` dimension to `trickle eval`. This catches the silent failure pattern that 66% of developers complain about ("almost right but not quite").
 
-5. **Token budget enforcement** — `TRICKLE_TOKEN_BUDGET=10000` env var that logs a warning (or optionally kills the process) when cumulative token usage exceeds the budget during a run. Prevents runaway costs during development.
+5. **`trickle playback`** — SHIPPED: Chronological step-by-step replay of agent execution. Merges agents.jsonl + llm.jsonl + mcp.jsonl into a unified timeline with timestamps, durations, costs, input/output previews. Shows tool retries, LLM errors, cost accumulation. Local-first: instant from JSONL files.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
