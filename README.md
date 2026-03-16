@@ -471,7 +471,7 @@ trickle run "npm test"
 **What gets captured automatically:**
 - Function arguments, return values, and execution time
 - Variable assignments with types and sample values
-- Express/Fastify/Koa/FastAPI/Flask/Django route handlers
+- Express/Fastify/Koa/Hono/FastAPI/Flask/Django route handlers
 - Database queries (SQLite, PostgreSQL, MySQL, Redis, MongoDB)
 - HTTP requests (fetch, requests, httpx)
 - WebSocket connections and messages

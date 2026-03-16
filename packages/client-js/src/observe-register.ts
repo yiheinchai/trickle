@@ -38,6 +38,7 @@ import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
 import { instrumentFastify } from './fastify';
 import { instrumentKoa } from './koa';
+import { instrumentHono } from './hono';
 import { initVarTracer, traceVar } from './trace-var';
 import { initCallTrace } from './call-trace';
 import { initLlmObserver } from './llm-observer';
@@ -1479,6 +1480,47 @@ if (enabled) {
             const wrapped = { ...origKoa, default: WrappedKoa };
             return wrapped;
           }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // ── Hono auto-detection ──
+    if (request === 'hono' && !expressPatched.has('hono')) {
+      expressPatched.add('hono');
+      try {
+        const honoMod = exports;
+        const HonoClass = honoMod.Hono || (honoMod.default && honoMod.default.Hono);
+        if (HonoClass && typeof HonoClass === 'function') {
+          const OrigHono = HonoClass;
+          const WrappedHono = function (this: any, ...args: any[]): any {
+            const app = new OrigHono(...args);
+            try {
+              instrumentHono(app, { environment });
+              if (debug) {
+                console.log('[trickle/observe] Auto-instrumented Hono app');
+              }
+            } catch (e: unknown) {
+              if (debug) {
+                console.log('[trickle/observe] Hono instrumentation error:', (e as Error).message);
+              }
+            }
+            return app;
+          };
+          WrappedHono.prototype = OrigHono.prototype;
+          for (const key of Object.keys(OrigHono)) {
+            (WrappedHono as any)[key] = (OrigHono as any)[key];
+          }
+
+          if (honoMod.Hono) {
+            honoMod.Hono = WrappedHono;
+          }
+          try {
+            const resolvedPath = M._resolveFilename(request, parent);
+            if (require.cache[resolvedPath]) {
+              const cached = require.cache[resolvedPath]!.exports;
+              if (cached.Hono) cached.Hono = WrappedHono;
+            }
+          } catch { /* non-critical */ }
         }
       } catch { /* fall through */ }
     }

@@ -90,7 +90,7 @@ function processOrders(orders: Order[]) {
 
 ---
 
-## Use Case 3: Node.js Backend (Express, Fastify, Koa)
+## Use Case 3: Node.js Backend (Express, Fastify, Koa, Hono)
 
 ```bash
 trickle run node server.js
@@ -134,9 +134,19 @@ import { instrument } from 'trickle';
 instrument(app);  // Auto-detects Express, Fastify, or Koa
 ```
 
+**Hono (edge/serverless):**
+```javascript
+app.get('/api/users', (c) => {
+  const users = await db.users.findMany();
+  // → users: Array<{id: number; name: string; email: string}>
+  return c.json({ users, total: users.length });
+});
+```
+
 Framework-specific imports are also available:
 ```javascript
-import { instrumentFastify } from 'trickle';   // Fastify
+import { instrumentHono } from 'trickle';       // Hono
+import { instrumentFastify } from 'trickle';    // Fastify
 import { instrumentKoa } from 'trickle';        // Koa
 import { instrumentExpress } from 'trickle';    // Express
 ```

@@ -5,6 +5,7 @@ import { GlobalOpts, TrickleOpts, WrapOptions } from './types';
 import { instrumentExpress, trickleMiddleware } from './express';
 import { instrumentFastify, tricklePlugin } from './fastify';
 import { instrumentKoa, instrumentKoaRouter } from './koa';
+import { instrumentHono, trickleHonoMiddleware } from './hono';
 
 let globalOpts: GlobalOpts = {
   backendUrl: 'http://localhost:4888',
@@ -135,7 +136,7 @@ export function trickleExpress(
 }
 
 /**
- * Auto-instrument a framework app. Supports Express, Fastify, and Koa.
+ * Auto-instrument a framework app. Supports Express, Fastify, Koa, and Hono.
  *
  * Usage:
  *   import { instrument } from 'trickle';
@@ -163,6 +164,13 @@ export function instrument(
     sampleRate: opts?.sampleRate ?? 1,
     maxDepth: opts?.maxDepth ?? 5,
   };
+
+  // Detect Hono: has .fetch (bound method), .route(), .get(), but NOT .listen() on the app itself
+  // Hono apps use serve() from @hono/node-server rather than app.listen()
+  if (typeof app.fetch === 'function' && typeof app.get === 'function' && typeof app.route === 'function' && typeof app.fire === 'function') {
+    instrumentHono(app, mergedOpts);
+    return;
+  }
 
   // Detect Fastify: has .route(), .register(), .addHook()
   if (typeof app.route === 'function' && typeof app.register === 'function' && typeof app.addHook === 'function') {
@@ -227,6 +235,7 @@ export { flush } from './transport';
 export { instrumentExpress, trickleMiddleware } from './express';
 export { instrumentFastify, tricklePlugin } from './fastify';
 export { instrumentKoa, instrumentKoaRouter } from './koa';
+export { instrumentHono, trickleHonoMiddleware } from './hono';
 export { observe, observeFn } from './observe';
 export type { ObserveOpts } from './observe';
 export { wrapFunction } from './wrap';

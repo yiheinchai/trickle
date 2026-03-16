@@ -1,7 +1,7 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.127",
-  "description": "Zero-code runtime observability for JavaScript/TypeScript. Auto-instruments Express, Fastify, Koa, OpenAI, Anthropic, Gemini, MCP. Captures functions, variables, LLM calls, agent workflows.",
+  "version": "0.2.128",
+  "description": "Zero-code runtime observability for JavaScript/TypeScript. Auto-instruments Express, Fastify, Koa, Hono, OpenAI, Anthropic, Gemini, MCP. Captures functions, variables, LLM calls, agent workflows.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
