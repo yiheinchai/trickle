@@ -76,6 +76,9 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
 
 
 def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) -> Dict[str, Any]:
+    if max_depth <= 0:
+        return {"kind": "primitive", "name": "unknown"}
+
     # Unwrap TrackedObject and proxy objects to get the actual object
     try:
         from trickle.attr_tracker import TrackedObject
