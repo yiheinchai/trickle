@@ -290,16 +290,7 @@ export async function runCommand(
     if (!backendProc) {
       // Fall back to local/offline mode instead of exiting
       localMode = true;
-      console.log(
-        chalk.yellow(
-          `\n  Backend not available — using local mode (offline)`,
-        ),
-      );
-      console.log(
-        chalk.gray(
-          "  Observations will be saved to .trickle/observations.jsonl",
-        ),
-      );
+      // Silent for first-time users — local mode is the default experience
     }
   }
 
@@ -453,13 +444,9 @@ async function executeSingleRun(
     // Generate post-run summary for AI agents
     writeRunSummary({ exitCode, command: instrumentedCommand });
 
-    // Next steps hint
     console.log("");
-    console.log(chalk.bold("  Next steps:"));
-    console.log(chalk.gray("    trickle summary        ") + "full analysis (errors, queries, root causes)");
-    console.log(chalk.gray("    trickle explain <file>  ") + "understand a file (functions, call graph, data flow)");
-    console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
-    console.log(chalk.gray("    trickle test            ") + "run tests with observability");
+    console.log(chalk.gray("  trickle summary      ") + "full analysis");
+    console.log(chalk.gray("  trickle why          ") + "trace any error to root cause");
     console.log("");
 
     return exitCode;
@@ -632,8 +619,18 @@ async function autoCloudPush(): Promise<void> {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     if (config.url && config.token) {
-      const { cloudPush } = await import("./cloud");
-      await cloudPush();
+      // Suppress console output for auto-push to avoid noise
+      const origLog = console.log;
+      const origErr = console.error;
+      console.log = () => {};
+      console.error = () => {};
+      try {
+        const { cloudPush } = await import("./cloud");
+        await cloudPush();
+      } finally {
+        console.log = origLog;
+        console.error = origErr;
+      }
     }
   } catch {}
 }
