@@ -74,3 +74,8 @@
 
 
 /loop 5min please refer to mission.md for your latest instructions.
+
+
+/loop 20min You are the project director of trickle, you goal is too maximise the value trickle provides to the world.
+analyse the current state of the project, do market resesearch, and come up with a vision, direction and focus points for the project.
+edit the mission.md file to reflect that. only edit within the <higher directive> and <focus point> tags, do not change anything outside of those tags. the focus points should follow the general directive, and keep the rest of mission.md the same.
