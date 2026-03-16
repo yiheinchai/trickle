@@ -14,7 +14,7 @@ Priorities — deepen the local-first moat that Braintrust can't replicate:
 
 2. **Graduated token budget enforcement** — Expand the existing TRICKLE_TOKEN_BUDGET to follow the recommended graduated response pattern: alert at 50%, throttle at 80% (switch to cheaper model tier), hard block at 100%. Add TRICKLE_COST_BUDGET for dollar-denominated limits. Surface budget status in live status display and dashboard. This prevents runaway costs during development — a problem every agent developer hits.
 
-3. **Mistral + Cohere LLM auto-instrumentation** — Mistral v1.0 SDK just shipped (breaking changes, new syntax); Cohere API V2 aligned with industry patterns. Both growing in enterprise. Follow the same monkey-patch pattern. This maintains trickle's provider breadth advantage — Braintrust auto-instruments 4 languages but not necessarily all providers.
+3. **Mistral + Cohere LLM auto-instrumentation** — SHIPPED: Both providers added to Python LLM observer via __init__ patching. Mistral: patches `Mistral.chat.complete()`. Cohere: patches `ClientV2.chat()` (V2 API). Pricing for mistral-large/small/codestral and command-r/r-plus/light. Tier classification in cost-report. JS pricing added. Trickle now covers 5 LLM providers: OpenAI, Anthropic, Gemini, Mistral, Cohere.
 
 4. **Structured output validation** — SHIPPED: `trickle monitor` detects malformed JSON in LLM outputs. Identifies responses that look like JSON (start with `{`/`[` or wrapped in ```json) but don't parse. Surfaces as warning with actionable suggestion to use structured output mode. Catches the "almost right" silent failure pattern.
 

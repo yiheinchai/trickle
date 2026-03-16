@@ -131,6 +131,8 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
     ['claude-opus', 'frontier'], ['claude-sonnet', 'standard'], ['claude-haiku', 'mini'],
     ['gemini-2.5-flash-lite', 'mini'], ['gemini-2.5-flash', 'standard'], ['gemini-2.5-pro', 'frontier'],
     ['gemini-2.0-flash', 'mini'], ['gemini-1.5-pro', 'frontier'], ['gemini-1.5-flash', 'mini'],
+    ['mistral-large', 'frontier'], ['mistral-medium', 'standard'], ['mistral-small', 'mini'], ['codestral', 'standard'],
+    ['command-r-plus', 'frontier'], ['command-r', 'standard'], ['command-light', 'mini'],
   ];
 
   function classifyTier(model: string): string {

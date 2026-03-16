@@ -40,6 +40,13 @@ _PRICING: dict[str, dict[str, float]] = {
     "claude-3-5-sonnet-20241022": {"input": 3, "output": 15},
     "claude-3-5-haiku-20241022": {"input": 0.8, "output": 4},
     "claude-3-haiku-20240307": {"input": 0.25, "output": 1.25},
+    "mistral-large": {"input": 2, "output": 6},
+    "mistral-small": {"input": 0.1, "output": 0.3},
+    "mistral-medium": {"input": 0.75, "output": 2.25},
+    "codestral": {"input": 0.3, "output": 0.9},
+    "command-r-plus": {"input": 2.5, "output": 10},
+    "command-r": {"input": 0.15, "output": 0.6},
+    "command-light": {"input": 0.3, "output": 0.6},
     "gemini-2.5-flash-lite": {"input": 0.1, "output": 0.4},
     "gemini-2.5-flash": {"input": 0.3, "output": 2.5},
     "gemini-2.5-pro": {"input": 1.25, "output": 10},
@@ -578,6 +585,212 @@ def _capture_gemini_result(
 
 
 # ────────────────────────────────────────────────────
+# Mistral AI SDK patching
+# ────────────────────────────────────────────────────
+
+
+def patch_mistral(mistral_module: Any) -> None:
+    """Patch the Mistral AI SDK to capture LLM calls."""
+    if getattr(mistral_module, "_trickle_llm_patched", False):
+        return
+    mistral_module._trickle_llm_patched = True
+
+    MistralClient = getattr(mistral_module, "Mistral", None)
+    if MistralClient is None:
+        return
+
+    _orig_init = MistralClient.__init__
+
+    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        _orig_init(self, *args, **kwargs)
+        _patch_mistral_client(self)
+
+    MistralClient.__init__ = _patched_init
+
+    if _debug:
+        print("[trickle/llm] Patched Mistral SDK")
+
+
+def _patch_mistral_client(client: Any) -> None:
+    chat = getattr(client, "chat", None)
+    if not chat:
+        return
+    complete_fn = getattr(chat, "complete", None)
+    if complete_fn and not getattr(complete_fn, "_trickle_patched", False):
+        _orig = complete_fn
+
+        def _patched(*args: Any, **kwargs: Any) -> Any:
+            params = kwargs if kwargs else (args[0] if args else {})
+            start = time.perf_counter()
+            error_msg = None
+            result = None
+            try:
+                result = _orig(*args, **kwargs)
+                return result
+            except Exception as e:
+                error_msg = str(e)[:200]
+                raise
+            finally:
+                duration_ms = round((time.perf_counter() - start) * 1000, 2)
+                _capture_mistral_result(params, kwargs, result, duration_ms, error_msg)
+
+        _patched._trickle_patched = True  # type: ignore
+        chat.complete = _patched
+
+
+def _capture_mistral_result(params: Any, kwargs: dict, result: Any, duration_ms: float, error_msg: str | None) -> None:
+    try:
+        model = kwargs.get("model", "mistral-unknown")
+        messages = kwargs.get("messages", [])
+
+        if error_msg:
+            _write_event({
+                "kind": "llm_call", "provider": "mistral", "model": model,
+                "durationMs": duration_ms, "inputTokens": 0, "outputTokens": 0,
+                "totalTokens": 0, "estimatedCostUsd": 0, "stream": False,
+                "finishReason": "error",
+                "inputPreview": _extract_input_preview(messages),
+                "outputPreview": "", "messageCount": len(messages),
+                "toolUse": False, "timestamp": int(time.time() * 1000),
+                "error": error_msg,
+            })
+            return
+
+        if result is None:
+            return
+
+        usage = getattr(result, "usage", None)
+        input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+        output_tokens = getattr(usage, "completion_tokens", 0) or 0
+        total_tokens = getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens)
+
+        choices = getattr(result, "choices", []) or []
+        output_text = ""
+        finish_reason = "unknown"
+        if choices:
+            output_text = getattr(choices[0], "message", None)
+            if output_text:
+                output_text = getattr(output_text, "content", "") or ""
+            else:
+                output_text = getattr(choices[0], "content", "") or ""
+            finish_reason = getattr(choices[0], "finish_reason", "unknown") or "unknown"
+
+        _write_event({
+            "kind": "llm_call", "provider": "mistral", "model": model,
+            "durationMs": duration_ms, "inputTokens": input_tokens,
+            "outputTokens": output_tokens, "totalTokens": total_tokens,
+            "estimatedCostUsd": _estimate_cost(model, input_tokens, output_tokens),
+            "stream": False, "finishReason": str(finish_reason),
+            "inputPreview": _extract_input_preview(messages),
+            "outputPreview": _truncate(str(output_text)),
+            "messageCount": len(messages),
+            "toolUse": bool(kwargs.get("tools")),
+            "timestamp": int(time.time() * 1000),
+        })
+
+        if _debug:
+            print(f"[trickle/llm] Mistral: {model} ({total_tokens} tokens, {duration_ms}ms)")
+    except Exception:
+        pass
+
+
+# ────────────────────────────────────────────────────
+# Cohere SDK patching
+# ────────────────────────────────────────────────────
+
+
+def patch_cohere(cohere_module: Any) -> None:
+    """Patch the Cohere SDK to capture LLM calls."""
+    if getattr(cohere_module, "_trickle_llm_patched", False):
+        return
+    cohere_module._trickle_llm_patched = True
+
+    CohereClient = getattr(cohere_module, "ClientV2", None) or getattr(cohere_module, "Client", None)
+    if CohereClient is None:
+        return
+
+    _orig_init = CohereClient.__init__
+
+    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> None:
+        _orig_init(self, *args, **kwargs)
+        _patch_cohere_client(self)
+
+    CohereClient.__init__ = _patched_init
+
+    if _debug:
+        print("[trickle/llm] Patched Cohere SDK")
+
+
+def _patch_cohere_client(client: Any) -> None:
+    chat_fn = getattr(client, "chat", None)
+    if chat_fn and not getattr(chat_fn, "_trickle_patched", False):
+        _orig = chat_fn
+
+        def _patched(*args: Any, **kwargs: Any) -> Any:
+            start = time.perf_counter()
+            error_msg = None
+            result = None
+            try:
+                result = _orig(*args, **kwargs)
+                return result
+            except Exception as e:
+                error_msg = str(e)[:200]
+                raise
+            finally:
+                duration_ms = round((time.perf_counter() - start) * 1000, 2)
+                model = kwargs.get("model", "command-r")
+                message = kwargs.get("message", "")
+                messages = kwargs.get("messages", [])
+                input_preview = _truncate(str(message)) if message else _extract_input_preview(messages)
+
+                if error_msg:
+                    _write_event({
+                        "kind": "llm_call", "provider": "cohere", "model": model,
+                        "durationMs": duration_ms, "inputTokens": 0, "outputTokens": 0,
+                        "totalTokens": 0, "estimatedCostUsd": 0, "stream": False,
+                        "finishReason": "error", "inputPreview": input_preview,
+                        "outputPreview": "", "messageCount": 1,
+                        "toolUse": False, "timestamp": int(time.time() * 1000),
+                        "error": error_msg,
+                    })
+                elif result is not None:
+                    try:
+                        usage = getattr(result, "usage", None) or getattr(result, "meta", None)
+                        input_tokens = 0
+                        output_tokens = 0
+                        if usage:
+                            billed = getattr(usage, "billed_units", None) or getattr(usage, "tokens", None)
+                            if billed:
+                                input_tokens = getattr(billed, "input_tokens", 0) or 0
+                                output_tokens = getattr(billed, "output_tokens", 0) or 0
+                        text = getattr(result, "text", "") or ""
+                        if not text:
+                            msg = getattr(result, "message", None)
+                            if msg:
+                                content = getattr(msg, "content", [])
+                                if content and len(content) > 0:
+                                    text = getattr(content[0], "text", "") or ""
+                        _write_event({
+                            "kind": "llm_call", "provider": "cohere", "model": model,
+                            "durationMs": duration_ms, "inputTokens": input_tokens,
+                            "outputTokens": output_tokens,
+                            "totalTokens": input_tokens + output_tokens,
+                            "estimatedCostUsd": _estimate_cost(model, input_tokens, output_tokens),
+                            "stream": False, "finishReason": "stop",
+                            "inputPreview": input_preview,
+                            "outputPreview": _truncate(str(text)),
+                            "messageCount": len(messages) if messages else 1,
+                            "toolUse": bool(kwargs.get("tools")),
+                            "timestamp": int(time.time() * 1000),
+                        })
+                    except Exception:
+                        pass
+
+        _patched._trickle_patched = True  # type: ignore
+        client.chat = _patched
+
+
+# ────────────────────────────────────────────────────
 # Installation
 # ────────────────────────────────────────────────────
 
@@ -605,6 +818,8 @@ def patch_llms(debug: bool = False) -> None:
         "openai": patch_openai,
         "anthropic": patch_anthropic,
         "google.genai": patch_gemini,
+        "mistralai": patch_mistral,
+        "cohere": patch_cohere,
     }
 
     # Patch already-imported modules
