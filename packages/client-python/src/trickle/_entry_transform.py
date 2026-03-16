@@ -28,6 +28,47 @@ import sys
 from typing import Any, Dict, Optional, Set
 
 
+def _install_traceback_rewriter(tmp_path: str, original_path: str) -> None:
+    """Install a sys.excepthook that rewrites temp file paths and line numbers.
+
+    When trickle transforms source and runs it from a temp file, error
+    tracebacks reference the temp file with inflated line numbers (due to
+    the setup preamble). This hook rewrites paths back to the original file
+    and adjusts line numbers so developers can find the actual source.
+    """
+    import re
+    import traceback as tb_mod
+
+    preamble_lines = int(os.environ.get("TRICKLE_PREAMBLE_LINES", "0"))
+    _prev_hook = sys.excepthook
+    # Pattern matching traceback file/line references
+    _tb_line_re = re.compile(
+        r'(  File ")'
+        + re.escape(tmp_path)
+        + r'(", line )(\d+)'
+    )
+
+    def _rewrite_hook(exc_type: type, exc_value: BaseException, exc_tb: Any) -> None:
+        if exc_tb is not None:
+            try:
+                lines = tb_mod.format_exception(exc_type, exc_value, exc_tb)
+                rewritten = []
+                for line in lines:
+                    def _fix_line(m: re.Match) -> str:
+                        orig_lineno = int(m.group(3))
+                        corrected = max(1, orig_lineno - preamble_lines)
+                        return m.group(1) + original_path + m.group(2) + str(corrected)
+                    line = _tb_line_re.sub(_fix_line, line)
+                    rewritten.append(line)
+                sys.stderr.write("".join(rewritten))
+                return
+            except Exception:
+                pass
+        _prev_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _rewrite_hook
+
+
 def run_entry_with_observation(
     filepath: str,
     module_name: Optional[str] = None,
@@ -73,6 +114,21 @@ def run_entry_with_observation(
     try:
         with os.fdopen(fd, "w") as f:
             f.write(transformed_source)
+
+        # Install a traceback filter that rewrites the temp file path back to the
+        # original source file, so error stack traces reference real files.
+        _install_traceback_rewriter(tmp_path, abs_path)
+
+        # Register the transformed source in linecache under BOTH paths so
+        # traceback.print_exc() can show source lines even after temp file deletion.
+        import linecache
+        source_lines = transformed_source.splitlines(True)
+        linecache.cache[tmp_path] = (
+            len(transformed_source), None, source_lines, tmp_path
+        )
+        linecache.cache[abs_path] = (
+            len(transformed_source), None, source_lines, abs_path
+        )
 
         # Add the script's directory to sys.path
         if script_dir not in sys.path:
@@ -400,7 +456,7 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            'message': str(__exc)[:500],",
             "            'function': __name,",
             "            'module': __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '',",
-            "            'file': __fn.__code__.co_filename if hasattr(__fn, '__code__') else '',",
+            f"            'file': {filename!r},",
             "            'line': __fn.__code__.co_firstlineno if hasattr(__fn, '__code__') else 0,",
             "            'stack': ''.join(_tb.format_exception(type(__exc), __exc, __exc.__traceback__))[-1000:],",
             "            'timestamp': int(_trickle_time.time() * 1000),",

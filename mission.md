@@ -6,13 +6,11 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.119, client-python 0.2.27. Recent ships: LLM auto-instrumentation, CSV export, pagination, kwargs fix, route parameterization, docstring preservation, consolidated import hooks.
+CLI 0.1.177, client-js 0.2.119, client-python 0.2.28. Recent reliability fixes: docstring preservation, import hook consolidation, error stack trace source mapping, route parameterization, kwargs fix.
 
-Just fixed:
-- AST transform now preserves docstrings as first statement (fixes LangChain @tool compatibility)
-- Consolidated Python import hooks: llm_observer registers patches with db_observer's hook instead of creating separate one (cleaner stack traces)
+Just fixed: Error stack traces now reference the original source file instead of the deleted temp file. Installed sys.excepthook to rewrite both file paths and line numbers (subtracting preamble offset). errors.jsonl also records the original file path.
 
-Known remaining issues: (a) Python .pyi stubs have invalid types for tensor params, (b) error stack traces point to temp file not source
+Known remaining issue: Python .pyi stubs have invalid types for tensor params
 
 Priority areas:
 1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
