@@ -953,6 +953,16 @@ program
     whyCommand(query, opts);
   });
 
+// trickle summarize
+program
+  .command("summarize")
+  .description("Compress agent traces into key decisions — what happened, why, at what cost")
+  .option("--json", "Output structured JSON")
+  .action(async (opts) => {
+    const { summarizeCommand } = await import("./commands/summarize");
+    summarizeCommand(opts);
+  });
+
 // trickle cleanup
 program
   .command("cleanup")
