@@ -21,6 +21,13 @@ _event_count = 0
 _MAX_EVENTS = 500
 _TRUNCATE_LEN = 500
 
+# Token budget enforcement
+_cumulative_tokens = 0
+_cumulative_cost = 0.0
+_budget_warned = False
+_TOKEN_BUDGET = int(os.environ.get("TRICKLE_TOKEN_BUDGET", "0"))
+_COST_BUDGET = float(os.environ.get("TRICKLE_COST_BUDGET", "0"))
+
 # Approximate pricing per 1M tokens (USD)
 _PRICING: dict[str, dict[str, float]] = {
     "gpt-4o": {"input": 2.5, "output": 10},
@@ -53,10 +60,25 @@ def _get_llm_file() -> str:
 
 
 def _write_event(event: dict[str, Any]) -> None:
-    global _event_count
+    global _event_count, _cumulative_tokens, _cumulative_cost, _budget_warned
     if _event_count >= _MAX_EVENTS:
         return
     _event_count += 1
+
+    # Track cumulative usage for budget enforcement
+    _cumulative_tokens += event.get("totalTokens", 0) or 0
+    _cumulative_cost += event.get("estimatedCostUsd", 0) or 0
+
+    if not _budget_warned:
+        if _TOKEN_BUDGET > 0 and _cumulative_tokens > _TOKEN_BUDGET:
+            import sys
+            print(f"[trickle] \u26a0 Token budget exceeded: {_cumulative_tokens} tokens used (budget: {_TOKEN_BUDGET})", file=sys.stderr)
+            _budget_warned = True
+        if _COST_BUDGET > 0 and _cumulative_cost > _COST_BUDGET:
+            import sys
+            print(f"[trickle] \u26a0 Cost budget exceeded: ${_cumulative_cost:.4f} spent (budget: ${_COST_BUDGET:.4f})", file=sys.stderr)
+            _budget_warned = True
+
     try:
         with open(_get_llm_file(), "a") as f:
             f.write(json.dumps(event) + "\n")

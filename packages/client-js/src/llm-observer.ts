@@ -18,6 +18,13 @@ let eventCount = 0;
 const MAX_LLM_EVENTS = 500;
 const TRUNCATE_LEN = 500;
 
+// Token budget enforcement
+let cumulativeTokens = 0;
+let cumulativeCost = 0;
+let budgetWarned = false;
+const TOKEN_BUDGET = parseInt(process.env.TRICKLE_TOKEN_BUDGET || '0', 10);
+const COST_BUDGET = parseFloat(process.env.TRICKLE_COST_BUDGET || '0');
+
 // Approximate pricing per 1M tokens (USD) — used for cost estimation
 const PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o': { input: 2.5, output: 10 },
@@ -71,6 +78,21 @@ interface LlmEvent {
 function writeLlmEvent(event: LlmEvent): void {
   if (eventCount >= MAX_LLM_EVENTS) return;
   eventCount++;
+
+  // Track cumulative usage for budget enforcement
+  cumulativeTokens += event.totalTokens || 0;
+  cumulativeCost += event.estimatedCostUsd || 0;
+
+  if (!budgetWarned) {
+    if (TOKEN_BUDGET > 0 && cumulativeTokens > TOKEN_BUDGET) {
+      console.warn(`[trickle] ⚠ Token budget exceeded: ${cumulativeTokens} tokens used (budget: ${TOKEN_BUDGET}). Set TRICKLE_TOKEN_BUDGET=0 to disable.`);
+      budgetWarned = true;
+    }
+    if (COST_BUDGET > 0 && cumulativeCost > COST_BUDGET) {
+      console.warn(`[trickle] ⚠ Cost budget exceeded: $${cumulativeCost.toFixed(4)} spent (budget: $${COST_BUDGET.toFixed(4)}). Set TRICKLE_COST_BUDGET=0 to disable.`);
+      budgetWarned = true;
+    }
+  }
   try {
     fs.appendFileSync(getLlmFile(), JSON.stringify(event) + '\n');
   } catch {}
