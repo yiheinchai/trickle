@@ -2,24 +2,23 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle's strategic moat is zero-code, local-first runtime observability that works for both humans AND AI agents — at zero cost. The market is in a cost revolt against Datadog/New Relic ($50K-$1M/year) and drowning in "too much telemetry, not enough insight." Trickle's winning position: free because it's on your machine, intelligent because it surfaces signal not noise, and AI-native because it feeds runtime context to coding agents via MCP. Three strategic pillars: (1) Be the default "eyes" for AI coding agents — 95% of developers use AI tools weekly and Claude Code is the #1 most-loved; if trickle + MCP makes agents write better code, adoption follows the agent ecosystem. (2) Shift-left observability — give developers production-grade runtime understanding during localhost development, filling the massive gap between printf debugging and enterprise APM. (3) Intelligent signal extraction — don't just capture everything, automatically surface anomalies, performance regressions, and breaking changes so developers act on insights not raw data. Every feature must pass: "does this help a developer (or their AI agent) understand their running code faster, with less noise?"
+Trickle's strategic moat is zero-code, local-first runtime observability for both humans AND AI agents — at zero cost. The market has three openings: (1) a cost revolt against Datadog/New Relic ($50K-$1M/year), (2) 10,390+ MCP servers with no observability standard, and (3) LangSmith locked to LangChain while CrewAI, OpenAI Agents SDK, and Microsoft Agent Framework all need framework-agnostic observability. Trickle's positioning: the Switzerland of agent observability — works with every framework, every LLM provider, every IDE agent. Three strategic pillars: (1) MCP-native observability — be the default way AI coding agents understand runtime behavior; 10K+ MCP servers generate traces that need capturing, and trickle's MCP server already feeds context back to agents. (2) Framework-agnostic agent tracing — trace LangChain, CrewAI, OpenAI Agents SDK, and custom agents with zero code changes, owning the space LangSmith can't reach. (3) Vibe-coder DX — zero-config, single-line setup, instant results; 45% of AI-generated code has security vulnerabilities, and developers building with AI need observability that's as fast as their workflow. Every feature must pass: "does this make a developer (or their AI agent) understand running code faster, with zero setup friction?"
 </higher directive>
 
 <focus point>
-CLI 0.1.178, client-js 0.2.120, client-python 0.2.29. Just shipped: live status display + Gemini auto-instrumentation.
+CLI 0.1.178, client-js 0.2.120, client-python 0.2.29. SHIPPED: live status display, Gemini auto-instrumentation, OTel export (`trickle export --otlp`), CSV export, pagination, LLM auto-instrumentation (OpenAI + Anthropic + Gemini), WebSocket observer, dashboard charts/sorting. LLM coverage spans top 3 providers.
 
-Live status: `trickle run` now shows real-time observation counts during execution (functions, variables, calls, queries, LLM calls, errors). Updates every 3 seconds, only when data changes. Gives developers immediate feedback that trickle is working — especially important for long-running servers and training loops. Doesn't fire for fast scripts that finish in <2s.
+Priority areas ranked by strategic opportunity:
 
-LLM coverage: OpenAI + Anthropic + Google Gemini — the top 3 LLM APIs.
+1. **Framework-agnostic agent tracing** — LangSmith is locked to LangChain. CrewAI, OpenAI Agents SDK, Microsoft Agent Framework (AutoGen+Semantic Kernel merger), and LangGraph all need third-party observability. Build zero-code auto-detection and tracing of agent workflows: tool calls, reasoning steps, delegation between agents, state changes. Trace the agent execution graph automatically when running `trickle run` on any agent framework. This is the single biggest market gap — Arize Phoenix has agent graph visualization but requires manual instrumentation.
 
-Known remaining issue: Python .pyi stubs have invalid types for tensor params
+2. **MCP tool call tracing** — 10,390+ MCP servers exist and growing. Nobody traces MCP tool invocations as first-class observability events. Add automatic capture of MCP tool calls (tool name, arguments, response, latency, errors) into `.trickle/mcp.jsonl`. This makes trickle indispensable for anyone building or consuming MCP servers — and positions trickle at the center of the AI tool ecosystem.
 
-Priority areas:
-1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
-2. **OpenTelemetry export** — OTel-compatible span export with GenAI semantic conventions
-3. **WebSocket dashboard streaming** — real-time updates in the browser dashboard (live status is CLI-only for now)
-4. **More LLM providers** — Cohere, Mistral AI for broader coverage
-5. **Python .pyi stub quality** — fix tensor param types, missing imports
+3. **Agent execution graph visualization** — Add a visual node-based graph view to the dashboard showing agent decision flow: LLM calls → tool invocations → sub-agent delegation → results. Arize Phoenix has this and it's becoming table stakes. Combine with trickle's existing call trace data to show the full picture without extra instrumentation.
+
+4. **WebSocket dashboard streaming** — Upgrade live status from CLI-only to browser dashboard via WebSocket. Real-time updates for long-running servers, training loops, and agent workflows. The shift-left observability trend demands instant feedback during development.
+
+5. **Python .pyi stub quality** — FIXED: class_name preserved during merge (Tensor/SimpleCNN no longer become TypedDict), Union[Any,Any,Any] deduplicated, conditional imports added. **More LLM providers** — Add Cohere and Mistral AI auto-instrumentation for broader LLM coverage.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

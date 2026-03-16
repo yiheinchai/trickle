@@ -70,6 +70,13 @@ function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
 
   // Both objects: merge properties
   if (a.kind === "object" && b.kind === "object") {
+    // Display-only types (Tensor, ndarray, DataFrame, etc.) have metadata
+    // properties that vary per call. Don't merge properties — just keep a's value.
+    const DISPLAY_CLASSES = new Set(["ndarray", "Tensor", "DataFrame", "Series", "DatasetDict", "Dataset"]);
+    if (a.class_name && a.class_name === b.class_name && DISPLAY_CLASSES.has(a.class_name)) {
+      return a;
+    }
+
     const aProps = a.properties || {};
     const bProps = b.properties || {};
     const allKeys = new Set([...Object.keys(aProps), ...Object.keys(bProps)]);
@@ -80,18 +87,19 @@ function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
       const inB = key in bProps;
 
       if (inA && inB) {
-        // Property exists in both — merge their types
         merged[key] = mergeTypeNodes(aProps[key], bProps[key]);
       } else if (inA) {
-        // Only in A — mark as optional (union with undefined)
         merged[key] = makeOptional(aProps[key]);
       } else {
-        // Only in B — mark as optional
         merged[key] = makeOptional(bProps[key]);
       }
     }
 
-    return { kind: "object", properties: merged };
+    // Preserve class_name from either side
+    const result: TypeNode = { kind: "object", properties: merged };
+    if (a.class_name) result.class_name = a.class_name;
+    else if (b.class_name) result.class_name = b.class_name;
+    return result;
   }
 
   // Both arrays: merge element types
@@ -351,10 +359,11 @@ function typeNodeToTS(
       return `[${elements.join(", ")}]`;
     }
     case "union": {
-      const members = (node.members || []).map((m) =>
+      const rawMembers = (node.members || []).map((m) =>
         typeNodeToTS(m, extracted, parentName, propName, indent),
       );
-      return members.join(" | ");
+      const unique = [...new Set(rawMembers)];
+      return unique.join(" | ");
     }
     case "map": {
       const k = typeNodeToTS(node.key!, extracted, parentName, "key", indent);
@@ -673,14 +682,17 @@ function typeNodeToPython(
       return `Tuple[${els.join(", ")}]`;
     }
     case "union": {
-      const members = (node.members || []).map((m) =>
+      const rawMembers = (node.members || []).map((m) =>
         typeNodeToPython(m, extracted, parentName, propName),
       );
-      if (members.length === 2 && members.includes("None")) {
-        const nonNone = members.find((m) => m !== "None");
+      // Deduplicate: Union[Any, Any, Any] → Any
+      const unique = [...new Set(rawMembers)];
+      if (unique.length === 1) return unique[0];
+      if (unique.length === 2 && unique.includes("None")) {
+        const nonNone = unique.find((m) => m !== "None");
         return `Optional[${nonNone}]`;
       }
-      return `Union[${members.join(", ")}]`;
+      return `Union[${unique.join(", ")}]`;
     }
     case "map": {
       const k = typeNodeToPython(node.key!, extracted, parentName, "key");
@@ -994,6 +1006,37 @@ export function generateFromJsonl(jsonlPath: string): Record<string, { ts: strin
       pySections.push(generatePyForFunction(fn));
       pySections.push("");
       pySections.push("");
+    }
+
+    // Add conditional imports for display types (Tensor, ndarray, etc.)
+    const pyBody = pySections.join("\n");
+    const displayImports: Record<string, string> = {
+      "Tensor": "from torch import Tensor",
+      "ndarray": "from numpy import ndarray",
+      "DataFrame": "from pandas import DataFrame",
+      "Series": "from pandas import Series",
+      "DatasetDict": "from datasets import DatasetDict",
+      "Dataset": "from datasets import Dataset",
+    };
+    const importLines: string[] = [];
+    for (const [typeName, importStmt] of Object.entries(displayImports)) {
+      // Check if type is used as a standalone word (not inside comments/imports)
+      if (new RegExp(`\\b${typeName}\\b`).test(pyBody)) {
+        importLines.push(importStmt);
+      }
+    }
+    // Also collect user-defined class names referenced but not defined in the stub
+    const classDefPattern = /^class (\w+)/gm;
+    const definedClasses = new Set<string>();
+    let m: RegExpExecArray | null;
+    while ((m = classDefPattern.exec(pyBody)) !== null) definedClasses.add(m[1]);
+    // Find class references in type annotations that aren't defined or imported
+    const typeRefPattern = /:\s*(\w+)(?:\s*[=)]|\s*$)/gm;
+    // No need — the display imports cover the main cases
+
+    if (importLines.length > 0) {
+      const block = "try:\n" + importLines.map(l => `    ${l}`).join("\n") + "\nexcept ImportError:\n    pass\n";
+      pySections.splice(6, 0, block);
     }
 
     result[mod] = {
