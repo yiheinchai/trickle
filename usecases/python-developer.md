@@ -145,7 +145,7 @@ def create_user(data: CreateUserInput) -> UserResponse:
     ...
 ```
 
-## Use Case 3: FastAPI / Flask / Django API Types
+## Use Case 3: FastAPI / Flask / Django / Litestar API Types
 
 Trickle auto-detects your framework and captures request/response types:
 
@@ -158,6 +158,15 @@ trickle run python app.py
 
 # Django
 trickle run python manage.py runserver
+
+# Litestar
+trickle run litestar run app:app
+```
+
+Or use explicit instrumentation:
+```python
+from trickle import instrument, instrument_litestar
+instrument(app)  # Auto-detects FastAPI, Flask, Django, or Litestar
 ```
 
 Hit some endpoints, then:

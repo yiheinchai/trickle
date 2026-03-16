@@ -384,6 +384,98 @@ def _instrument_django_urls(urlpatterns: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Litestar auto-instrumentation
+# ---------------------------------------------------------------------------
+
+
+def instrument_litestar(app: Any) -> None:
+    """Instrument a Litestar app using lifecycle hooks.
+
+    Uses before_request (input capture) and before_send (response capture)
+    to observe all HTTP endpoints.
+
+    Usage:
+        from litestar import Litestar
+        from trickle import instrument_litestar
+
+        app = Litestar(...)
+        instrument_litestar(app)
+    """
+    # Store request data keyed by scope id for correlation
+    _request_store: Dict[int, Dict[str, Any]] = {}
+
+    original_before_request = app.before_request
+
+    async def trickle_before_request(request: Any) -> None:
+        """Capture input before the handler runs."""
+        try:
+            scope = request.scope if hasattr(request, "scope") else {}
+            req_id = id(scope)
+
+            input_data: Dict[str, Any] = {
+                "path": str(request.url.path) if hasattr(request, "url") else "/",
+                "method": request.method if hasattr(request, "method") else "GET",
+                "query": dict(request.query_params) if hasattr(request, "query_params") else {},
+            }
+
+            if scope.get("path_params"):
+                input_data["params"] = dict(scope["path_params"])
+
+            if hasattr(request, "method") and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+                try:
+                    body_bytes = await request.body()
+                    if body_bytes:
+                        try:
+                            input_data["body"] = json.loads(body_bytes)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            pass
+                except Exception:
+                    pass
+
+            route_name = f"{input_data['method']} {input_data['path']}"
+            try:
+                route = scope.get("route")
+                if route and hasattr(route, "path"):
+                    route_name = f"{input_data['method']} {route.path}"
+            except Exception:
+                pass
+
+            _request_store[req_id] = {"input": input_data, "route": route_name}
+        except Exception:
+            pass
+
+        if original_before_request is not None:
+            result = original_before_request(request)
+            if inspect.isawaitable(result):
+                await result
+
+    async def trickle_before_send(message: Any, scope: Any) -> None:
+        """Capture response body from the ASGI send messages."""
+        try:
+            if scope.get("type") != "http":
+                return
+            req_id = id(scope)
+            store = _request_store.get(req_id)
+            if not store:
+                return
+
+            if message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                if body:
+                    try:
+                        output_data = json.loads(body)
+                        _emit_route(store["route"], "litestar", store["input"], output_data, None)
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        _emit_route(store["route"], "litestar", store["input"], None, None)
+                    _request_store.pop(req_id, None)
+        except Exception:
+            pass
+
+    app.before_request = trickle_before_request
+    app.before_send.append(trickle_before_send)
+
+
+# ---------------------------------------------------------------------------
 # Auto-detect and instrument
 # ---------------------------------------------------------------------------
 
@@ -395,7 +487,7 @@ def instrument(app: Any) -> None:
         from trickle import instrument
         instrument(app)
 
-    Supports: FastAPI, Flask, Django (pass urlpatterns).
+    Supports: FastAPI, Flask, Django (pass urlpatterns), Litestar.
     """
     app_type = type(app).__name__
     module_name = type(app).__module__ or ""
@@ -403,6 +495,11 @@ def instrument(app: Any) -> None:
     # FastAPI / Starlette
     if "fastapi" in module_name.lower() or app_type in ("FastAPI", "Starlette"):
         instrument_fastapi(app)
+        return
+
+    # Litestar
+    if "litestar" in module_name.lower() or app_type == "Litestar":
+        instrument_litestar(app)
         return
 
     # Flask
@@ -419,5 +516,5 @@ def instrument(app: Any) -> None:
     logger.warning(
         f"trickle: could not auto-detect framework for {app_type} "
         f"(module: {module_name}). Use instrument_fastapi(), "
-        f"instrument_flask(), or instrument_django() directly."
+        f"instrument_flask(), instrument_django(), or instrument_litestar() directly."
     )
