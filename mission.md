@@ -2,21 +2,23 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle's strategic moat is zero-code, local-first runtime observability that works for both humans AND AI agents. The market is splitting into expensive enterprise APM (Datadog, New Relic) and LLM-specific observability (Langfuse, LangSmith, Helicone). Trickle sits in the underserved middle: general-purpose runtime understanding for individual developers and small teams, with first-class AI agent integration. Double down on this position by: (1) making trickle the default "eyes" for AI coding agents — if an agent uses trickle, it writes better code faster, (2) extending auto-instrumentation to capture LLM/AI calls (OpenAI, Anthropic, etc.) with zero code changes, competing with Langfuse/LangSmith on DX, and (3) ensuring rock-solid reliability on real-world codebases so developers trust it in production. Every feature should pass the test: "does this help a developer (or their AI agent) understand their running code faster?"
+Trickle's strategic moat is zero-code, local-first runtime observability that works for both humans AND AI agents — at zero cost. The market is in a cost revolt against Datadog/New Relic ($50K-$1M/year) and drowning in "too much telemetry, not enough insight." Trickle's winning position: free because it's on your machine, intelligent because it surfaces signal not noise, and AI-native because it feeds runtime context to coding agents via MCP. Three strategic pillars: (1) Be the default "eyes" for AI coding agents — 95% of developers use AI tools weekly and Claude Code is the #1 most-loved; if trickle + MCP makes agents write better code, adoption follows the agent ecosystem. (2) Shift-left observability — give developers production-grade runtime understanding during localhost development, filling the massive gap between printf debugging and enterprise APM. (3) Intelligent signal extraction — don't just capture everything, automatically surface anomalies, performance regressions, and breaking changes so developers act on insights not raw data. Every feature must pass: "does this help a developer (or their AI agent) understand their running code faster, with less noise?"
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.118, client-python 0.2.24. Priority areas:
+CLI 0.1.177, client-js 0.2.118, client-python 0.2.25. SHIPPED: LLM auto-instrumentation, CSV export, pagination, dashboard charts. Just fixed: Python kwargs parameter wrapping bug (was collapsing kwargs into single object, now correctly maps each kwarg to its parameter name).
 
-1. **LLM/AI call auto-instrumentation** — SHIPPED: Zero-code capture of OpenAI and Anthropic SDK calls in both JS and Python. Records model, messages, token counts (input/output/total), latency, estimated cost (USD), streaming, tool use, temperature, system prompt, and finish reason into .trickle/llm.jsonl. Dashboard has LLM Calls tab with faceted browsing by provider/model. CLI has `trickle llm` command for terminal viewing. JS uses prototype-level monkey-patching of Completions/Messages classes. Python uses `__init__` patching + `builtins.__import__` hook. Still TODO: streaming token accumulation (Python), more providers (Cohere, Mistral, Google Gemini).
+Real-world testing results (Express, FastAPI, TypeScript, PyTorch):
+- JS instrumentation rock-solid: Express routes, middleware, auth, TypeScript via tsx all work perfectly
+- Python: function/variable capture works well. PyTorch tensor shapes captured correctly.
+- Known remaining issues: (a) Python .pyi stubs have invalid types for tensor params, (b) FastAPI routes not parameterized (literal IDs instead of {task_id}), (c) error stack traces point to temp file not source
 
-2. **Agent workflow tracing** — Extend tracing to capture multi-step AI agent workflows (tool calls, reasoning chains, delegation between agents). Trickle's MCP integration already makes it agent-native; adding agent-aware tracing makes it indispensable.
-
-3. **Real-world reliability hardening** — Test trickle against 10+ popular open-source repos. Fix every instrumentation failure found. The JS LLM observer was tested against OpenAI SDK v4+ with real API calls.
-
-4. **Export and interoperability** — SHIPPED: CSV export, pagination, LLM data in CSV export. Still TODO: OpenTelemetry GenAI semantic conventions for LLM span export.
-
-5. **Live streaming mode** — Real-time tail of observations in the dashboard (WebSocket-based). Critical for debugging long-running processes and agent workflows.
+Priority areas:
+1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
+2. **OpenTelemetry export** — OTel-compatible span export with GenAI semantic conventions
+3. **Live streaming mode** — WebSocket real-time dashboard for long-running processes
+4. **More LLM providers** — Cohere, Mistral, Google Gemini, Python streaming tokens
+5. **Route parameterization (Python)** — use FastAPI/Flask route definitions to normalize HTTP paths
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

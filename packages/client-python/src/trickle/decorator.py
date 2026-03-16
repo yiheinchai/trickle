@@ -314,15 +314,6 @@ def _emit_with_return_type(
     try:
         import traceback
 
-        elements = [infer_type(arg) for arg in original_args]
-        if original_kwargs:
-            kwargs_props: Dict[str, Any] = {}
-            for key, val in original_kwargs.items():
-                kwargs_props[key] = infer_type(val)
-            elements.append({"kind": "object", "properties": kwargs_props})
-
-        args_type: Dict[str, Any] = {"kind": "tuple", "elements": elements}
-
         param_names: list[str] = []
         try:
             sig = inspect.signature(fn)
@@ -331,10 +322,34 @@ def _emit_with_return_type(
                 if p.kind in (
                     inspect.Parameter.POSITIONAL_ONLY,
                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
                 )
             ]
         except (ValueError, TypeError):
             pass
+
+        if param_names and original_kwargs:
+            elements: list[Dict[str, Any]] = []
+            provided_names: list[str] = []
+            for i, pname in enumerate(param_names):
+                if i < len(original_args):
+                    elements.append(infer_type(original_args[i]))
+                    provided_names.append(pname)
+                elif pname in original_kwargs:
+                    elements.append(infer_type(original_kwargs[pname]))
+                    provided_names.append(pname)
+            for arg in original_args[len(param_names):]:
+                elements.append(infer_type(arg))
+            param_names = provided_names
+        else:
+            elements = [infer_type(arg) for arg in original_args]
+            if original_kwargs:
+                kwargs_props: Dict[str, Any] = {}
+                for key, val in original_kwargs.items():
+                    kwargs_props[key] = infer_type(val)
+                elements.append({"kind": "object", "properties": kwargs_props})
+
+        args_type: Dict[str, Any] = {"kind": "tuple", "elements": elements}
 
         type_hash_val = hash_type(args_type, return_type)
         function_key = f"{func_module}.{func_name}"
@@ -466,19 +481,9 @@ def _emit(
     try:
         import traceback
 
-        # Infer argument types as a tuple (matching JS client format)
-        elements = [infer_type(arg) for arg in original_args]
-        # Include kwargs in the type
-        if original_kwargs:
-            kwargs_props: Dict[str, Any] = {}
-            for key, val in original_kwargs.items():
-                kwargs_props[key] = infer_type(val)
-            elements.append({"kind": "object", "properties": kwargs_props})
-
-        args_type: Dict[str, Any] = {"kind": "tuple", "elements": elements}
-        return_type = infer_type(result)
-
-        # Extract parameter names from the original function
+        # Build argument types matching the function signature order.
+        # Merge positional args and kwargs so each parameter gets its own
+        # element in the tuple — avoids collapsing kwargs into one object.
         param_names: list[str] = []
         try:
             sig = inspect.signature(fn)
@@ -487,10 +492,38 @@ def _emit(
                 if p.kind in (
                     inspect.Parameter.POSITIONAL_ONLY,
                     inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
                 )
             ]
         except (ValueError, TypeError):
             pass
+
+        if param_names and original_kwargs:
+            # Merge positional and keyword args in signature order,
+            # keeping only params that were actually provided.
+            elements: list[Dict[str, Any]] = []
+            provided_names: list[str] = []
+            for i, pname in enumerate(param_names):
+                if i < len(original_args):
+                    elements.append(infer_type(original_args[i]))
+                    provided_names.append(pname)
+                elif pname in original_kwargs:
+                    elements.append(infer_type(original_kwargs[pname]))
+                    provided_names.append(pname)
+                # else: parameter not provided (has a default) — skip
+            for arg in original_args[len(param_names):]:
+                elements.append(infer_type(arg))
+            param_names = provided_names
+        else:
+            elements = [infer_type(arg) for arg in original_args]
+            if original_kwargs:
+                kwargs_props: Dict[str, Any] = {}
+                for key, val in original_kwargs.items():
+                    kwargs_props[key] = infer_type(val)
+                elements.append({"kind": "object", "properties": kwargs_props})
+
+        args_type: Dict[str, Any] = {"kind": "tuple", "elements": elements}
+        return_type = infer_type(result)
 
         type_hash_val = hash_type(args_type, return_type)
         function_key = f"{func_module}.{func_name}"
@@ -499,10 +532,20 @@ def _emit(
         if error_exc is None and not _cache.should_send(function_key, type_hash_val):
             return
 
-        # Build sample input
-        sample_args = [_sanitize_sample(a) for a in original_args]
-        if original_kwargs:
-            sample_args.append(_sanitize_sample(original_kwargs))
+        # Build sample input matching the argsType element order
+        if param_names and original_kwargs:
+            sample_args = []
+            for i, pname in enumerate(param_names):
+                if i < len(original_args):
+                    sample_args.append(_sanitize_sample(original_args[i]))
+                elif pname in original_kwargs:
+                    sample_args.append(_sanitize_sample(original_kwargs[pname]))
+            for arg in original_args[len(param_names):]:
+                sample_args.append(_sanitize_sample(arg))
+        else:
+            sample_args = [_sanitize_sample(a) for a in original_args]
+            if original_kwargs:
+                sample_args.append(_sanitize_sample(original_kwargs))
 
         # camelCase payload to match backend's IngestPayload interface
         payload: Dict[str, Any] = {
