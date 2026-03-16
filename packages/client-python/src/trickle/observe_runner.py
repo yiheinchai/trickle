@@ -190,6 +190,13 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
+    # Patch OpenAI Agents SDK for agent workflow tracing
+    try:
+        from trickle.openai_agents_observer import patch_openai_agents_sdk
+        patch_openai_agents_sdk(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 

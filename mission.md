@@ -12,7 +12,7 @@ Priority areas ranked by competitive urgency:
 
 1. **Claude Agent SDK tracing** — SHIPPED: Zero-code tracing via SDK hooks (PreToolUse, PostToolUse, PostToolUseFailure, SubagentStart, SubagentStop). Auto-injects hooks into ClaudeAgentOptions. Captures tool calls with input/output/duration, subagent lifecycle, and full agent run. Events use `framework: "claude-agent-sdk"`. Parity with Arize Phoenix achieved.
 
-2. **OpenAI Agents SDK tracing** — The SDK has `add_trace_processor()` API that accepts custom trace processors — a clean zero-code entry point. Capture agent handoffs, guardrails, tool calls, and custom events. Datadog already has native integration; trickle needs a free, local alternative. Combined with Claude Agent SDK (#1), this completes the Big 3: LangChain + CrewAI + OpenAI + Claude = every major agent framework.
+2. **OpenAI Agents SDK tracing** — SHIPPED: Zero-code tracing via TracingProcessor interface + add_trace_processor(). Captures AgentSpanData, FunctionSpanData, GenerationSpanData, HandoffSpanData, GuardrailSpanData with timing/tokens. Events use `framework: "openai-agents"`. Trickle now traces ALL major agent frameworks: LangChain + CrewAI + Claude Agent SDK + OpenAI Agents SDK.
 
 3. **Silent failure detection** — The #1 unsolved agent problem: agents select wrong tools, retrieve wrong docs, but return HTTP 200 with confident-sounding answers. Only 3% of developers "highly trust" AI output. Build automatic detection of: repeated tool retries, tool selection that ignores available context, cost spikes vs output quality, and response confidence scoring. Surface these as warnings in dashboard and `trickle monitor`. This is the "why" debugger.
 
