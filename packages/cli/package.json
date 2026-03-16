@@ -1,6 +1,6 @@
 {
   "name": "trickle-cli",
-  "version": "0.1.205",
+  "version": "0.1.206",
   "description": "Zero-code runtime observability for JS/Python + AI agent debugging. Traces LangChain, CrewAI, OpenAI, Anthropic, Gemini. Eval, security, compliance, cost tracking. Free, local-first.",
   "keywords": ["observability", "tracing", "llm", "openai", "anthropic", "langchain", "crewai", "agent", "mcp", "debugging", "typescript", "python", "security", "eval", "compliance"],
   "bin": {

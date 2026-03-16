@@ -281,12 +281,36 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
       }
     }
 
-    if (cacheDetected) {
+    // Provider-reported cache tokens (Anthropic cache_read/cache_creation)
+    const cacheReadTotal = calls.reduce((s: number, c: any) => s + (c.cacheReadTokens || 0), 0);
+    const cacheWriteTotal = calls.reduce((s: number, c: any) => s + (c.cacheWriteTokens || 0), 0);
+    const callsWithCache = calls.filter((c: any) => c.cacheReadTokens > 0 || c.cacheWriteTokens > 0);
+
+    if (callsWithCache.length > 0 || cacheDetected) {
       console.log(chalk.gray('\n  ' + '─'.repeat(60)));
-      console.log(chalk.bold('  Cache Analysis') + chalk.gray(' (detected from latency bimodality)'));
-      for (const ca of cacheAnalysis) {
-        const speedup = (ca.slowAvg / Math.max(1, ca.fastAvg)).toFixed(0);
-        console.log(`  ${chalk.cyan(ca.model.padEnd(25))} hit rate: ${chalk.green(ca.hitRate + '%')} (${ca.fastCalls} fast, ${ca.slowCalls} slow)  ${speedup}x speedup  fast=${ca.fastAvg}ms slow=${ca.slowAvg}ms`);
+      console.log(chalk.bold('  Cache Analysis'));
+
+      if (callsWithCache.length > 0) {
+        const cacheHitCalls = calls.filter((c: any) => c.cacheReadTokens > 0);
+        const hitRate = calls.length > 0 ? Math.round((cacheHitCalls.length / calls.length) * 100) : 0;
+        // Estimate savings: cached tokens cost ~90% less
+        const savedTokens = cacheReadTotal;
+        const avgInputPrice = totalCost > 0 && totalTokens > 0 ? (totalCost / totalTokens) : 0.000003;
+        const estimatedSavings = savedTokens * avgInputPrice * 0.9;
+        console.log(chalk.gray('  Provider-reported cache tokens:'));
+        console.log(`  Hit rate: ${chalk.green(hitRate + '%')} (${cacheHitCalls.length}/${calls.length} calls used cache)`);
+        console.log(`  Cache read: ${formatTokens(cacheReadTotal)} tokens | Cache write: ${formatTokens(cacheWriteTotal)} tokens`);
+        if (estimatedSavings > 0) {
+          console.log(`  Estimated savings: ${chalk.green('~$' + estimatedSavings.toFixed(4))} from cached tokens`);
+        }
+      }
+
+      if (cacheDetected) {
+        console.log(chalk.gray('  Latency-based detection:'));
+        for (const ca of cacheAnalysis) {
+          const speedup = (ca.slowAvg / Math.max(1, ca.fastAvg)).toFixed(0);
+          console.log(`  ${chalk.cyan(ca.model.padEnd(25))} hit rate: ${chalk.green(ca.hitRate + '%')} (${ca.fastCalls} fast, ${ca.slowCalls} slow)  ${speedup}x speedup`);
+        }
       }
     }
   }

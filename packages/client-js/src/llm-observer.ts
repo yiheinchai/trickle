@@ -67,6 +67,8 @@ interface LlmEvent {
   outputTokens: number;
   totalTokens: number;
   estimatedCostUsd: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   stream: boolean;
   finishReason: string;
   temperature?: number;
@@ -486,12 +488,16 @@ function handleAnthropicStream(stream: any, params: any, startTime: number, debu
 function captureAnthropicResponse(params: any, response: any, startTime: number, debug: boolean): void {
   const usage = response.usage || {};
   const outputText = response.content?.map((c: any) => c.text || '').join('') || '';
+  const cacheRead = usage.cache_read_input_tokens || 0;
+  const cacheWrite = usage.cache_creation_input_tokens || 0;
   const event: LlmEvent = {
     kind: 'llm_call', provider: 'anthropic', model: response.model || params.model || 'unknown',
     durationMs: round(performance.now() - startTime),
     inputTokens: usage.input_tokens || 0, outputTokens: usage.output_tokens || 0,
     totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
     estimatedCostUsd: estimateCost(response.model || params.model || '', usage.input_tokens || 0, usage.output_tokens || 0),
+    ...(cacheRead > 0 ? { cacheReadTokens: cacheRead } : {}),
+    ...(cacheWrite > 0 ? { cacheWriteTokens: cacheWrite } : {}),
     stream: false, finishReason: response.stop_reason || 'unknown',
     temperature: params.temperature, maxTokens: params.max_tokens,
     systemPrompt: typeof params.system === 'string' ? truncate(params.system, 200) : undefined,
