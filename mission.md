@@ -6,7 +6,7 @@ Trickle is the only tool that infers types from runtime behavior and generates t
 </higher directive>
 
 <focus point>
-1. **Framework coverage: Fastify and Koa** — Fastify and Koa are 2 of the top 3 most popular Node.js web frameworks and we don't support them. This is the single biggest adoption blocker for JavaScript developers. Implement auto-instrumentation for both (like we did for Express), add e2e tests, and update the JS developer usecase guide. Same pattern as express.ts — monkey-patch route handlers, capture request/response types.
+1. **Framework coverage: Fastify and Koa** — DONE (0.2.127): instrumentFastify(), instrumentKoa(), instrumentKoaRouter(), tricklePlugin (Fastify hook-based). Auto-detection in instrument() and zero-code mode (node -r trickle/register). E2E tests pass for both. JS developer usecase updated.
 
 2. **Real-world validation on open-source projects** — We have 70+ commands but zero published evidence they work on real codebases. Find 3-5 popular open-source projects (an Express API, a FastAPI service, a Next.js app, a LangChain agent), run trickle on them, fix any issues encountered, and document the results. Every bug found this way is a bug our users would hit. Every success is a case study we can reference. This is how we prove the "zero-code" promise actually holds.
 
@@ -14,7 +14,7 @@ Trickle is the only tool that infers types from runtime behavior and generates t
 
 4. **Onboarding: progressive disclosure for 70+ commands** — New users see 70+ commands and don't know where to start. Implement `trickle help <topic>` with grouped command discovery (e.g., `trickle help debug`, `trickle help types`, `trickle help agents`). Add shell completion scripts (bash/zsh) so tab-complete works. The first 5 minutes determine adoption — make them guided, not overwhelming.
 
-5. **Browser and frontend instrumentation** — React/Next.js/React Native usecases exist in docs but actual browser-side instrumentation is minimal. Frontend developers are a huge audience (the "backend ships faster than they document" pain point is universal). Add React component render tracking, state mutation capture (useState/useReducer), and network waterfall visualization. The Vite plugin and Next.js plugin exist — extend them to capture meaningful frontend observability data.
+5. **Framework coverage: Hono and Nest.js** — Hono is the fastest-growing Node.js framework (Cloudflare Workers, Deno, Bun) and Nest.js is the most popular TypeScript framework. Adding these would cover the full Node.js framework ecosystem. Hono uses a similar middleware pattern to Koa; Nest.js wraps Express/Fastify underneath but adds decorators and DI.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
