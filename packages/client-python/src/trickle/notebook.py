@@ -697,17 +697,79 @@ def _build_sample(value: Any) -> Any:
     return str(value)[:200]
 
 
+def _quick_type_and_sample(val: Any) -> tuple:
+    """Fast type + sample for error snapshots. Avoids deep inference on large objects."""
+    import types as _types
+    # Skip modules, functions, classes — not useful for debugging
+    if isinstance(val, (type, _types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType)):
+        return None, None
+
+    t = type(val)
+    # Primitives: instant
+    if isinstance(val, bool):
+        return {"kind": "primitive", "name": "boolean"}, val
+    if isinstance(val, int):
+        return {"kind": "primitive", "name": "integer"}, val
+    if isinstance(val, float):
+        return {"kind": "primitive", "name": "number"}, val
+    if isinstance(val, str):
+        return {"kind": "primitive", "name": "string"}, val[:200]
+
+    # Tensors/ndarrays: show shape without deep inference
+    if hasattr(val, "shape") and hasattr(val, "dtype"):
+        shape = val.shape
+        parts = [f"shape={list(shape)}", f"dtype={val.dtype}"]
+        if hasattr(val, "device"):
+            parts.append(f"device={val.device}")
+        cn = t.__name__
+        props: dict = {
+            "shape": {"kind": "primitive", "name": str(list(shape))},
+            "dtype": {"kind": "primitive", "name": str(val.dtype)},
+        }
+        type_node = {"kind": "object", "properties": props, "class_name": cn}
+        sample = f'{cn}({", ".join(parts)})'
+        return type_node, sample
+
+    # Lists/tuples: shallow — just show first few string representations
+    if isinstance(val, (list, tuple)):
+        items = []
+        for item in val[:20]:
+            if item is None or isinstance(item, (bool, int, float)):
+                items.append(item)
+            elif isinstance(item, str):
+                items.append(item[:80])
+            else:
+                items.append(str(item)[:80])
+        if len(val) > 20:
+            items.append(f"... ({len(val)} total)")
+        elem_name = "unknown"
+        if val and isinstance(val[0], str):
+            elem_name = "string"
+        elif val and isinstance(val[0], (int, float)):
+            elem_name = "number"
+        type_node = {"kind": "array", "element": {"kind": "primitive", "name": elem_name}}
+        return type_node, items
+
+    # Dicts: shallow
+    if isinstance(val, dict):
+        d = {}
+        for k, v in list(val.items())[:10]:
+            if isinstance(k, str):
+                if v is None or isinstance(v, (bool, int, float)):
+                    d[k] = v
+                elif isinstance(v, str):
+                    d[k] = v[:80]
+                else:
+                    d[k] = str(v)[:80]
+        return {"kind": "primitive", "name": t.__name__}, d if d else str(val)[:200]
+
+    # Fallback: just stringify
+    return {"kind": "primitive", "name": t.__name__}, str(val)[:200]
+
+
 def _capture_error_snapshot(exc: BaseException) -> None:
-    """Capture all frame locals at the error site and write as error_snapshot records.
-
-    When a cell raises an exception, this walks the traceback to find the
-    user-code frame, then captures every local variable with full type
-    inference and sample values — so the VSCode extension can show them
-    as inline hints in 'error mode'.
-    """
+    """Capture frame locals at the error site — lightweight, no deep inference."""
     try:
-        from .type_inference import infer_type
-
         tb = exc.__traceback__
         if tb is None:
             return
@@ -733,12 +795,13 @@ def _capture_error_snapshot(exc: BaseException) -> None:
         error_msg = f"{type(exc).__name__}: {exc}"
 
         records: list = []
-        for name, val in list(user_frame.f_locals.items()):
+        for name, val in list(user_frame.f_locals.items())[:30]:
             if name.startswith("_"):
                 continue
             try:
-                type_node = infer_type(val, max_depth=3)
-                sample = _build_sample(val)
+                type_node, sample = _quick_type_and_sample(val)
+                if type_node is None:
+                    continue
                 records.append({
                     "kind": "error_snapshot",
                     "varName": name,
