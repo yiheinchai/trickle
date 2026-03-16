@@ -85,10 +85,48 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
     ? (totalCost / timeSpanMs) * 30 * 24 * 60 * 60 * 1000
     : null;
 
+  // Per-agent cost roll-up — read agents.jsonl and attribute LLM costs to agents
+  const agentsFile = path.join(dir, 'agents.jsonl');
+  const byAgent: Record<string, { calls: number; tokens: number; cost: number; framework: string }> = {};
+  if (fs.existsSync(agentsFile)) {
+    const agentEvents = fs.readFileSync(agentsFile, 'utf-8').split('\n').filter(Boolean)
+      .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+
+    // Build agent activity windows: agent_start → agent_end with timestamps
+    const activeAgents: { name: string; framework: string; start: number; end: number }[] = [];
+    const startTimes: Record<string, { name: string; framework: string; ts: number }> = {};
+
+    for (const ev of agentEvents) {
+      const name = ev.chain || ev.tool || 'unknown';
+      const fw = ev.framework || 'unknown';
+      if (ev.event === 'agent_start' || ev.event === 'crew_start') {
+        startTimes[name] = { name, framework: fw, ts: ev.timestamp || 0 };
+      } else if ((ev.event === 'agent_end' || ev.event === 'crew_end') && startTimes[name]) {
+        activeAgents.push({ name, framework: fw, start: startTimes[name].ts, end: ev.timestamp || Date.now() });
+        delete startTimes[name];
+      }
+    }
+
+    // Attribute each LLM call to the most-recently-started agent active at that time
+    for (const call of calls) {
+      const ts = call.timestamp || 0;
+      const matching = activeAgents.filter(a => ts >= a.start && ts <= a.end);
+      const agent = matching.length > 0 ? matching[matching.length - 1] : null;
+      if (agent) {
+        const key = `${agent.framework}/${agent.name}`;
+        if (!byAgent[key]) byAgent[key] = { calls: 0, tokens: 0, cost: 0, framework: agent.framework };
+        byAgent[key].calls++;
+        byAgent[key].tokens += call.totalTokens || 0;
+        byAgent[key].cost += call.estimatedCostUsd || 0;
+      }
+    }
+  }
+
   if (opts.json) {
     console.log(JSON.stringify({
       summary: { totalCost, totalTokens, totalInputTokens, totalOutputTokens, totalCalls: calls.length, totalDurationMs: totalDuration, errors: errorCount, monthlyProjection },
       byProvider, byModel,
+      ...(Object.keys(byAgent).length > 0 ? { byAgent } : {}),
     }, null, 2));
     return;
   }
@@ -137,6 +175,17 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
 
   // Top costly calls
   const costlyCalls = calls.filter(c => c.estimatedCostUsd > 0).sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd).slice(0, 5);
+  // By agent (if agent data exists)
+  if (Object.keys(byAgent).length > 0) {
+    console.log(chalk.gray('\n  ' + '─'.repeat(60)));
+    console.log(chalk.bold('  By Agent/Workflow'));
+    const sortedAgents = Object.entries(byAgent).sort((a, b) => b[1].cost - a[1].cost);
+    for (const [name, data] of sortedAgents) {
+      const pct = totalCost > 0 ? ((data.cost / totalCost) * 100).toFixed(0) : '0';
+      console.log(`  ${chalk.cyan(name.padEnd(30))} $${data.cost.toFixed(4).padEnd(10)} ${chalk.gray(pct + '%')}  ${data.calls} calls  ${formatTokens(data.tokens)} tokens`);
+    }
+  }
+
   if (costlyCalls.length > 0) {
     console.log(chalk.gray('\n  ' + '─'.repeat(60)));
     console.log(chalk.bold('  Most Expensive Calls'));
