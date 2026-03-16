@@ -413,7 +413,6 @@ def patch_llms(debug: bool = False) -> None:
     _debug = debug
 
     import sys
-    import builtins
 
     # Clear previous LLM data
     try:
@@ -436,16 +435,10 @@ def patch_llms(debug: bool = False) -> None:
             except Exception:
                 pass
 
-    # Hook builtins.__import__ for future imports
-    _orig_import = builtins.__import__
-
-    def _hooked_import(name: str, *args: Any, **kwargs: Any) -> Any:
-        module = _orig_import(name, *args, **kwargs)
-        if name in _LLM_PATCHES and not getattr(module, "_trickle_llm_patched", False):
-            try:
-                _LLM_PATCHES[name](module)
-            except Exception:
-                pass
-        return module
-
-    builtins.__import__ = _hooked_import
+    # Register patches with db_observer's __import__ hook instead of
+    # creating a separate one (avoids double-hooking stack trace noise)
+    try:
+        from trickle.db_observer import register_import_patches
+        register_import_patches(_LLM_PATCHES)
+    except Exception:
+        pass

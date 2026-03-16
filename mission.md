@@ -6,9 +6,11 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.119, client-python 0.2.26. Recent ships: LLM auto-instrumentation, CSV export, pagination, kwargs fix, route parameterization.
+CLI 0.1.177, client-js 0.2.119, client-python 0.2.27. Recent ships: LLM auto-instrumentation, CSV export, pagination, kwargs fix, route parameterization, docstring preservation, consolidated import hooks.
 
-Just fixed: URL path normalization for both JS and Python. UUIDs, numeric IDs, hex strings, and MongoDB ObjectIds in URL paths are now replaced with `:uuid` or `:id` placeholders. Prevents cardinality explosion (5 different UUIDs → 1 function name). FastAPI middleware also extracts route templates from `request.scope['route'].path`.
+Just fixed:
+- AST transform now preserves docstrings as first statement (fixes LangChain @tool compatibility)
+- Consolidated Python import hooks: llm_observer registers patches with db_observer's hook instead of creating separate one (cleaner stack traces)
 
 Known remaining issues: (a) Python .pyi stubs have invalid types for tensor params, (b) error stack traces point to temp file not source
 

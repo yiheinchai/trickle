@@ -28,6 +28,19 @@ _MAX_QUERY_LENGTH = 500
 _MAX_QUERIES = 500
 _query_count = 0
 
+# Registry for other observers to add their import patches.
+# These get merged into the __import__ hook alongside database patches.
+_extra_import_patches: Dict[str, Any] = {}
+
+
+def register_import_patches(patches: Dict[str, Any]) -> None:
+    """Register additional module import patches.
+
+    Called by llm_observer to add OpenAI/Anthropic patches without
+    creating a separate __import__ hook (which clutters stack traces).
+    """
+    _extra_import_patches.update(patches)
+
 
 def _get_queries_file() -> str:
     global _queries_file
@@ -773,6 +786,8 @@ def patch_databases(debug: bool = False) -> None:
         "sqlalchemy": patch_sqlalchemy,
         "django": patch_django,
     }
+    # Merge any extra patches registered by other observers (e.g. LLM observer)
+    _DB_PATCHES.update(_extra_import_patches)
     for mod_name, patcher in _DB_PATCHES.items():
         if mod_name in sys.modules:
             try:
@@ -788,6 +803,12 @@ def patch_databases(debug: bool = False) -> None:
         if name in _DB_PATCHES and not getattr(module, "_trickle_patched", False):
             try:
                 _DB_PATCHES[name](module)
+            except Exception:
+                pass
+        # Check late-registered patches (e.g. from LLM observer)
+        if name in _extra_import_patches and not getattr(module, "_trickle_llm_patched", False):
+            try:
+                _extra_import_patches[name](module)
             except Exception:
                 pass
         # Schedule deferred loguru/structlog patching (can't patch mid-import)

@@ -286,7 +286,16 @@ def _transform_functions_with_context(node: ast.AST, class_name: str | None) -> 
         elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
             func_name = f"{class_name}.{child.name}" if class_name else child.name
             param_traces = _make_param_traces(child, func_name=func_name)
-            child.body = param_traces + _transform_func_body(child.body, func_name=func_name)
+            transformed_body = _transform_func_body(child.body, func_name=func_name)
+            # Preserve docstring: must remain the first statement in the body,
+            # otherwise Python won't recognize it as __doc__ (breaks @tool, etc.)
+            if (transformed_body
+                    and isinstance(transformed_body[0], ast.Expr)
+                    and isinstance(transformed_body[0].value, ast.Constant)
+                    and isinstance(transformed_body[0].value.value, str)):
+                child.body = [transformed_body[0]] + param_traces + transformed_body[1:]
+            else:
+                child.body = param_traces + transformed_body
             # Don't recurse into nested functions from here — _transform_func_body handles them
         else:
             # Recurse into other compound nodes (if/for/with/try at module level)
