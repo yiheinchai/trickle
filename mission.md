@@ -6,19 +6,19 @@ The reliability stack is COMPLETE: benchmark → eval → diff-runs → playback
 </higher directive>
 
 <focus point>
-CLI 0.1.206, client-js 0.2.126, client-python 0.2.39, VSCode 0.1.69. 38 MCP tools, 83 CLI commands, 5 LLM providers. THE RELIABILITY STACK IS COMPLETE: benchmark (pass@k, pass^k, consistency), eval (A-F grading, --fail-under), diff-runs, playback, monitor (silent failures, structured output, agent anomalies), security (Lethal Trifecta), compliance (EU AI Act), cost-report (per-agent, per-tier, cache analysis with provider tokens), token budgets (graduated 50/80/100%), summarize. SHIPPED: everything from the last 5 focus-point cycles.
+CLI 0.1.208, client-js 0.2.126, client-python 0.2.40, VSCode 0.1.69. 39 MCP tools, 84+ CLI commands, 5 LLM providers, 4 agent frameworks, Mem0 memory tracing. ALL previous priorities shipped. Distribution tasks (#3-#5 from prior cycle: Dev.to tutorial, awesome-lists, Show HN) require human action.
 
-Distribution is now the #1 priority. The product is ready — more features without users = zero impact:
+Fresh technical priorities — test on real codebases and fix what breaks:
 
-1. **Agent memory observability** — SHIPPED (Py 0.2.40, CLI 0.1.207): Mem0 patched + `trickle memory` CLI command. TODO: MCP tool, LangGraph checkpointer.
+1. **Test on a real LangChain RAG app from GitHub** — clone a popular RAG example, run through trickle end-to-end, verify LLM tracing + agent tracing + eval + security all work together on a real retrieval-augmented generation workflow. Fix any issues.
 
-2. **Onboarding optimization** — VERIFIED: 4.7 seconds to first types. Clean output.
+2. **Test on a real CrewAI multi-agent crew** — now that pydantic is fixed, test with a real CrewAI crew that has multiple agents delegating tasks. Verify event bus tracing captures crew/agent/task lifecycle correctly.
 
-3. **"Pilot to production" content** — Write a Dev.to tutorial: "Your AI agent works 85% of the time. Here's why that means it fails 80% of the time — and how to fix it." Walk through: trickle benchmark (measure variance) → trickle eval (score quality) → trickle diff-runs (catch regressions) → trickle playback (debug failures) → trickle security (scan for vulns) → trickle audit (compliance report). Real output, real screenshots. This is the content that HN and Reddit will upvote.
+3. **LangGraph checkpointer tracing** — the TODO from memory observability. Patch LangGraph's checkpointer to capture state saves/loads. This completes the agent memory surface.
 
-4. **Awesome-list submissions** — Submit trickle to: awesome-ai-agents-2026 (25k+ stars), awesome-agents, Awesome Claude, awesome-llm-agents. Write a clear one-liner: "Zero-code agent reliability toolkit — benchmark, eval, security, compliance, playback. Free, local-first, 5 LLM providers, 4 agent frameworks." These are high-leverage, low-effort distribution channels.
+4. **`trickle init` for Python projects** — verify `trickle init` works correctly for Python/FastAPI/Flask projects (creates .pyi config, CLAUDE.md). Test the Python onboarding path end-to-end.
 
-5. **Show HN preparation** — Prepare a launch post. Title: "Show HN: Trickle – Free, local-first agent reliability toolkit (benchmark, eval, security, playback)." Lead with the compound failure rate math. Include a 60-second GIF showing: trickle run → trickle benchmark --runs 5 → trickle eval → trickle security → trickle playback. Link to GitHub. Time the launch for a Tuesday/Wednesday morning for maximum HN visibility.
+5. **Performance profiling on large datasets** — stress-test trickle with 10K+ observations, verify dashboard/CSV export/eval/cost-report don't degrade. Profile any bottlenecks.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
