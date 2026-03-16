@@ -384,8 +384,15 @@ program
   .option("--json", "Output raw JSON (for CI integration)")
   .option("--fail-on-error", "Exit 1 if any errors are found")
   .option("--fail-on-warning", "Exit 1 if any errors or warnings are found")
+  .option("--compliance", "Generate compliance audit report (EU AI Act / Colorado AI Act)")
+  .option("-o, --out <file>", "Write compliance report to file")
   .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
+    if (opts.compliance) {
+      const { generateComplianceReport } = await import("./commands/compliance");
+      generateComplianceReport({ json: opts.json, out: opts.out });
+      return;
+    }
     await auditCommand(opts);
   });
 
