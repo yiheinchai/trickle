@@ -122,10 +122,44 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
     }
   }
 
+  // Model tier analysis — classify models into frontier/standard/mini tiers
+  // Ordered longest-first to avoid substring matches (gpt-4o-mini before gpt-4o)
+  const TIER_RULES: Array<[string, string]> = [
+    ['gpt-4o-mini', 'mini'], ['gpt-4-turbo', 'frontier'], ['gpt-4o', 'standard'], ['gpt-4', 'frontier'],
+    ['gpt-3.5-turbo', 'mini'], ['o1-mini', 'standard'], ['o1-pro', 'frontier'], ['o1', 'frontier'],
+    ['o3-mini', 'standard'], ['o3', 'frontier'], ['o4-mini', 'standard'],
+    ['claude-opus', 'frontier'], ['claude-sonnet', 'standard'], ['claude-haiku', 'mini'],
+    ['gemini-2.5-flash-lite', 'mini'], ['gemini-2.5-flash', 'standard'], ['gemini-2.5-pro', 'frontier'],
+    ['gemini-2.0-flash', 'mini'], ['gemini-1.5-pro', 'frontier'], ['gemini-1.5-flash', 'mini'],
+  ];
+
+  function classifyTier(model: string): string {
+    for (const [pattern, tier] of TIER_RULES) {
+      if (model.includes(pattern)) return tier;
+    }
+    if (model.includes('mini') || model.includes('lite') || model.includes('haiku') || model.includes('flash')) return 'mini';
+    if (model.includes('pro') || model.includes('opus') || model.includes('turbo')) return 'frontier';
+    return 'standard';
+  }
+
+  const byTier: Record<string, { calls: number; tokens: number; cost: number; avgLatency: number; errors: number }> = {};
+  for (const c of calls) {
+    const tier = classifyTier(c.model || '');
+    if (!byTier[tier]) byTier[tier] = { calls: 0, tokens: 0, cost: 0, avgLatency: 0, errors: 0 };
+    byTier[tier].calls++;
+    byTier[tier].tokens += c.totalTokens || 0;
+    byTier[tier].cost += c.estimatedCostUsd || 0;
+    byTier[tier].avgLatency += c.durationMs || 0;
+    if (c.error) byTier[tier].errors++;
+  }
+  for (const t of Object.values(byTier)) {
+    t.avgLatency = t.calls > 0 ? t.avgLatency / t.calls : 0;
+  }
+
   if (opts.json) {
     console.log(JSON.stringify({
       summary: { totalCost, totalTokens, totalInputTokens, totalOutputTokens, totalCalls: calls.length, totalDurationMs: totalDuration, errors: errorCount, monthlyProjection },
-      byProvider, byModel,
+      byProvider, byModel, byTier,
       ...(Object.keys(byAgent).length > 0 ? { byAgent } : {}),
     }, null, 2));
     return;
@@ -175,6 +209,27 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
 
   // Top costly calls
   const costlyCalls = calls.filter(c => c.estimatedCostUsd > 0).sort((a, b) => b.estimatedCostUsd - a.estimatedCostUsd).slice(0, 5);
+  // By tier
+  if (Object.keys(byTier).length > 1) {
+    console.log(chalk.gray('\n  ' + '─'.repeat(60)));
+    console.log(chalk.bold('  Model Tier Analysis'));
+    const tierOrder = ['frontier', 'standard', 'mini'];
+    const tierLabels: Record<string, string> = { frontier: '🔴 Frontier', standard: '🟡 Standard', mini: '🟢 Mini' };
+    for (const tier of tierOrder) {
+      const data = byTier[tier];
+      if (!data) continue;
+      const pct = totalCost > 0 ? ((data.cost / totalCost) * 100).toFixed(0) : '0';
+      const callPct = calls.length > 0 ? ((data.calls / calls.length) * 100).toFixed(0) : '0';
+      const errRate = data.calls > 0 ? ((data.errors / data.calls) * 100).toFixed(0) : '0';
+      console.log(`  ${(tierLabels[tier] || tier).padEnd(16)} $${data.cost.toFixed(4).padEnd(10)} ${chalk.gray(pct + '% cost')}  ${data.calls} calls (${callPct}%)  avg ${data.avgLatency.toFixed(0)}ms  ${data.errors > 0 ? chalk.red(errRate + '% err') : chalk.green('0% err')}`);
+    }
+    // Tier optimization suggestion
+    const frontierPct = byTier.frontier ? (byTier.frontier.calls / calls.length) * 100 : 0;
+    if (frontierPct > 50) {
+      console.log(chalk.yellow(`  💡 ${frontierPct.toFixed(0)}% of calls use frontier models. Consider routing simple tasks to mini tier for ~75% savings.`));
+    }
+  }
+
   // By agent (if agent data exists)
   if (Object.keys(byAgent).length > 0) {
     console.log(chalk.gray('\n  ' + '─'.repeat(60)));
