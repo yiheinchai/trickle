@@ -176,6 +176,13 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
+    # Patch LangChain/agent frameworks for workflow tracing
+    try:
+        from trickle.agent_observer import patch_agents
+        patch_agents(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 

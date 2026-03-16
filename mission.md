@@ -2,21 +2,21 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle's strategic moat is zero-code, local-first runtime observability for both humans AND AI agents — at zero cost. The market has three openings: (1) a cost revolt against Datadog/New Relic ($50K-$1M/year), (2) 10,390+ MCP servers with no observability standard, and (3) LangSmith locked to LangChain while CrewAI, OpenAI Agents SDK, and Microsoft Agent Framework all need framework-agnostic observability. Trickle's positioning: the Switzerland of agent observability — works with every framework, every LLM provider, every IDE agent. Three strategic pillars: (1) MCP-native observability — be the default way AI coding agents understand runtime behavior; 10K+ MCP servers generate traces that need capturing, and trickle's MCP server already feeds context back to agents. (2) Framework-agnostic agent tracing — trace LangChain, CrewAI, OpenAI Agents SDK, and custom agents with zero code changes, owning the space LangSmith can't reach. (3) Vibe-coder DX — zero-config, single-line setup, instant results; 45% of AI-generated code has security vulnerabilities, and developers building with AI need observability that's as fast as their workflow. Every feature must pass: "does this make a developer (or their AI agent) understand running code faster, with zero setup friction?"
+Trickle's strategic moat is zero-code, local-first runtime observability for both humans AND AI agents — at zero cost. The competitive landscape is heating up: Braintrust just raised $80M at $800M to be "the observability layer for AI," Dynatrace launched an MCP Server, and MCP SDKs hit 97M+ monthly downloads. But every competitor is cloud-first and expensive. Trickle wins by being free, local, and zero-code — the observability tool that works the way vibe coders and AI agents actually work. Three strategic pillars: (1) Framework-agnostic agent tracing — LangSmith is locked to LangChain, and multi-agent parallelism (OpenAI Codex fires multiple agents simultaneously) creates observability needs nobody serves yet. Be the Switzerland of agent observability. (2) MCP + A2A protocol-native — trickle already traces MCP tool calls; now A2A (agent-to-agent communication, backed by Google/IBM, governed by Linux Foundation) is emerging as the complementary protocol. Owning observability across both protocols makes trickle indispensable for the agentic future. (3) Instant value, zero friction — single-line setup, instant results. Claude Cowork is expanding AI tooling beyond developers; observability must be accessible to non-technical users too. Every feature must pass: "does this make a developer (or their AI agent) understand running code faster, with zero setup friction?"
 </higher directive>
 
 <focus point>
-CLI 0.1.180, client-js 0.2.121, client-python 0.2.30. SHIPPED: MCP tool call tracing, .pyi stub quality fix, live status display, Gemini auto-instrumentation.
+CLI 0.1.181, client-js 0.2.121, client-python 0.2.31. SHIPPED: LangChain agent tracing, MCP tool call tracing, LLM auto-instrumentation (OpenAI + Anthropic + Gemini).
 
-Just shipped: **MCP tool call auto-instrumentation** — zero-code capture of MCP tool invocations for both @modelcontextprotocol/sdk (JS) and mcp (Python). Captures tool name, arguments, response preview, latency, errors, and direction (outgoing client calls + incoming server handlers). Writes to .trickle/mcp.jsonl. CLI has `trickle mcp-calls` command. Dashboard/CSV export include MCP data. Live status shows MCP call count.
-
-This makes trickle the first observability tool with built-in MCP tracing — positioning it at the center of the 10K+ MCP server ecosystem.
+Just shipped: **LangChain agent workflow auto-tracing** — zero-code capture of agent steps. Patches CallbackManager.configure() to auto-inject a trickle callback handler as an inheritable handler. Captures: chain_start/end, tool_start/end, agent_action/finish, llm_start/end — all with parent-child run_id relationships. Writes to .trickle/agents.jsonl. Live status shows agent event count.
 
 Priority areas:
-1. **Framework-agnostic agent tracing** — zero-code auto-detection of LangChain/CrewAI/OpenAI Agents SDK workflows
-2. **Agent execution graph visualization** — visual node-based graph in dashboard showing LLM→tool→agent flow
-3. **WebSocket dashboard streaming** — real-time browser updates for long-running processes
-4. **More LLM providers** — Cohere, Mistral AI for broader coverage
+1. **Agent execution graph visualization** — visual DAG in dashboard showing LLM→tool→agent flow
+2. **More agent frameworks** — CrewAI, OpenAI Agents SDK auto-detection
+3. **A2A protocol observability** — trace Google's Agent-to-Agent protocol alongside MCP
+4. **WebSocket dashboard streaming** — real-time browser updates
+5. **More LLM providers** — Cohere, Mistral AI
+</focus point>
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add
