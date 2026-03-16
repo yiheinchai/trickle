@@ -165,6 +165,7 @@ def _create_trickle_handler() -> Any:
             run_id: UUID, parent_run_id: Optional[UUID] = None, **kwargs: Any
         ) -> None:
             self._record_start(run_id)
+            serialized = serialized or {}
             name = serialized.get("name", serialized.get("id", ["unknown"])[-1] if isinstance(serialized.get("id"), list) else "unknown")
             _write_event({
                 "kind": "agent_action", "event": "chain_start",
@@ -273,40 +274,23 @@ def patch_langchain(langchain_module: Any) -> None:
     # Patch CallbackManager.configure to auto-inject our handler
     try:
         from langchain_core.callbacks.manager import CallbackManager
-        if hasattr(CallbackManager, "configure") and not getattr(CallbackManager.configure, "_trickle_patched", False):
-            _orig_configure = CallbackManager.configure
+        if hasattr(CallbackManager, "configure") and not getattr(CallbackManager, "_trickle_patched", False):
+            # Get the underlying function from the classmethod
+            orig_func = CallbackManager.configure.__func__ if hasattr(CallbackManager.configure, '__func__') else CallbackManager.configure
 
-            @classmethod  # type: ignore
-            def _patched_configure(
-                cls: Any,
-                inheritable_callbacks: Any = None,
-                local_callbacks: Any = None,
-                verbose: bool = False,
-                inheritable_tags: Any = None,
-                local_tags: Any = None,
-                inheritable_metadata: Any = None,
-                local_metadata: Any = None,
-            ) -> Any:
-                # Call original configure
-                manager = _orig_configure.__func__(
-                    cls,
-                    inheritable_callbacks=inheritable_callbacks,
-                    local_callbacks=local_callbacks,
-                    verbose=verbose,
-                    inheritable_tags=inheritable_tags,
-                    local_tags=local_tags,
-                    inheritable_metadata=inheritable_metadata,
-                    local_metadata=local_metadata,
-                )
-                # Auto-inject trickle handler if not already present
+            def _patched_configure_func(cls: Any, *args: Any, **kwargs: Any) -> Any:
+                manager = orig_func(cls, *args, **kwargs)
                 if manager is not None:
-                    handler_names = {getattr(h, "name", None) for h in (manager.inheritable_handlers or [])}
-                    if "trickle_agent_observer" not in handler_names:
-                        manager.add_handler(handler, inherit=True)
+                    try:
+                        handler_names = {getattr(h, "name", None) for h in (getattr(manager, 'inheritable_handlers', None) or [])}
+                        if "trickle_agent_observer" not in handler_names:
+                            manager.add_handler(handler, inherit=True)
+                    except Exception:
+                        pass
                 return manager
 
-            _patched_configure._trickle_patched = True  # type: ignore
-            CallbackManager.configure = _patched_configure  # type: ignore
+            CallbackManager.configure = classmethod(_patched_configure_func)  # type: ignore
+            CallbackManager._trickle_patched = True  # type: ignore
 
             if _debug:
                 print("[trickle/agent] Patched CallbackManager.configure — agent tracing enabled")
@@ -551,25 +535,44 @@ def patch_agents(debug: bool = False) -> None:
     except Exception:
         pass
 
-    # Patch already-imported modules
-    if "langchain_core" in sys.modules:
+    # Deferred patching: langchain_core has circular imports, so we can't
+    # patch CallbackManager during the initial import. Use a timer to patch
+    # after the module is fully loaded.
+    import threading
+
+    def _deferred_patch_langchain():
         try:
-            patch_langchain(sys.modules["langchain_core"])
-        except Exception:
-            pass
-    if "crewai" in sys.modules:
-        try:
-            patch_crewai(sys.modules["crewai"])
+            if "langchain_core" in sys.modules:
+                patch_langchain(sys.modules["langchain_core"])
         except Exception:
             pass
 
-    # Register with the consolidated import hook
+    def _deferred_patch_crewai():
+        try:
+            if "crewai" in sys.modules:
+                patch_crewai(sys.modules["crewai"])
+        except Exception:
+            pass
+
+    # Patch already-imported modules (deferred to avoid circular imports)
+    if "langchain_core" in sys.modules:
+        threading.Timer(0.1, _deferred_patch_langchain).start()
+    if "crewai" in sys.modules:
+        threading.Timer(0.1, _deferred_patch_crewai).start()
+
+    # Register deferred patches with the import hook
+    def _langchain_hook(mod: Any) -> None:
+        threading.Timer(0.1, _deferred_patch_langchain).start()
+
+    def _crewai_hook(mod: Any) -> None:
+        threading.Timer(0.1, _deferred_patch_crewai).start()
+
     try:
         from trickle.db_observer import register_import_patches
         register_import_patches({
-            "langchain_core": patch_langchain,
-            "langchain": patch_langchain,
-            "crewai": patch_crewai,
+            "langchain_core": _langchain_hook,
+            "langchain": _langchain_hook,
+            "crewai": _crewai_hook,
         })
     except Exception:
         pass
