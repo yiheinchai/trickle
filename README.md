@@ -11,6 +11,7 @@ For example: Pytorch tensor shape annotations from runtime
 ```bash
 pip install trickle-observe
 npm install -g trickle-cli
+code --install-extension yiheinchai.trickle-vscode
 ```
 
 ## See tensor shapes flow through your model
@@ -58,9 +59,8 @@ trickle hints demo/demo.py
 ```bash
 pip install trickle-observe          # runtime tracer
 npm install -g trickle-cli           # CLI
+code --install-extension yiheinchai.trickle-vscode  # VSCode inline hints
 ```
-
-VSCode extension: search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`.
 
 ## Scripts
 
