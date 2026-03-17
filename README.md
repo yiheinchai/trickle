@@ -1,4 +1,4 @@
-# trickle
+# Trickle – See PyTorch tensor shapes inline in VSCode as you code
 
 Runtime context for every variable in your code — types, shapes, values, error state — without adding print statements.
 
