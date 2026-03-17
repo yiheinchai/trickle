@@ -774,8 +774,12 @@ def _capture_error_snapshot(exc: BaseException) -> None:
         if tb is None:
             return
 
-        # Walk to the innermost user-code frame (skip IPython internals)
-        user_frame = None
+        # Walk the traceback and collect ALL user-code frames.
+        # In Python 3, list comprehensions / generator expressions have their
+        # own scope, so the innermost frame may only contain loop vars like
+        # `d` or `.0`.  We need variables from the enclosing cell frame too
+        # (e.g. `file_path`, `data_dir`, …).
+        user_frames: list = []
         user_lineno = 0
         while tb is not None:
             fn = tb.tb_frame.f_code.co_filename
@@ -784,12 +788,24 @@ def _capture_error_snapshot(exc: BaseException) -> None:
                 or "/lib/python" in fn or "\\lib\\python" in fn
             )
             if not skip:
-                user_frame = tb.tb_frame
+                user_frames.append(tb.tb_frame)
                 user_lineno = tb.tb_lineno
             tb = tb.tb_next
 
-        if user_frame is None:
+        if not user_frames:
             return
+
+        # Merge locals from all user frames — outer frames first so inner
+        # frames override on name collision (inner values are more relevant).
+        merged_locals: dict = {}
+        for frame in user_frames:
+            merged_locals.update(frame.f_locals)
+        # Also pull in f_globals from the cell frame (first user frame) —
+        # in notebooks, cell-level variables live in the global namespace.
+        if user_frames:
+            for k, v in user_frames[0].f_globals.items():
+                if k not in merged_locals:
+                    merged_locals[k] = v
 
         cell_id = _make_cell_id(_cell_counter)
         error_msg = f"{type(exc).__name__}: {exc}"
@@ -829,8 +845,8 @@ def _capture_error_snapshot(exc: BaseException) -> None:
         }
 
         records: list = []
-        for name, val in list(user_frame.f_locals.items()):
-            if name.startswith("_") or name in _IPYTHON_BUILTINS:
+        for name, val in list(merged_locals.items()):
+            if name.startswith("_") or name.startswith(".") or name in _IPYTHON_BUILTINS:
                 continue
             # Only include variables that were used in the cell
             if traced_names and name not in traced_names:
