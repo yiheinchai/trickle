@@ -629,6 +629,15 @@ export function activate(context: vscode.ExtensionContext) {
   // Register inline hints provider
   registerInlineHints(context, selector);
 
+  // Register completion provider for runtime-type-aware autocomplete
+  context.subscriptions.push(
+    vscode.languages.registerCompletionItemProvider(
+      selector,
+      new TrickleCompletionProvider(),
+      '.', // trigger on dot
+    ),
+  );
+
   // Register CodeLens provider for LLM cost + eval insights
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()),
@@ -3821,4 +3830,158 @@ function formatSample(sample: unknown): string {
   } catch {
     return String(sample);
   }
+}
+
+// ─── Runtime-type-aware Autocomplete ──────────────────────────────────────────
+
+/** Common methods/properties for known Python types, used for autocomplete. */
+const KNOWN_TYPE_MEMBERS: Record<string, { props: string[]; methods: string[] }> = {
+  Tensor: {
+    props: [
+      'shape', 'dtype', 'device', 'data', 'grad', 'requires_grad', 'is_cuda',
+      'is_contiguous', 'ndim', 'T', 'mT', 'real', 'imag', 'is_leaf',
+      'grad_fn', 'is_sparse', 'is_quantized', 'is_meta', 'is_nested',
+      'nbytes', 'itemsize', 'is_complex', 'is_floating_point',
+    ],
+    methods: [
+      'abs', 'add', 'argmax', 'argmin', 'backward', 'bool', 'chunk', 'clamp',
+      'clone', 'contiguous', 'cpu', 'cuda', 'detach', 'dim', 'div', 'double',
+      'eq', 'expand', 'expand_as', 'flatten', 'flip', 'float', 'floor', 'gather',
+      'half', 'index_select', 'int', 'item', 'log', 'long', 'masked_fill',
+      'matmul', 'max', 'mean', 'min', 'mm', 'mul', 'narrow', 'ne', 'neg',
+      'nonzero', 'norm', 'numel', 'numpy', 'permute', 'pow', 'prod',
+      'repeat', 'reshape', 'requires_grad_', 'retain_grad', 'scatter',
+      'sigmoid', 'sign', 'size', 'softmax', 'sort', 'split', 'sqrt',
+      'squeeze', 'std', 'sub', 'sum', 'to', 'tolist', 'topk', 'transpose',
+      'type', 'unbind', 'unflatten', 'unfold', 'uniform_', 'unique',
+      'unsqueeze', 'var', 'view', 'view_as', 'zero_',
+    ],
+  },
+  ndarray: {
+    props: [
+      'shape', 'dtype', 'ndim', 'size', 'T', 'flat', 'real', 'imag',
+      'data', 'strides', 'itemsize', 'nbytes', 'base',
+    ],
+    methods: [
+      'all', 'any', 'argmax', 'argmin', 'argsort', 'astype', 'clip', 'copy',
+      'cumsum', 'diagonal', 'dot', 'fill', 'flatten', 'item', 'max', 'mean',
+      'min', 'nonzero', 'prod', 'ravel', 'repeat', 'reshape', 'round',
+      'sort', 'squeeze', 'std', 'sum', 'swapaxes', 'take', 'tolist',
+      'transpose', 'var', 'view',
+    ],
+  },
+  DataFrame: {
+    props: [
+      'columns', 'index', 'dtypes', 'shape', 'values', 'T', 'axes', 'ndim',
+      'size', 'empty', 'loc', 'iloc', 'at', 'iat',
+    ],
+    methods: [
+      'apply', 'astype', 'copy', 'corr', 'count', 'describe', 'drop',
+      'dropna', 'fillna', 'filter', 'groupby', 'head', 'info', 'isna',
+      'isnull', 'iterrows', 'join', 'max', 'mean', 'melt', 'merge', 'min',
+      'nunique', 'pivot', 'plot', 'query', 'rename', 'replace', 'reset_index',
+      'rolling', 'sample', 'set_index', 'sort_values', 'std', 'sum', 'tail',
+      'to_csv', 'to_dict', 'to_json', 'to_numpy', 'value_counts', 'var',
+    ],
+  },
+  Series: {
+    props: [
+      'dtype', 'index', 'name', 'shape', 'values', 'ndim', 'size', 'empty',
+      'loc', 'iloc', 'at', 'iat', 'str', 'dt', 'cat',
+    ],
+    methods: [
+      'apply', 'astype', 'copy', 'count', 'cumsum', 'describe', 'drop',
+      'dropna', 'fillna', 'groupby', 'head', 'idxmax', 'idxmin', 'isna',
+      'isnull', 'map', 'max', 'mean', 'min', 'nunique', 'plot', 'replace',
+      'reset_index', 'rolling', 'sample', 'sort_values', 'std', 'sum',
+      'tail', 'to_dict', 'to_frame', 'to_list', 'to_numpy', 'unique',
+      'value_counts', 'var',
+    ],
+  },
+};
+
+class TrickleCompletionProvider implements vscode.CompletionItemProvider {
+  provideCompletionItems(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+  ): vscode.CompletionItem[] | undefined {
+    // Get the text before the cursor to find the variable name
+    const lineText = document.lineAt(position.line).text;
+    const textBefore = lineText.substring(0, position.character);
+
+    // Match `varName.` at the end
+    const dotMatch = textBefore.match(/\b(\w+)\.\s*$/);
+    if (!dotMatch) return undefined;
+    const varName = dotMatch[1];
+
+    // Look up this variable in trickle observations
+    const lineMap = getLineMapForDocument(document);
+    if (!lineMap) return undefined;
+
+    // Find the observation for this variable (search all lines)
+    let obs: VariableObservation | undefined;
+    for (const [, observations] of lineMap) {
+      for (const o of observations) {
+        if (o.varName === varName) {
+          obs = o;
+        }
+      }
+    }
+    if (!obs) return undefined;
+
+    // Resolve the effective type (unwrap arrays for element access, etc.)
+    const typeNode = obs.type;
+    const items: vscode.CompletionItem[] = [];
+
+    // 1. Check known class types
+    const className = resolveClassName(typeNode);
+    if (className && KNOWN_TYPE_MEMBERS[className]) {
+      const known = KNOWN_TYPE_MEMBERS[className];
+      for (const prop of known.props) {
+        const item = new vscode.CompletionItem(prop, vscode.CompletionItemKind.Property);
+        item.detail = `(trickle) ${className}.${prop}`;
+        item.sortText = `0_${prop}`; // sort before other completions
+        items.push(item);
+      }
+      for (const method of known.methods) {
+        const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Method);
+        item.detail = `(trickle) ${className}.${method}()`;
+        item.sortText = `1_${method}`;
+        items.push(item);
+      }
+    }
+
+    // 2. Add observed properties from the type node itself
+    if (typeNode.kind === 'object' && typeNode.properties) {
+      for (const [key, valType] of Object.entries(typeNode.properties)) {
+        // Skip internal properties and ones already added from known types
+        if (key.startsWith('__')) continue;
+        if (className && KNOWN_TYPE_MEMBERS[className]) {
+          const known = KNOWN_TYPE_MEMBERS[className];
+          if (known.props.includes(key) || known.methods.includes(key)) continue;
+        }
+        const typeStr = typeNodeToStringCompact(valType);
+        const item = new vscode.CompletionItem(key, vscode.CompletionItemKind.Field);
+        item.detail = `(trickle) ${typeStr}`;
+        item.sortText = `2_${key}`;
+        items.push(item);
+      }
+    }
+
+    return items.length > 0 ? items : undefined;
+  }
+}
+
+/** Resolve the class name from a TypeNode, handling arrays and unions. */
+function resolveClassName(node: TypeNode): string | undefined {
+  if (node.class_name) return node.class_name;
+  if (node.kind === 'union') {
+    const members = node.elements || node.members;
+    if (members && members.length > 0) {
+      // If all members share the same class, use that
+      const names = new Set(members.map(m => m.class_name).filter(Boolean));
+      if (names.size === 1) return names.values().next().value;
+    }
+  }
+  return undefined;
 }
