@@ -1,3 +1,5 @@
+BEFORE DOING ANYTHING, read principles.md. It governs all work on this project. Every principle exists because past AI agents drifted into building unused features. Follow it strictly.
+
 /loop 10min think of a feature that will improve this project and make it
   more useful for developers, and provide real value. the vision is that
   with minimal setup (one-liners changes) developers can turn their codebase

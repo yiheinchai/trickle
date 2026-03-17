@@ -1,3 +1,5 @@
+BEFORE DOING ANYTHING, read principles.md. It governs all work on this project.
+
 Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
