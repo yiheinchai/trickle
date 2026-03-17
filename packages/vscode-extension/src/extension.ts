@@ -156,6 +156,7 @@ interface TypeNode {
   class_name?: string;
   element?: TypeNode;
   elements?: TypeNode[];
+  members?: TypeNode[];  // Python uses "members" for union types
   properties?: Record<string, TypeNode>;
   resolved?: TypeNode;
   key?: TypeNode;
@@ -3407,11 +3408,13 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
       }
       return 'Promise<unknown>';
 
-    case 'union':
-      if (node.elements) {
-        return node.elements.map(e => typeNodeToString(e, depth - 1)).join(' | ');
+    case 'union': {
+      const unionMembers = node.elements || node.members;
+      if (unionMembers) {
+        return unionMembers.map(e => typeNodeToString(e, depth - 1)).join(' | ');
       }
       return 'unknown';
+    }
 
     default:
       return 'unknown';
@@ -3447,6 +3450,19 @@ function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[], sample?: 
     const needsWrapper = inner.includes('|') || inner.includes('(') ||
       (inner.includes('<') && !inner.endsWith('>'));
     return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+  }
+
+  // Unions: collapse homogeneous unions (e.g. 20 Tensor variants → just "Tensor")
+  if (node.kind === 'union') {
+    const members = node.elements || node.members;
+    if (!members || members.length === 0) return 'unknown';
+    // If all members share the same class_name, use that class name
+    const classNames = new Set(members.map(m => m.class_name).filter(Boolean));
+    if (classNames.size === 1) {
+      return classNames.values().next().value!;
+    }
+    // Otherwise fall through to typeNodeToString
+    return typeNodeToString(node, 3, dimLabels);
   }
 
   if (node.kind === 'map') {
@@ -3727,11 +3743,13 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
       return `${header}{\n${fieldLines.join('\n')}\n${pad}}`;
     }
 
-    case 'union':
-      if (node.elements) {
-        return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
+    case 'union': {
+      const prettyUnionMembers = node.elements || node.members;
+      if (prettyUnionMembers) {
+        return prettyUnionMembers.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
       }
       return 'unknown';
+    }
 
     case 'map': {
       const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
