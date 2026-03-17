@@ -88,6 +88,11 @@ trickle hints --errors --show values       # values only
 trickle hints --errors --show both         # both (default in error mode)
 ```
 
+## Use cases
+
+- [ML Engineer](usecases/ml-engineer.md) — tensor shapes, training loops, Jupyter notebooks
+- [AI Agent](usecases/ai-agent.md) — runtime context in the terminal for debugging unfamiliar code
+
 ## How it works
 
 Trickle rewrites your Python source via AST transformation before execution. After every variable assignment, it inserts a lightweight call that captures the type and a sample value, then writes to `.trickle/variables.jsonl`. The VSCode extension watches this file and renders inline hints.
