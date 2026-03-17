@@ -638,6 +638,19 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
+  // Register semantic token provider for runtime-type-aware syntax highlighting
+  const semanticLegend = new vscode.SemanticTokensLegend(
+    ['property', 'method', 'variable'],
+    ['declaration', 'readonly'],
+  );
+  context.subscriptions.push(
+    vscode.languages.registerDocumentSemanticTokensProvider(
+      selector,
+      new TrickleSemanticTokensProvider(),
+      semanticLegend,
+    ),
+  );
+
   // Register CodeLens provider for LLM cost + eval insights
   context.subscriptions.push(
     vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()),
@@ -3984,4 +3997,67 @@ function resolveClassName(node: TypeNode): string | undefined {
     }
   }
   return undefined;
+}
+
+// ─── Semantic Token Provider ──────────────────────────────────────────────────
+
+// Token type indices matching the legend registered in activate()
+const TOKEN_TYPE_PROPERTY = 0;
+const TOKEN_TYPE_METHOD = 1;
+
+class TrickleSemanticTokensProvider implements vscode.DocumentSemanticTokensProvider {
+  provideDocumentSemanticTokens(
+    document: vscode.TextDocument,
+  ): vscode.SemanticTokens | undefined {
+    const lineMap = getLineMapForDocument(document);
+    if (!lineMap) return undefined;
+
+    // Build a map: varName → className for all observed variables
+    const varTypes: Map<string, string> = new Map();
+    for (const [, observations] of lineMap) {
+      for (const obs of observations) {
+        const cls = resolveClassName(obs.type);
+        if (cls) varTypes.set(obs.varName, cls);
+      }
+    }
+    if (varTypes.size === 0) return undefined;
+
+    const builder = new vscode.SemanticTokensBuilder(
+      new vscode.SemanticTokensLegend(
+        ['property', 'method', 'variable'],
+        ['declaration', 'readonly'],
+      ),
+    );
+
+    // Scan document for `varName.attr` patterns
+    const varPattern = new RegExp(
+      `\\b(${[...varTypes.keys()].map(escapeRegex).join('|')})\\.(\\w+)`,
+      'g',
+    );
+
+    for (let lineIdx = 0; lineIdx < document.lineCount; lineIdx++) {
+      const lineText = document.lineAt(lineIdx).text;
+      let match: RegExpExecArray | null;
+      varPattern.lastIndex = 0;
+      while ((match = varPattern.exec(lineText)) !== null) {
+        const varName = match[1];
+        const attrName = match[2];
+        const cls = varTypes.get(varName);
+        if (!cls) continue;
+
+        const known = KNOWN_TYPE_MEMBERS[cls];
+        if (!known) continue;
+
+        // Determine token type
+        const attrStart = match.index + varName.length + 1; // skip "varName."
+        if (known.methods.includes(attrName)) {
+          builder.push(lineIdx, attrStart, attrName.length, TOKEN_TYPE_METHOD);
+        } else if (known.props.includes(attrName)) {
+          builder.push(lineIdx, attrStart, attrName.length, TOKEN_TYPE_PROPERTY);
+        }
+      }
+    }
+
+    return builder.build();
+  }
 }
