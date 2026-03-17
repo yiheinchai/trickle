@@ -8,6 +8,19 @@ Pick one focus point from mission.md, fix it, validate it on real code, publish,
 
 ## Workflow
 
+### Step 0: Read the docs as a new user
+
+Before starting any work, read README.md and ML_DEBUGGING.md as if you were a developer encountering trickle for the first time. Try to understand how to use the features relevant to your focus point.
+
+If the docs are confusing, incomplete, or wrong — that is a bug. Fix the docs as part of your session. Specifically:
+- If you couldn't find how to do something, add it to the docs
+- If the docs describe a feature that doesn't work as described, fix the code or the docs
+- If you discover a useful feature only by reading source code (not docs), the docs failed — add it
+
+This matters because future agents and users will hit the same confusion and silently miss features that already exist.
+
+### Steps 1-8: Fix the focus point
+
 1. Read the focus points in mission.md — pick the one you can validate most concretely
 2. Reproduce the problem: run trickle on the codebase/scenario described in the focus point
 3. Verify you see the broken output described
