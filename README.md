@@ -4,7 +4,33 @@ You're writing Python. Your code crashes. You don't know what `data` looks like 
 
 Trickle eliminates this. Run your code once, and every variable's type, shape, and value is captured — visible inline in VSCode or in the terminal.
 
-## Before trickle
+## The tensor shape problem
+
+You're building a neural network. Every layer transforms the shape. You can't see it unless you print:
+
+```python
+def forward(self, x):
+    x = self.fc1(x)        # what shape is x now?
+    x = self.relu(x)       # still the same?
+    x = self.fc2(x)        # does this match the next layer?
+    return x
+```
+
+With trickle, the shapes are right there:
+
+```python
+def forward(self, x: Tensor[32, 784] float32):
+    x: Tensor[32, 128] float32 = self.fc1(x)
+    x: Tensor[32, 128] float32 = self.relu(x)
+    x: Tensor[32, 10] float32  = self.fc2(x)
+    return x
+```
+
+Every layer, every shape, every dtype. No print statements. No debugger. Just run your code and look.
+
+## The debugging problem
+
+Your code crashes. You don't know which variable is wrong. Without trickle:
 
 ```python
 data_dir = Path("../data/gaitpdb/1.0.0")
@@ -19,7 +45,7 @@ for file_path in data_file_paths:
         # Which file? What's in patient_gait_data? You have no idea.
 ```
 
-## After trickle
+With trickle, every variable's value at crash time is visible:
 
 ```python
 data_dir: PosixPath = Path("../data/gaitpdb/1.0.0")
