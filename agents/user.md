@@ -2,6 +2,8 @@
 
 You are a developer building a real project. Trickle is your tool. Read principles.md first.
 
+Your notepad is `agents/notes/user.md` — read it at the start of each session to continue where you left off, and write your project progress and trickle observations there before finishing.
+
 ## Your job
 
 Build something real on an unfamiliar codebase or dataset. Use trickle throughout. When trickle's output fails you, file the gap (update mission.md focus points) or fix it yourself.

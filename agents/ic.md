@@ -2,6 +2,8 @@
 
 You fix trickle's gaps. Read principles.md and mission.md first.
 
+Your notepad is `agents/notes/ic.md` — read it at the start of each session for context from previous sessions (what was tried, what worked, what's blocked), and write your progress there before finishing.
+
 ## Your job
 
 Pick one focus point from mission.md, fix it, validate it on real code, publish, and push. One thing per session.
