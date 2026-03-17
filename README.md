@@ -8,6 +8,8 @@ For example: Pytorch tensor shape annotations from runtime
 
 ![Pytorch tensor shape annotations from runtime](image.png)
 
+## Installation
+
 ```bash
 pip install trickle-observe
 npm install -g trickle-cli
@@ -62,14 +64,6 @@ npm install -g trickle-cli           # CLI
 code --install-extension yiheinchai.trickle-vscode  # VSCode inline hints
 ```
 
-## Scripts
-
-```bash
-trickle run python train.py          # run with tracing
-trickle hints                        # source with inline types
-trickle hints --errors               # crash-time values + error underline
-```
-
 ## Jupyter Notebooks
 
 ```python
@@ -77,6 +71,14 @@ trickle hints --errors               # crash-time values + error underline
 ```
 
 Types appear inline in VSCode immediately after each cell runs.
+
+## Scripts
+
+```bash
+trickle run python train.py          # run with tracing
+trickle hints                        # source with inline types
+trickle hints --errors               # crash-time values + error underline
+```
 
 ## For AI agents
 
@@ -98,3 +100,8 @@ trickle hints --errors --show both         # both (default in error mode)
 Trickle rewrites your Python source via AST transformation before execution. After every variable assignment, it inserts a lightweight call that captures the type and a sample value, then writes to `.trickle/variables.jsonl`. The VSCode extension watches this file and renders inline hints.
 
 Only your code is traced — stdlib, site-packages, torch/numpy internals are skipped. No code changes to your files. No decorators. No type annotations required.
+
+## Key features Documentation
+
+- [Key Features](features.md)
+- [Full Features](archive/pre_steve_jobs_features.md)
