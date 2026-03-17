@@ -541,7 +541,8 @@ program
   .description("Output source code with inline type hints from runtime observations (for AI agents)")
   .option("--values", "Include sample values alongside types")
   .option("--errors", "Show error mode — variables at crash time with values that caused the error")
-  .action(async (file: string | undefined, opts: { values?: boolean; errors?: boolean }) => {
+  .option("--show <mode>", "What to show inline: types, values, or both (default: both in error mode, types otherwise)")
+  .action(async (file: string | undefined, opts: { values?: boolean; errors?: boolean; show?: string }) => {
     await hintsCommand(file, opts);
   });
 

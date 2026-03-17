@@ -17,6 +17,7 @@ import * as path from "path";
 export interface HintsOptions {
   values?: boolean;
   errors?: boolean;
+  show?: string; // "types", "values", "both" (default: "both" in error mode, "types" otherwise)
 }
 
 interface TypeNode {
@@ -268,8 +269,10 @@ export async function hintsCommand(
             const typeStr = typeToString(v.type);
             const scope = v.funcName ? ` (in ${v.funcName})` : "";
             const sampleStr = formatSample(v.sample);
-            // In error mode, always show values (crash-time state)
-            if ((opts.errors || opts.values) && v.sample !== undefined) {
+            const nbShowMode = opts.show || (opts.errors ? "both" : (opts.values ? "both" : "types"));
+            if (nbShowMode === "values" && v.sample !== undefined) {
+              console.log(`${v.varName} = ${sampleStr}${scope}`);
+            } else if (nbShowMode === "both" && v.sample !== undefined) {
               console.log(`${v.varName}: ${typeStr} = ${sampleStr}${scope}`);
             } else {
               console.log(`${v.varName}: ${typeStr}${scope}`);
@@ -363,9 +366,13 @@ export async function hintsCommand(
           if (isFuncParam && afterVar.startsWith(":")) continue;
         }
 
-        // Build the hint string — error mode always shows values (crash-time state)
+        // Build the hint string based on --show mode
+        const showMode = opts.show || (opts.errors ? "both" : (opts.values ? "both" : "types"));
+        const hasSample = v.sample !== undefined && v.sample !== null;
         let hint: string;
-        if ((opts.errors || opts.values) && v.sample !== undefined && v.sample !== null) {
+        if (showMode === "values" && hasSample) {
+          hint = ` = ${formatSample(v.sample)}`;
+        } else if (showMode === "both" && hasSample) {
           const sampleStr = formatSample(v.sample);
           hint = sampleStr ? `: ${typeStr} = ${sampleStr}` : `: ${typeStr}`;
         } else {
