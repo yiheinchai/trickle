@@ -320,6 +320,11 @@ def main() -> None:
             pass
 
     if _user_code_error is not None:
+        # Write error_snapshot records to variables.jsonl for `trickle hints --errors`
+        try:
+            _write_error_snapshots(_user_code_error)
+        except Exception:
+            pass
         # Print tensor shape context for the error before re-raising
         if _trace_vars:
             try:
@@ -328,6 +333,85 @@ def main() -> None:
             except Exception:
                 pass
         raise _user_code_error
+
+
+def _write_error_snapshots(exc: BaseException) -> None:
+    """Write error_snapshot records to variables.jsonl for script crashes."""
+    import types as _types
+
+    tb = exc.__traceback__
+    if tb is None:
+        return
+
+    # Collect all user-code frames (same approach as notebook.py)
+    user_frames = []
+    user_lineno = 0
+    user_filename = ""
+    while tb is not None:
+        fn = tb.tb_frame.f_code.co_filename
+        skip = (
+            fn.startswith("<") or "site-packages" in fn
+            or "/lib/python" in fn or "\\lib\\python" in fn
+        )
+        if not skip:
+            user_frames.append(tb.tb_frame)
+            user_lineno = tb.tb_lineno
+            user_filename = fn
+        tb = tb.tb_next
+
+    if not user_frames:
+        return
+
+    # Merge locals from all user frames
+    merged_locals: dict = {}
+    for frame in user_frames:
+        merged_locals.update(frame.f_locals)
+
+    error_msg = f"{type(exc).__name__}: {exc}"
+
+    # Find the vars file
+    trickle_dir = os.path.join(os.getcwd(), ".trickle")
+    vars_file = os.path.join(trickle_dir, "variables.jsonl")
+    if not os.path.exists(trickle_dir):
+        os.makedirs(trickle_dir, exist_ok=True)
+
+    _SKIP_NAMES = {
+        '__name__', '__doc__', '__package__', '__loader__', '__spec__',
+        '__annotations__', '__builtins__', '__file__', '__cached__',
+    }
+
+    records = []
+    for name, val in list(merged_locals.items()):
+        if name.startswith("_") or name.startswith(".") or name in _SKIP_NAMES:
+            continue
+        # Skip modules, functions, classes
+        if isinstance(val, (type, _types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType)):
+            continue
+        try:
+            # Lightweight type + sample (avoid deep inference)
+            from trickle.notebook import _quick_type_and_sample
+            type_node, sample = _quick_type_and_sample(val)
+            if type_node is None:
+                continue
+            records.append({
+                "kind": "error_snapshot",
+                "varName": name,
+                "line": user_lineno,
+                "module": os.path.basename(user_filename).replace(".py", ""),
+                "file": user_filename,
+                "type": type_node,
+                "typeHash": json.dumps(type_node, sort_keys=True)[:32],
+                "sample": sample,
+                "error": error_msg,
+                "errorLine": user_lineno,
+            })
+        except Exception:
+            pass
+
+    if records:
+        with open(vars_file, "a") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
 
 
 if __name__ == "__main__":
