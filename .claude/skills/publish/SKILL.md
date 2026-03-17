@@ -105,13 +105,23 @@ Note: Use `npx @vscode/vsce` (not bare `vsce` which may not be installed globall
 
 ### 6. Update installed VSCode extension locally
 
-After publishing, also update the local installed copy so the user sees changes immediately:
+After publishing, clean up old extension versions and update the local copy so the user sees changes immediately. VSCode keeps old versioned folders around and may load a stale one if multiple exist.
 
 ```bash
-cp packages/vscode-extension/dist/extension.js ~/.vscode/extensions/yiheinchai.trickle-vscode-*/dist/extension.js
+# Remove ALL old versions first
+rm -rf ~/.vscode/extensions/yiheinchai.trickle-vscode-*/
+
+# Install fresh from the just-published VSIX
+code --install-extension /tmp/trickle-vsce/trickle-vscode-*.vsix --force
 ```
 
-If the extension isn't installed locally yet, skip this step.
+If `code` CLI is not available, manually copy both files:
+```bash
+NEW_VERSION=$(node -p "require('./packages/vscode-extension/package.json').version")
+mkdir -p ~/.vscode/extensions/yiheinchai.trickle-vscode-${NEW_VERSION}/dist
+cp packages/vscode-extension/package.json ~/.vscode/extensions/yiheinchai.trickle-vscode-${NEW_VERSION}/
+cp packages/vscode-extension/dist/extension.js ~/.vscode/extensions/yiheinchai.trickle-vscode-${NEW_VERSION}/dist/
+```
 
 Then tell user to reload VSCode (Cmd+Shift+P -> "Developer: Reload Window").
 

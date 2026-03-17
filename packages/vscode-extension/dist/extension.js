@@ -382,6 +382,11 @@ function activate(context) {
     context.subscriptions.push(vscode.languages.registerHoverProvider(selector, new TrickleHoverProvider()));
     // Register inline hints provider
     registerInlineHints(context, selector);
+    // Register completion provider for runtime-type-aware autocomplete
+    context.subscriptions.push(vscode.languages.registerCompletionItemProvider(selector, new TrickleCompletionProvider(), '.'));
+    // Register semantic token provider for runtime-type-aware syntax highlighting
+    const semanticLegend = new vscode.SemanticTokensLegend(['property', 'method', 'variable'], ['declaration', 'readonly']);
+    context.subscriptions.push(vscode.languages.registerDocumentSemanticTokensProvider(selector, new TrickleSemanticTokensProvider(), semanticLegend));
     // Register CodeLens provider for LLM cost + eval insights
     context.subscriptions.push(vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()));
     // Register CodeLens commands
@@ -930,18 +935,29 @@ function loadAllVariables() {
                         }
                         catch { /* keep original */ }
                         // Index into errorSnapshotIndex (same structure as varIndex)
-                        const targetIndex = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/)
-                            ? errorSnapshotIndex : errorSnapshotIndex;
-                        if (!targetIndex.has(snapPath)) {
-                            targetIndex.set(snapPath, new Map());
+                        if (!errorSnapshotIndex.has(snapPath)) {
+                            errorSnapshotIndex.set(snapPath, new Map());
                         }
-                        const snapLineMap = targetIndex.get(snapPath);
-                        // Error snapshots have all vars at the error line — spread them to their original trace lines too
-                        const errorLine = record.errorLine || snap.line;
-                        if (!snapLineMap.has(errorLine)) {
-                            snapLineMap.set(errorLine, []);
+                        const snapLineMap = errorSnapshotIndex.get(snapPath);
+                        // Place each error_snapshot hint on its original assignment line
+                        // (from the regular observation index) instead of the error line,
+                        // so error mode looks like auto mode but with crash-time values.
+                        const isCell = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/);
+                        const regularIndex = isCell ? notebookCellIndex : varIndex;
+                        let targetLine = snap.line; // default: the error line from the record
+                        const regularLineMap = regularIndex.get(snapPath);
+                        if (regularLineMap) {
+                            for (const [ln, obs] of regularLineMap) {
+                                if (obs.some(o => o.varName === snap.varName)) {
+                                    targetLine = ln;
+                                    break;
+                                }
+                            }
                         }
-                        const snapExisting = snapLineMap.get(errorLine);
+                        if (!snapLineMap.has(targetLine)) {
+                            snapLineMap.set(targetLine, []);
+                        }
+                        const snapExisting = snapLineMap.get(targetLine);
                         const snapIdx = snapExisting.findIndex(o => o.varName === snap.varName);
                         if (snapIdx >= 0) {
                             snapExisting[snapIdx] = snap;
@@ -2540,36 +2556,92 @@ class TrickleInlayHintsProvider {
         }
         if (!snapLineMap)
             return hints;
-        // Error snapshots store all vars at the error line — show them on the error line
+        const isPython = document.languageId === 'python';
+        // Render error snapshot hints in the same style as auto mode —
+        // positioned after the variable name on its assignment line,
+        // with `: type  = value` format showing crash-time values.
         for (const [lineNo, observations] of snapLineMap) {
             if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
                 continue;
             for (const obs of observations) {
                 try {
                     const line = document.lineAt(lineNo - 1);
-                    const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-                    // Format: show variable name = sample value
-                    let valueStr;
-                    if (obs.sample !== undefined && obs.sample !== null) {
+                    const lineText = line.text;
+                    // Find the variable name in the line (same as auto mode)
+                    const isAttrVar = obs.varName.includes('.');
+                    const varPattern = isAttrVar
+                        ? new RegExp(escapeRegex(obs.varName))
+                        : new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
+                    const match = varPattern.exec(lineText);
+                    if (!match) {
+                        // Fallback: place at end of line if variable name not found
+                        const position = new vscode.Position(lineNo - 1, lineText.trimEnd().length);
                         const inline = formatSampleInline(obs.sample);
-                        valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
+                        const valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
+                        const label = ` ${obs.varName} = ${valueStr}`;
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const tooltipParts = [];
+                        tooltipParts.push(`**Error mode** — values at crash time`);
+                        if (lastErrorMessage)
+                            tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
+                        const obsLabels = getDimLabels(obs);
+                        tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+                        if (obs.sample !== undefined) {
+                            tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                        }
+                        hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
+                        hints.push(hint);
+                        continue;
                     }
-                    else {
-                        valueStr = typeNodeToStringCompact(obs.type, undefined, undefined);
+                    const varEnd = match.index + obs.varName.length;
+                    // Format type string like auto mode
+                    const obsLabels = getDimLabels(obs);
+                    const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
+                    let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
+                    // Show sample values inline like auto mode
+                    if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+                        if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+                            typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+                        }
+                        else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+                            typeStr = String(obs.sample);
+                        }
+                        else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+                            typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
+                        }
+                        else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+                            typeStr = `"${obs.sample}"`;
+                        }
                     }
-                    const label = ` ${obs.varName} = ${valueStr}`;
-                    const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-                    hint.paddingLeft = true;
-                    // Tooltip with full sample and error context
+                    if (obs.type.kind === 'object' && obs.type.class_name &&
+                        typeof obs.sample === 'string' &&
+                        obs.sample.startsWith(obs.type.class_name + '(') &&
+                        obs.sample.endsWith(')')) {
+                        typeStr = obs.sample;
+                    }
+                    const position = new vscode.Position(lineNo - 1, varEnd);
+                    const label = `: ${typeStr}`;
+                    const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
+                    hint.paddingLeft = false;
+                    hint.paddingRight = true;
+                    // Tooltip with error context + full type/sample
                     const tooltipParts = [];
                     tooltipParts.push(`**Error mode** — values at crash time`);
                     if (lastErrorMessage) {
                         tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
                     }
-                    const obsLabels = getDimLabels(obs);
-                    tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+                    if (fullTypeStr !== typeStr) {
+                        if (obs.type && isComplexType(obs.type)) {
+                            const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+                            tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
+                        }
+                        else {
+                            tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+                        }
+                    }
                     if (obs.sample !== undefined) {
-                        tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                        tooltipParts.push(`**Value at crash:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
                     }
                     hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
                     hints.push(hint);
@@ -2932,11 +3004,13 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                 return `Promise<${typeNodeToString(node.resolved, depth - 1)}>`;
             }
             return 'Promise<unknown>';
-        case 'union':
-            if (node.elements) {
-                return node.elements.map(e => typeNodeToString(e, depth - 1)).join(' | ');
+        case 'union': {
+            const unionMembers = node.elements || node.members;
+            if (unionMembers) {
+                return unionMembers.map(e => typeNodeToString(e, depth - 1)).join(' | ');
             }
             return 'unknown';
+        }
         default:
             return 'unknown';
     }
@@ -2974,6 +3048,19 @@ function typeNodeToStringCompact(node, dimLabels, sample) {
         const needsWrapper = inner.includes('|') || inner.includes('(') ||
             (inner.includes('<') && !inner.endsWith('>'));
         return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+    }
+    // Unions: collapse homogeneous unions (e.g. 20 Tensor variants → just "Tensor")
+    if (node.kind === 'union') {
+        const members = node.elements || node.members;
+        if (!members || members.length === 0)
+            return 'unknown';
+        // If all members share the same class_name, use that class name
+        const classNames = new Set(members.map(m => m.class_name).filter(Boolean));
+        if (classNames.size === 1) {
+            return classNames.values().next().value;
+        }
+        // Otherwise fall through to typeNodeToString
+        return typeNodeToString(node, 3, dimLabels);
     }
     if (node.kind === 'map') {
         return typeNodeToString(node, 3, dimLabels);
@@ -3244,11 +3331,13 @@ function typeNodeToPretty(node, indent = 0, dimLabels) {
             });
             return `${header}{\n${fieldLines.join('\n')}\n${pad}}`;
         }
-        case 'union':
-            if (node.elements) {
-                return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
+        case 'union': {
+            const prettyUnionMembers = node.elements || node.members;
+            if (prettyUnionMembers) {
+                return prettyUnionMembers.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
             }
             return 'unknown';
+        }
         case 'map': {
             const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
             const valNode = node.value;
@@ -3272,6 +3361,10 @@ function typeNodeToPretty(node, indent = 0, dimLabels) {
 function isComplexType(node) {
     if (node.kind === 'array' && node.element)
         return isComplexType(node.element);
+    if (node.kind === 'union') {
+        const members = node.elements || node.members;
+        return !!members && members.length > 1;
+    }
     if (node.kind !== 'object' || !node.properties)
         return false;
     const entries = Object.entries(node.properties);
@@ -3318,5 +3411,242 @@ function formatSample(sample) {
     }
     catch {
         return String(sample);
+    }
+}
+// ─── Runtime-type-aware Autocomplete ──────────────────────────────────────────
+/** Common methods/properties for known Python types, used for autocomplete. */
+const KNOWN_TYPE_MEMBERS = {
+    Tensor: {
+        props: [
+            'shape', 'dtype', 'device', 'data', 'grad', 'requires_grad', 'is_cuda',
+            'is_contiguous', 'ndim', 'T', 'mT', 'real', 'imag', 'is_leaf',
+            'grad_fn', 'is_sparse', 'is_quantized', 'is_meta', 'is_nested',
+            'nbytes', 'itemsize', 'is_complex', 'is_floating_point',
+        ],
+        methods: [
+            'abs', 'add', 'argmax', 'argmin', 'backward', 'bool', 'chunk', 'clamp',
+            'clone', 'contiguous', 'cpu', 'cuda', 'detach', 'dim', 'div', 'double',
+            'eq', 'expand', 'expand_as', 'flatten', 'flip', 'float', 'floor', 'gather',
+            'half', 'index_select', 'int', 'item', 'log', 'long', 'masked_fill',
+            'matmul', 'max', 'mean', 'min', 'mm', 'mul', 'narrow', 'ne', 'neg',
+            'nonzero', 'norm', 'numel', 'numpy', 'permute', 'pow', 'prod',
+            'repeat', 'reshape', 'requires_grad_', 'retain_grad', 'scatter',
+            'sigmoid', 'sign', 'size', 'softmax', 'sort', 'split', 'sqrt',
+            'squeeze', 'std', 'sub', 'sum', 'to', 'tolist', 'topk', 'transpose',
+            'type', 'unbind', 'unflatten', 'unfold', 'uniform_', 'unique',
+            'unsqueeze', 'var', 'view', 'view_as', 'zero_',
+        ],
+    },
+    ndarray: {
+        props: [
+            'shape', 'dtype', 'ndim', 'size', 'T', 'flat', 'real', 'imag',
+            'data', 'strides', 'itemsize', 'nbytes', 'base',
+        ],
+        methods: [
+            'all', 'any', 'argmax', 'argmin', 'argsort', 'astype', 'clip', 'copy',
+            'cumsum', 'diagonal', 'dot', 'fill', 'flatten', 'item', 'max', 'mean',
+            'min', 'nonzero', 'prod', 'ravel', 'repeat', 'reshape', 'round',
+            'sort', 'squeeze', 'std', 'sum', 'swapaxes', 'take', 'tolist',
+            'transpose', 'var', 'view',
+        ],
+    },
+    DataFrame: {
+        props: [
+            'columns', 'index', 'dtypes', 'shape', 'values', 'T', 'axes', 'ndim',
+            'size', 'empty', 'loc', 'iloc', 'at', 'iat',
+        ],
+        methods: [
+            'apply', 'astype', 'copy', 'corr', 'count', 'describe', 'drop',
+            'dropna', 'fillna', 'filter', 'groupby', 'head', 'info', 'isna',
+            'isnull', 'iterrows', 'join', 'max', 'mean', 'melt', 'merge', 'min',
+            'nunique', 'pivot', 'plot', 'query', 'rename', 'replace', 'reset_index',
+            'rolling', 'sample', 'set_index', 'sort_values', 'std', 'sum', 'tail',
+            'to_csv', 'to_dict', 'to_json', 'to_numpy', 'value_counts', 'var',
+        ],
+    },
+    Series: {
+        props: [
+            'dtype', 'index', 'name', 'shape', 'values', 'ndim', 'size', 'empty',
+            'loc', 'iloc', 'at', 'iat', 'str', 'dt', 'cat',
+        ],
+        methods: [
+            'apply', 'astype', 'copy', 'count', 'cumsum', 'describe', 'drop',
+            'dropna', 'fillna', 'groupby', 'head', 'idxmax', 'idxmin', 'isna',
+            'isnull', 'map', 'max', 'mean', 'min', 'nunique', 'plot', 'replace',
+            'reset_index', 'rolling', 'sample', 'sort_values', 'std', 'sum',
+            'tail', 'to_dict', 'to_frame', 'to_list', 'to_numpy', 'unique',
+            'value_counts', 'var',
+        ],
+    },
+};
+/**
+ * Find the enclosing function name for a given line in a Python document.
+ * Returns undefined if the line is at module/cell top level.
+ */
+function findEnclosingFunction(document, lineIdx) {
+    for (let i = lineIdx; i >= 0; i--) {
+        const text = document.lineAt(i).text;
+        const m = text.match(/^\s*(?:async\s+)?def\s+(\w+)\s*\(/);
+        if (m) {
+            // Check indentation: if the target line is indented more than the def, it's inside
+            const defIndent = text.search(/\S/);
+            if (i === lineIdx)
+                return m[1]; // cursor is on the def line itself
+            const targetIndent = document.lineAt(lineIdx).text.search(/\S/);
+            if (targetIndent > defIndent)
+                return m[1];
+            // If same or less indent, this def doesn't contain our line
+        }
+    }
+    return undefined;
+}
+/**
+ * Find the observation for a variable name, scoped to the enclosing function.
+ * Falls back to module-level observations if no function-scoped match.
+ */
+function findScopedObservation(lineMap, varName, funcName) {
+    let funcMatch;
+    let moduleMatch;
+    for (const [, observations] of lineMap) {
+        for (const o of observations) {
+            if (o.varName !== varName)
+                continue;
+            if (funcName && o.funcName === funcName) {
+                funcMatch = o;
+            }
+            else if (!o.funcName) {
+                moduleMatch = o;
+            }
+        }
+    }
+    return funcMatch || (funcName ? undefined : moduleMatch);
+}
+class TrickleCompletionProvider {
+    provideCompletionItems(document, position) {
+        const lineText = document.lineAt(position.line).text;
+        const textBefore = lineText.substring(0, position.character);
+        // Match `varName.` at the end
+        const dotMatch = textBefore.match(/\b(\w+)\.\s*$/);
+        if (!dotMatch)
+            return undefined;
+        const varName = dotMatch[1];
+        const lineMap = getLineMapForDocument(document);
+        if (!lineMap)
+            return undefined;
+        // Scope to the enclosing function
+        const funcName = findEnclosingFunction(document, position.line);
+        const obs = findScopedObservation(lineMap, varName, funcName);
+        if (!obs)
+            return undefined;
+        const typeNode = obs.type;
+        const items = [];
+        const className = resolveClassName(typeNode);
+        if (className && KNOWN_TYPE_MEMBERS[className]) {
+            const known = KNOWN_TYPE_MEMBERS[className];
+            for (const prop of known.props) {
+                const item = new vscode.CompletionItem(prop, vscode.CompletionItemKind.Property);
+                item.detail = `(trickle) ${className}.${prop}`;
+                item.sortText = `0_${prop}`;
+                items.push(item);
+            }
+            for (const method of known.methods) {
+                const item = new vscode.CompletionItem(method, vscode.CompletionItemKind.Method);
+                item.detail = `(trickle) ${className}.${method}()`;
+                item.sortText = `1_${method}`;
+                items.push(item);
+            }
+        }
+        if (typeNode.kind === 'object' && typeNode.properties) {
+            for (const [key, valType] of Object.entries(typeNode.properties)) {
+                if (key.startsWith('__'))
+                    continue;
+                if (className && KNOWN_TYPE_MEMBERS[className]) {
+                    const known = KNOWN_TYPE_MEMBERS[className];
+                    if (known.props.includes(key) || known.methods.includes(key))
+                        continue;
+                }
+                const typeStr = typeNodeToStringCompact(valType);
+                const item = new vscode.CompletionItem(key, vscode.CompletionItemKind.Field);
+                item.detail = `(trickle) ${typeStr}`;
+                item.sortText = `2_${key}`;
+                items.push(item);
+            }
+        }
+        return items.length > 0 ? items : undefined;
+    }
+}
+/** Resolve the class name from a TypeNode, handling arrays and unions. */
+function resolveClassName(node) {
+    if (node.class_name)
+        return node.class_name;
+    if (node.kind === 'union') {
+        const members = node.elements || node.members;
+        if (members && members.length > 0) {
+            // If all members share the same class, use that
+            const names = new Set(members.map(m => m.class_name).filter(Boolean));
+            if (names.size === 1)
+                return names.values().next().value;
+        }
+    }
+    return undefined;
+}
+// ─── Semantic Token Provider ──────────────────────────────────────────────────
+// Token type indices matching the legend registered in activate()
+const TOKEN_TYPE_PROPERTY = 0;
+const TOKEN_TYPE_METHOD = 1;
+class TrickleSemanticTokensProvider {
+    provideDocumentSemanticTokens(document) {
+        const lineMap = getLineMapForDocument(document);
+        if (!lineMap)
+            return undefined;
+        // Build scope-aware map: "funcName:varName" → className
+        const scopedVarTypes = new Map();
+        for (const [, observations] of lineMap) {
+            for (const obs of observations) {
+                const cls = resolveClassName(obs.type);
+                if (cls) {
+                    const scopeKey = `${obs.funcName || ''}:${obs.varName}`;
+                    scopedVarTypes.set(scopeKey, cls);
+                }
+            }
+        }
+        if (scopedVarTypes.size === 0)
+            return undefined;
+        const builder = new vscode.SemanticTokensBuilder(new vscode.SemanticTokensLegend(['property', 'method', 'variable'], ['declaration', 'readonly']));
+        // Build a set of all variable names that have ANY observation
+        const allVarNames = new Set();
+        for (const key of scopedVarTypes.keys()) {
+            allVarNames.add(key.split(':')[1]);
+        }
+        if (allVarNames.size === 0)
+            return undefined;
+        const varPattern = new RegExp(`\\b(${[...allVarNames].map(escapeRegex).join('|')})\\.(\\w+)`, 'g');
+        for (let lineIdx = 0; lineIdx < document.lineCount; lineIdx++) {
+            const lineText = document.lineAt(lineIdx).text;
+            let match;
+            varPattern.lastIndex = 0;
+            while ((match = varPattern.exec(lineText)) !== null) {
+                const varName = match[1];
+                const attrName = match[2];
+                // Resolve class using function scope
+                const funcName = findEnclosingFunction(document, lineIdx);
+                const scopeKey = `${funcName || ''}:${varName}`;
+                const cls = scopedVarTypes.get(scopeKey)
+                    || (!funcName ? scopedVarTypes.get(`:${varName}`) : undefined);
+                if (!cls)
+                    continue;
+                const known = KNOWN_TYPE_MEMBERS[cls];
+                if (!known)
+                    continue;
+                const attrStart = match.index + varName.length + 1;
+                if (known.methods.includes(attrName)) {
+                    builder.push(lineIdx, attrStart, attrName.length, TOKEN_TYPE_METHOD);
+                }
+                else if (known.props.includes(attrName)) {
+                    builder.push(lineIdx, attrStart, attrName.length, TOKEN_TYPE_PROPERTY);
+                }
+            }
+        }
+        return builder.build();
     }
 }

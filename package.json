@@ -8,5 +8,13 @@
     "dev": "npm run --workspace=packages/backend dev",
     "build": "npm run --workspaces build",
     "start": "npm run --workspace=packages/backend start"
+  },
+  "devDependencies": {
+    "@hono/node-server": "^1.19.11",
+    "@koa/router": "^15.4.0",
+    "fastify": "^5.8.2",
+    "hono": "^4.12.8",
+    "koa": "^3.1.2",
+    "koa-bodyparser": "^4.4.1"
   }
 }
