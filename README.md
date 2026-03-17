@@ -108,6 +108,11 @@ Trickle rewrites your Python source via AST transformation before execution. Aft
 ## Documentation
 
 - [Features](features.md)
-- [Full Features - including TS/JS and React support](archive/pre_steve_jobs_features.md)
 - [ML Engineer Guide](usecases/ml-engineer.md)
 - [AI Agent Guide](usecases/ai-agent.md)
+
+## Additional Documentation
+
+- [Full Features - including TS/JS and React support](archive/pre_steve_jobs_features.md)
+- [Full Usecases](usecases/additional%20usecases/)
+- [FULL DOCS](docs.md)
