@@ -335,6 +335,61 @@ def main() -> None:
         raise _user_code_error
 
 
+def _quick_type_sample(val):
+    """Lightweight type + sample for error snapshots. No heavy imports."""
+    import types as _types
+    if isinstance(val, (type, _types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType)):
+        return None, None
+    if isinstance(val, bool):
+        return {"kind": "primitive", "name": "boolean"}, val
+    if isinstance(val, int):
+        return {"kind": "primitive", "name": "integer"}, val
+    if isinstance(val, float):
+        return {"kind": "primitive", "name": "number"}, val
+    if isinstance(val, str):
+        return {"kind": "primitive", "name": "string"}, val[:200]
+    if hasattr(val, "shape") and hasattr(val, "dtype"):
+        shape = val.shape
+        parts = [f"shape={list(shape)}", f"dtype={val.dtype}"]
+        if hasattr(val, "device"):
+            parts.append(f"device={val.device}")
+        cn = type(val).__name__
+        props = {
+            "shape": {"kind": "primitive", "name": str(list(shape))},
+            "dtype": {"kind": "primitive", "name": str(val.dtype)},
+        }
+        return {"kind": "object", "properties": props, "class_name": cn}, f'{cn}({", ".join(parts)})'
+    if isinstance(val, (list, tuple)):
+        items = []
+        for item in val[:20]:
+            if item is None or isinstance(item, (bool, int, float)):
+                items.append(item)
+            elif isinstance(item, str):
+                items.append(item[:80])
+            else:
+                items.append(str(item)[:80])
+        if len(val) > 20:
+            items.append(f"... ({len(val)} total)")
+        elem_name = "unknown"
+        if val and isinstance(val[0], str):
+            elem_name = "string"
+        elif val and isinstance(val[0], (int, float)):
+            elem_name = "number"
+        return {"kind": "array", "element": {"kind": "primitive", "name": elem_name}}, items
+    if isinstance(val, dict):
+        d = {}
+        for k, v in list(val.items())[:10]:
+            if isinstance(k, str):
+                if v is None or isinstance(v, (bool, int, float)):
+                    d[k] = v
+                elif isinstance(v, str):
+                    d[k] = v[:80]
+                else:
+                    d[k] = str(v)[:80]
+        return {"kind": "primitive", "name": type(val).__name__}, d if d else str(val)[:200]
+    return {"kind": "primitive", "name": type(val).__name__}, str(val)[:200]
+
+
 def _write_error_snapshots(exc: BaseException) -> None:
     """Write error_snapshot records to variables.jsonl for script crashes."""
     import types as _types
@@ -384,13 +439,12 @@ def _write_error_snapshots(exc: BaseException) -> None:
     for name, val in list(merged_locals.items()):
         if name.startswith("_") or name.startswith(".") or name in _SKIP_NAMES:
             continue
-        # Skip modules, functions, classes
-        if isinstance(val, (type, _types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType)):
+        # Skip modules, functions, classes, methods
+        if isinstance(val, (type, _types.ModuleType, _types.FunctionType,
+                            _types.BuiltinFunctionType, _types.MethodType)):
             continue
         try:
-            # Lightweight type + sample (avoid deep inference)
-            from trickle.notebook import _quick_type_and_sample
-            type_node, sample = _quick_type_and_sample(val)
+            type_node, sample = _quick_type_sample(val)
             if type_node is None:
                 continue
             records.append({
