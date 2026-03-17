@@ -2933,9 +2933,13 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
     if (document.uri.scheme === 'file') {
       snapLineMap = errorSnapshotIndex.get(document.uri.fsPath);
     } else if (document.uri.scheme === 'vscode-notebook-cell') {
-      // Notebook cell: use content-based matching (same approach as regular hints)
+      // For notebooks, try content matching first, then fall back to
+      // using the single entry (common case: one error at a time)
       const cellText = document.getText();
       snapLineMap = findBestMatchingCellIn(cellText, errorSnapshotIndex);
+      if (!snapLineMap && errorSnapshotIndex.size === 1) {
+        snapLineMap = errorSnapshotIndex.values().next().value;
+      }
     }
 
     if (!snapLineMap) return hints;

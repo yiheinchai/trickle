@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trickle-observe"
-version = "0.2.48"
+version = "0.2.49"
 description = "Zero-code runtime observability for Python. Auto-instruments FastAPI, Flask, Django, OpenAI, Anthropic, Gemini, LangChain, CrewAI. Captures functions, variables, LLM calls, agent workflows, tensor shapes."
 requires-python = ">=3.9"
 dependencies = ["requests>=2.28.0"]

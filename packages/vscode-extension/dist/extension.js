@@ -181,9 +181,14 @@ let reactHookIndex = new Map();
 let reactStateIndex = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex = new Map();
+/** Error snapshot observations: same structure as varIndex but captured at crash time */
+let errorSnapshotIndex = new Map();
+/** The error message from the most recent error snapshot */
+let lastErrorMessage;
 let fileWatcher;
 let errorFileWatcher;
 let statusBarItem;
+let modeStatusBarItem;
 let inlineHintsProvider;
 let diagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
@@ -247,10 +252,114 @@ function saveTypeHistory(hashes) {
         }
     }
 }
+/**
+ * CodeLens provider that shows LLM cost and eval score inline.
+ * Reads .trickle/llm.jsonl to find which functions made LLM calls
+ * and displays cost/token info above them.
+ */
+class TrickleCostCodeLensProvider {
+    provideCodeLenses(document) {
+        const lenses = [];
+        const fileDir = path.dirname(document.uri.fsPath);
+        const trickleDir = findNearestTrickleDirCached(fileDir);
+        if (!trickleDir)
+            return lenses;
+        // Read LLM data
+        const llmPath = path.join(trickleDir, 'llm.jsonl');
+        if (!fs.existsSync(llmPath))
+            return lenses;
+        let llmCalls;
+        try {
+            llmCalls = fs.readFileSync(llmPath, 'utf-8').split('\n').filter(Boolean)
+                .map(l => { try {
+                return JSON.parse(l);
+            }
+            catch {
+                return null;
+            } }).filter(Boolean);
+        }
+        catch {
+            return lenses;
+        }
+        if (llmCalls.length === 0)
+            return lenses;
+        // Aggregate: total cost, calls, tokens
+        const totalCost = llmCalls.reduce((s, c) => s + (c.estimatedCostUsd || 0), 0);
+        const totalTokens = llmCalls.reduce((s, c) => s + (c.totalTokens || 0), 0);
+        const errorCount = llmCalls.filter((c) => c.error).length;
+        const models = [...new Set(llmCalls.map((c) => c.model))];
+        // Show summary CodeLens at line 0
+        const costStr = totalCost > 0 ? `$${totalCost.toFixed(4)}` : '$0';
+        const tokStr = totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : String(totalTokens);
+        const errStr = errorCount > 0 ? ` | ${errorCount} errors` : '';
+        const modelStr = models.length <= 2 ? models.join(', ') : `${models.length} models`;
+        const title = `$(zap) trickle: ${llmCalls.length} LLM calls | ${costStr} | ${tokStr} tokens | ${modelStr}${errStr}`;
+        const lens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+            title,
+            command: 'trickle.showCostReport',
+            tooltip: 'Click to see full LLM cost report (trickle cost-report)',
+        });
+        lenses.push(lens);
+        // Read eval data if available
+        const agentsPath = path.join(trickleDir, 'agents.jsonl');
+        if (fs.existsSync(agentsPath)) {
+            try {
+                const agentEvents = fs.readFileSync(agentsPath, 'utf-8').split('\n').filter(Boolean)
+                    .map(l => { try {
+                    return JSON.parse(l);
+                }
+                catch {
+                    return null;
+                } }).filter(Boolean);
+                if (agentEvents.length > 0) {
+                    const crewStarts = agentEvents.filter((e) => e.event === 'crew_start' || e.event === 'chain_start');
+                    const errors = agentEvents.filter((e) => e.event?.includes('error'));
+                    const toolCalls = agentEvents.filter((e) => e.event === 'tool_start');
+                    const evalLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+                        title: `$(beaker) trickle eval: ${crewStarts.length} agent runs | ${toolCalls.length} tool calls | ${errors.length} errors`,
+                        command: 'trickle.showEval',
+                        tooltip: 'Click to see agent evaluation (trickle eval)',
+                    });
+                    lenses.push(evalLens);
+                }
+            }
+            catch { }
+        }
+        // Read alerts for security
+        const alertsPath = path.join(trickleDir, 'alerts.jsonl');
+        if (fs.existsSync(alertsPath)) {
+            try {
+                const alerts = fs.readFileSync(alertsPath, 'utf-8').split('\n').filter(Boolean)
+                    .map(l => { try {
+                    return JSON.parse(l);
+                }
+                catch {
+                    return null;
+                } }).filter(Boolean);
+                const critical = alerts.filter((a) => a.severity === 'critical');
+                const warnings = alerts.filter((a) => a.severity === 'warning');
+                if (critical.length > 0 || warnings.length > 0) {
+                    const secLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+                        title: `$(shield) trickle security: ${critical.length} critical | ${warnings.length} warnings`,
+                        command: 'trickle.showSecurity',
+                        tooltip: 'Click to see security scan (trickle security)',
+                    });
+                    lenses.push(secLens);
+                }
+            }
+            catch { }
+        }
+        return lenses;
+    }
+}
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     statusBarItem.command = 'trickle.refreshVariables';
     context.subscriptions.push(statusBarItem);
+    modeStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -1);
+    modeStatusBarItem.command = 'trickle.cycleInlineHintMode';
+    context.subscriptions.push(modeStatusBarItem);
+    updateModeStatusBar();
     // Create diagnostic collection for error reporting
     diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
     context.subscriptions.push(diagnosticCollection);
@@ -259,6 +368,7 @@ function activate(context) {
     // Load variable data
     loadAllVariables();
     loadErrors();
+    loadAlerts();
     // Register hover provider for all common file types (JS/TS and Python)
     const selector = [
         { scheme: 'file', language: 'typescript' },
@@ -272,6 +382,22 @@ function activate(context) {
     context.subscriptions.push(vscode.languages.registerHoverProvider(selector, new TrickleHoverProvider()));
     // Register inline hints provider
     registerInlineHints(context, selector);
+    // Register CodeLens provider for LLM cost + eval insights
+    context.subscriptions.push(vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()));
+    // Register CodeLens commands
+    context.subscriptions.push(vscode.commands.registerCommand('trickle.showCostReport', () => {
+        const terminal = vscode.window.createTerminal('trickle');
+        terminal.sendText('trickle cost-report');
+        terminal.show();
+    }), vscode.commands.registerCommand('trickle.showEval', () => {
+        const terminal = vscode.window.createTerminal('trickle');
+        terminal.sendText('trickle eval');
+        terminal.show();
+    }), vscode.commands.registerCommand('trickle.showSecurity', () => {
+        const terminal = vscode.window.createTerminal('trickle');
+        terminal.sendText('trickle security');
+        terminal.show();
+    }));
     // Watch for changes to variables.jsonl in ANY subdirectory (not just workspace root)
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders) {
@@ -309,7 +435,7 @@ function activate(context) {
                 if (errorReloadTimer)
                     clearTimeout(errorReloadTimer);
                 clearTrickleDirCache();
-                errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
+                errorReloadTimer = setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300);
             };
             errWatcher.onDidChange(debouncedErrorReload);
             errWatcher.onDidCreate(debouncedErrorReload);
@@ -324,6 +450,12 @@ function activate(context) {
             context.subscriptions.push(errWatcher);
             if (!errorFileWatcher)
                 errorFileWatcher = errWatcher;
+            // Watch alerts.jsonl for security/agent alerts
+            const alertPattern = new vscode.RelativePattern(folder, '**/.trickle/alerts.jsonl');
+            const alertWatcher = vscode.workspace.createFileSystemWatcher(alertPattern);
+            alertWatcher.onDidChange(() => setTimeout(loadAlerts, 300));
+            alertWatcher.onDidCreate(() => setTimeout(loadAlerts, 300));
+            context.subscriptions.push(alertWatcher);
         }
     }
     // Watch for source file edits — shift hint line numbers and invalidate edited lines
@@ -420,6 +552,8 @@ function activate(context) {
             }
             varIndex.clear();
             notebookCellIndex.clear();
+            errorSnapshotIndex.clear();
+            lastErrorMessage = undefined;
             diagnosticCollection.clear();
             clearTrickleDirCache();
             updateStatusBar();
@@ -432,10 +566,34 @@ function activate(context) {
             }
         }
     }));
+    // Toggle inline hints on/off
+    context.subscriptions.push(vscode.commands.registerCommand('trickle.toggleInlineHints', async () => {
+        const config = vscode.workspace.getConfiguration('trickle');
+        const current = config.get('inlineHints', true);
+        await config.update('inlineHints', !current, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`Trickle: Inline hints ${!current ? 'enabled' : 'disabled'}`);
+    }));
+    // Cycle inline hint mode: auto → sample → type → (error if available) → auto
+    context.subscriptions.push(vscode.commands.registerCommand('trickle.cycleInlineHintMode', async () => {
+        const config = vscode.workspace.getConfiguration('trickle');
+        const current = config.get('inlineHintMode', 'auto');
+        const order = errorSnapshotIndex.size > 0
+            ? ['auto', 'sample', 'type', 'error']
+            : ['auto', 'sample', 'type'];
+        const next = order[(order.indexOf(current) + 1) % order.length];
+        await config.update('inlineHintMode', next, vscode.ConfigurationTarget.Global);
+        refreshInlineHints();
+        updateModeStatusBar();
+        vscode.window.showInformationMessage(`Trickle: Inline hint mode → ${next}`);
+    }));
     // Listen for config changes
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
         if (e.affectsConfiguration('trickle.inlineHints')) {
             registerInlineHints(context, selector);
+        }
+        if (e.affectsConfiguration('trickle.inlineHintMode')) {
+            refreshInlineHints();
+            updateModeStatusBar();
         }
     }));
 }
@@ -509,6 +667,27 @@ function updateStatusBar() {
     else {
         statusBarItem.hide();
     }
+    updateModeStatusBar();
+}
+function updateModeStatusBar() {
+    const config = vscode.workspace.getConfiguration('trickle');
+    const mode = config.get('inlineHintMode', 'auto');
+    const icons = {
+        auto: '$(symbol-misc)',
+        sample: '$(symbol-value)',
+        type: '$(symbol-type-parameter)',
+        error: '$(error)',
+    };
+    const icon = icons[mode] || '$(symbol-misc)';
+    const hasErrors = errorSnapshotIndex.size > 0;
+    modeStatusBarItem.text = `${icon} ${mode}`;
+    modeStatusBarItem.tooltip = `Trickle hint mode: ${mode}\nClick to cycle (auto → sample → type${hasErrors ? ' → error' : ''})`;
+    if (countVars() > 0 || hasErrors) {
+        modeStatusBarItem.show();
+    }
+    else {
+        modeStatusBarItem.hide();
+    }
 }
 function loadAllVariables() {
     const config = vscode.workspace.getConfiguration('trickle');
@@ -519,6 +698,8 @@ function loadAllVariables() {
     }
     varIndex.clear();
     notebookCellIndex.clear();
+    errorSnapshotIndex.clear();
+    lastErrorMessage = undefined;
     dimLabelIndex.clear();
     latestProgress = null;
     gradientIndex.clear();
@@ -739,6 +920,38 @@ function loadAllVariables() {
                         dimLabelIndex.get(dl.file).set(key, dl);
                         continue;
                     }
+                    // Handle error snapshot records (captured at crash time)
+                    if (record.kind === 'error_snapshot') {
+                        const snap = record;
+                        snap.kind = 'variable'; // normalize for reuse in hint rendering
+                        let snapPath = snap.file;
+                        try {
+                            snapPath = fs.realpathSync(snapPath);
+                        }
+                        catch { /* keep original */ }
+                        // Index into errorSnapshotIndex (same structure as varIndex)
+                        const targetIndex = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/)
+                            ? errorSnapshotIndex : errorSnapshotIndex;
+                        if (!targetIndex.has(snapPath)) {
+                            targetIndex.set(snapPath, new Map());
+                        }
+                        const snapLineMap = targetIndex.get(snapPath);
+                        // Error snapshots have all vars at the error line — spread them to their original trace lines too
+                        const errorLine = record.errorLine || snap.line;
+                        if (!snapLineMap.has(errorLine)) {
+                            snapLineMap.set(errorLine, []);
+                        }
+                        const snapExisting = snapLineMap.get(errorLine);
+                        const snapIdx = snapExisting.findIndex(o => o.varName === snap.varName);
+                        if (snapIdx >= 0) {
+                            snapExisting[snapIdx] = snap;
+                        }
+                        else {
+                            snapExisting.push(snap);
+                        }
+                        lastErrorMessage = record.error || lastErrorMessage;
+                        continue;
+                    }
                     const obs = record;
                     if (obs.kind !== 'variable')
                         continue;
@@ -905,6 +1118,65 @@ function loadErrors() {
         }
     }
 }
+/**
+ * Load security alerts and agent warnings from alerts.jsonl.
+ * Surfaces them as VS Code diagnostics (yellow/red squiggles).
+ */
+function loadAlerts() {
+    const allAlertPaths = [];
+    for (const folder of (vscode.workspace.workspaceFolders || [])) {
+        const trickleDir = findNearestTrickleDirCached(folder.uri.fsPath);
+        if (trickleDir) {
+            const alertsPath = path.join(trickleDir, 'alerts.jsonl');
+            if (fs.existsSync(alertsPath))
+                allAlertPaths.push(alertsPath);
+        }
+    }
+    for (const alertsPath of allAlertPaths) {
+        try {
+            const content = fs.readFileSync(alertsPath, 'utf8');
+            const lines = content.split('\n').filter(l => l.trim());
+            const workspaceRoot = path.dirname(path.dirname(alertsPath));
+            // Find active editor file to attach diagnostics
+            const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
+            if (!activeFile)
+                continue;
+            const diags = [];
+            for (const line of lines) {
+                try {
+                    const alert = JSON.parse(line);
+                    if (alert.kind !== 'alert')
+                        continue;
+                    // Only surface critical and warning alerts as diagnostics
+                    if (alert.severity !== 'critical' && alert.severity !== 'warning')
+                        continue;
+                    // Skip non-security alerts that don't have actionable location
+                    const isSecurityAlert = ['prompt_injection', 'privilege_escalation', 'data_exfiltration',
+                        'secret', 'sql_injection', 'llm_errors', 'llm_cost_spike', 'agent_tool_retry',
+                        'agent_tool_errors', 'agent_failure'].includes(alert.category);
+                    if (!isSecurityAlert)
+                        continue;
+                    const severity = alert.severity === 'critical'
+                        ? vscode.DiagnosticSeverity.Error
+                        : vscode.DiagnosticSeverity.Warning;
+                    const message = `[trickle] ${alert.message}${alert.suggestion ? '\n💡 ' + alert.suggestion : ''}`;
+                    const range = new vscode.Range(0, 0, 0, 1000); // Top of file
+                    const diag = new vscode.Diagnostic(range, message, severity);
+                    diag.source = 'trickle-security';
+                    diags.push(diag);
+                }
+                catch { /* skip malformed */ }
+            }
+            if (diags.length > 0 && activeFile) {
+                // Merge with existing diagnostics (don't overwrite error diagnostics)
+                const existing = diagnosticCollection.get(vscode.Uri.file(activeFile)) || [];
+                const merged = [...existing.filter(d => d.source !== 'trickle-security'), ...diags];
+                diagnosticCollection.set(vscode.Uri.file(activeFile), merged);
+            }
+        }
+        catch { /* file read error */ }
+    }
+}
 /** Get the line map for a document, handling both regular files and notebook cells. */
 function getLineMapForDocument(document) {
     // Regular file
@@ -927,10 +1199,14 @@ function getLineMapForDocument(document) {
  * When multiple entries tie, prefers the one with the highest cell counter
  * (most recent execution). */
 function findBestMatchingCell(cellText) {
+    return findBestMatchingCellIn(cellText, notebookCellIndex);
+}
+/** Generic version: search any cell index for the best content match. */
+function findBestMatchingCellIn(cellText, index) {
     let bestMatch;
     let bestScore = 0;
     let bestCellNum = -1;
-    for (const [key, lineMap] of notebookCellIndex) {
+    for (const [key, lineMap] of index) {
         let score = 0;
         let total = 0;
         for (const obsArr of lineMap.values()) {
@@ -1247,6 +1523,11 @@ class TrickleInlayHintsProvider {
         const config = vscode.workspace.getConfiguration('trickle');
         if (!config.get('enabled', true) || !config.get('inlineHints', true))
             return [];
+        const hintMode = config.get('inlineHintMode', 'auto');
+        // Error mode: show error snapshot values instead of normal observations
+        if (hintMode === 'error' && errorSnapshotIndex.size > 0) {
+            return this._provideErrorHints(document, range, config);
+        }
         const lineMap = getLineMapForDocument(document);
         if (!lineMap)
             return [];
@@ -1369,28 +1650,38 @@ class TrickleInlayHintsProvider {
                 const obsLabels = getDimLabels(obs);
                 const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
                 let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
-                // For primitive types, show actual value inline instead of just "number"/"integer"
-                if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
-                    if (obs.type.name === 'number' && typeof obs.sample === 'number') {
-                        typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+                const hintMode = config.get('inlineHintMode', 'auto');
+                if (hintMode !== 'type') {
+                    // "auto" or "sample" mode — show sample values inline
+                    // For primitive types, show actual value inline instead of just "number"/"integer"
+                    if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+                        if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+                            typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+                        }
+                        else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+                            typeStr = String(obs.sample);
+                        }
+                        else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+                            typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
+                        }
+                        else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+                            typeStr = `"${obs.sample}"`;
+                        }
                     }
-                    else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
-                        typeStr = String(obs.sample);
+                    // For class instances with a config, sample is a constructor-call string like
+                    // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
+                    if (obs.type.kind === 'object' && obs.type.class_name &&
+                        typeof obs.sample === 'string' &&
+                        obs.sample.startsWith(obs.type.class_name + '(') &&
+                        obs.sample.endsWith(')')) {
+                        typeStr = obs.sample;
                     }
-                    else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
-                        typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
+                    // "sample" mode — aggressively prefer sample data for all types
+                    if (hintMode === 'sample' && obs.sample !== undefined && obs.sample !== null) {
+                        const sampleStr = formatSampleInline(obs.sample);
+                        if (sampleStr)
+                            typeStr = sampleStr;
                     }
-                    else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
-                        typeStr = `"${obs.sample}"`;
-                    }
-                }
-                // For class instances with a config, sample is a constructor-call string like
-                // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
-                if (obs.type.kind === 'object' && obs.type.class_name &&
-                    typeof obs.sample === 'string' &&
-                    obs.sample.startsWith(obs.type.class_name + '(') &&
-                    obs.sample.endsWith(')')) {
-                    typeStr = obs.sample;
                 }
                 const position = new vscode.Position(lineNo - 1, varEnd);
                 // Check for type drift (type changed since last run)
@@ -2230,6 +2521,66 @@ class TrickleInlayHintsProvider {
         }
         return hints;
     }
+    /** Render inline hints from error snapshot data (post-mortem debug view). */
+    _provideErrorHints(document, range, config) {
+        const hints = [];
+        // Find error snapshot observations for this document
+        let snapLineMap;
+        if (document.uri.scheme === 'file') {
+            snapLineMap = errorSnapshotIndex.get(document.uri.fsPath);
+        }
+        else if (document.uri.scheme === 'vscode-notebook-cell') {
+            // For notebooks, try content matching first, then fall back to
+            // using the single entry (common case: one error at a time)
+            const cellText = document.getText();
+            snapLineMap = findBestMatchingCellIn(cellText, errorSnapshotIndex);
+            if (!snapLineMap && errorSnapshotIndex.size === 1) {
+                snapLineMap = errorSnapshotIndex.values().next().value;
+            }
+        }
+        if (!snapLineMap)
+            return hints;
+        // Error snapshots store all vars at the error line — show them on the error line
+        for (const [lineNo, observations] of snapLineMap) {
+            if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                continue;
+            for (const obs of observations) {
+                try {
+                    const line = document.lineAt(lineNo - 1);
+                    const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                    // Format: show variable name = sample value
+                    let valueStr;
+                    if (obs.sample !== undefined && obs.sample !== null) {
+                        const inline = formatSampleInline(obs.sample);
+                        valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
+                    }
+                    else {
+                        valueStr = typeNodeToStringCompact(obs.type, undefined, undefined);
+                    }
+                    const label = ` ${obs.varName} = ${valueStr}`;
+                    const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                    hint.paddingLeft = true;
+                    // Tooltip with full sample and error context
+                    const tooltipParts = [];
+                    tooltipParts.push(`**Error mode** — values at crash time`);
+                    if (lastErrorMessage) {
+                        tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
+                    }
+                    const obsLabels = getDimLabels(obs);
+                    tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+                    if (obs.sample !== undefined) {
+                        tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                    }
+                    hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
+                    hints.push(hint);
+                }
+                catch {
+                    // Skip if line is out of range
+                }
+            }
+        }
+        return hints;
+    }
 }
 /** Format a callFlow record as a Markdown string for hover display.
  * Example: "**Flow:** layer (Linear)\n  x: Tensor[32, 784] → Tensor[32, 10]" */
@@ -2929,6 +3280,29 @@ function isComplexType(node) {
     return entries.some(([, v]) => v.kind === 'object' && v.properties && Object.keys(v.properties).length > 0);
 }
 /** Format a sample value for display */
+/** Format a sample value for inline hint display (compact, single-line). */
+function formatSampleInline(sample) {
+    if (sample === undefined || sample === null)
+        return null;
+    if (typeof sample === 'number') {
+        return Number.isInteger(sample) ? String(sample) : sample.toFixed(4);
+    }
+    if (typeof sample === 'boolean')
+        return String(sample);
+    if (typeof sample === 'string') {
+        return sample.length <= 60 ? `"${sample}"` : `"${sample.substring(0, 57)}..."`;
+    }
+    try {
+        const str = JSON.stringify(sample);
+        if (str.length <= 80)
+            return str;
+        return str.substring(0, 77) + '...';
+    }
+    catch {
+        const s = String(sample);
+        return s.length <= 80 ? s : s.substring(0, 77) + '...';
+    }
+}
 function formatSample(sample) {
     if (sample === undefined)
         return 'undefined';
@@ -2937,8 +3311,8 @@ function formatSample(sample) {
     try {
         const str = JSON.stringify(sample, null, 2);
         // Truncate long samples
-        if (str.length > 500) {
-            return str.substring(0, 500) + '\n// ... truncated';
+        if (str.length > 2000) {
+            return str.substring(0, 2000) + '\n// ... truncated';
         }
         return str;
     }

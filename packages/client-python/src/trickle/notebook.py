@@ -794,9 +794,46 @@ def _capture_error_snapshot(exc: BaseException) -> None:
         cell_id = _make_cell_id(_cell_counter)
         error_msg = f"{type(exc).__name__}: {exc}"
 
+        # In notebooks, f_locals contains the ENTIRE IPython namespace.
+        # Filter to only variables that were traced in the current cell.
+        traced_names: set = set()
+        for key in _tv_cache:
+            # cache keys are "cell_id:line_no:var_name"
+            parts = key.rsplit(":", 2)
+            if len(parts) == 3:
+                traced_names.add(parts[2])
+        # Also include the for-loop / with-as iteration variables that
+        # appear in the traceback line's code context
+        try:
+            ip = get_ipython()  # type: ignore[name-defined]
+            cell_source = ip.user_ns.get("In", [])
+            if cell_source and len(cell_source) > 0:
+                last_cell = cell_source[-1] if isinstance(cell_source[-1], str) else ""
+                # Extract simple variable names assigned in the cell
+                import re
+                for m in re.finditer(r'\b(\w+)\s*=', last_cell):
+                    traced_names.add(m.group(1))
+                # for-loop variables
+                for m in re.finditer(r'\bfor\s+(\w+)\s+in\b', last_cell):
+                    traced_names.add(m.group(1))
+                # with-as variables
+                for m in re.finditer(r'\bas\s+(\w+)\s*:', last_cell):
+                    traced_names.add(m.group(1))
+        except Exception:
+            pass
+
+        # IPython builtins to always skip
+        _IPYTHON_BUILTINS = {
+            'In', 'Out', 'get_ipython', 'exit', 'quit', 'open',
+            'display', 'print', 'input', 'help', 'type', 'len',
+        }
+
         records: list = []
-        for name, val in list(user_frame.f_locals.items())[:30]:
-            if name.startswith("_"):
+        for name, val in list(user_frame.f_locals.items()):
+            if name.startswith("_") or name in _IPYTHON_BUILTINS:
+                continue
+            # Only include variables that were used in the cell
+            if traced_names and name not in traced_names:
                 continue
             try:
                 type_node, sample = _quick_type_and_sample(val)
