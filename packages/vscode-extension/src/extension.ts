@@ -1219,18 +1219,31 @@ function loadAllVariables() {
             try { snapPath = fs.realpathSync(snapPath); } catch { /* keep original */ }
 
             // Index into errorSnapshotIndex (same structure as varIndex)
-            const targetIndex = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/)
-              ? errorSnapshotIndex : errorSnapshotIndex;
-            if (!targetIndex.has(snapPath)) {
-              targetIndex.set(snapPath, new Map());
+            if (!errorSnapshotIndex.has(snapPath)) {
+              errorSnapshotIndex.set(snapPath, new Map());
             }
-            const snapLineMap = targetIndex.get(snapPath)!;
-            // Error snapshots have all vars at the error line — spread them to their original trace lines too
-            const errorLine = (record as any).errorLine || snap.line;
-            if (!snapLineMap.has(errorLine)) {
-              snapLineMap.set(errorLine, []);
+            const snapLineMap = errorSnapshotIndex.get(snapPath)!;
+
+            // Place each error_snapshot hint on its original assignment line
+            // (from the regular observation index) instead of the error line,
+            // so error mode looks like auto mode but with crash-time values.
+            const isCell = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/);
+            const regularIndex = isCell ? notebookCellIndex : varIndex;
+            let targetLine = snap.line; // default: the error line from the record
+            const regularLineMap = regularIndex.get(snapPath);
+            if (regularLineMap) {
+              for (const [ln, obs] of regularLineMap) {
+                if (obs.some(o => o.varName === snap.varName)) {
+                  targetLine = ln;
+                  break;
+                }
+              }
             }
-            const snapExisting = snapLineMap.get(errorLine)!;
+
+            if (!snapLineMap.has(targetLine)) {
+              snapLineMap.set(targetLine, []);
+            }
+            const snapExisting = snapLineMap.get(targetLine)!;
             const snapIdx = snapExisting.findIndex(o => o.varName === snap.varName);
             if (snapIdx >= 0) {
               snapExisting[snapIdx] = snap;
@@ -2944,38 +2957,94 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
 
     if (!snapLineMap) return hints;
 
-    // Error snapshots store all vars at the error line — show them on the error line
+    const isPython = document.languageId === 'python';
+
+    // Render error snapshot hints in the same style as auto mode —
+    // positioned after the variable name on its assignment line,
+    // with `: type  = value` format showing crash-time values.
     for (const [lineNo, observations] of snapLineMap) {
       if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
 
       for (const obs of observations) {
         try {
           const line = document.lineAt(lineNo - 1);
-          const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+          const lineText = line.text;
 
-          // Format: show variable name = sample value
-          let valueStr: string;
-          if (obs.sample !== undefined && obs.sample !== null) {
+          // Find the variable name in the line (same as auto mode)
+          const isAttrVar = obs.varName.includes('.');
+          const varPattern = isAttrVar
+            ? new RegExp(escapeRegex(obs.varName))
+            : new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
+          const match = varPattern.exec(lineText);
+          if (!match) {
+            // Fallback: place at end of line if variable name not found
+            const position = new vscode.Position(lineNo - 1, lineText.trimEnd().length);
             const inline = formatSampleInline(obs.sample);
-            valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
-          } else {
-            valueStr = typeNodeToStringCompact(obs.type, undefined, undefined);
+            const valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
+            const label = ` ${obs.varName} = ${valueStr}`;
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+            const tooltipParts: string[] = [];
+            tooltipParts.push(`**Error mode** — values at crash time`);
+            if (lastErrorMessage) tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
+            const obsLabels = getDimLabels(obs);
+            tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+            if (obs.sample !== undefined) {
+              tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+            }
+            hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
+            hints.push(hint);
+            continue;
           }
 
-          const label = ` ${obs.varName} = ${valueStr}`;
-          const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-          hint.paddingLeft = true;
+          const varEnd = match.index + obs.varName.length;
 
-          // Tooltip with full sample and error context
+          // Format type string like auto mode
+          const obsLabels = getDimLabels(obs);
+          const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
+          let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
+
+          // Show sample values inline like auto mode
+          if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+            if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+              typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+            } else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+              typeStr = String(obs.sample);
+            } else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+              typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
+            } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+              typeStr = `"${obs.sample}"`;
+            }
+          }
+          if (obs.type.kind === 'object' && obs.type.class_name &&
+              typeof obs.sample === 'string' &&
+              obs.sample.startsWith(obs.type.class_name + '(') &&
+              obs.sample.endsWith(')')) {
+            typeStr = obs.sample;
+          }
+
+          const position = new vscode.Position(lineNo - 1, varEnd);
+          const label = `: ${typeStr}`;
+          const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
+          hint.paddingLeft = false;
+          hint.paddingRight = true;
+
+          // Tooltip with error context + full type/sample
           const tooltipParts: string[] = [];
           tooltipParts.push(`**Error mode** — values at crash time`);
           if (lastErrorMessage) {
             tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
           }
-          const obsLabels = getDimLabels(obs);
-          tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+          if (fullTypeStr !== typeStr) {
+            if (obs.type && isComplexType(obs.type)) {
+              const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+              tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
+            } else {
+              tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+            }
+          }
           if (obs.sample !== undefined) {
-            tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+            tooltipParts.push(`**Value at crash:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
           }
           hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
 
