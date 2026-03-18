@@ -40,7 +40,7 @@ _traced_modules: set[str] = set()
 # ---------------------------------------------------------------------------
 
 _SKIP_TOP_LEVEL = frozenset({
-    "trickle", "_trickle",
+    "trickle", "_trickle", "_sysconfigdata",
     # Web frameworks
     "flask", "fastapi", "django", "starlette", "uvicorn", "gunicorn",
     "werkzeug", "jinja2", "markupsafe", "click", "itsdangerous",
@@ -734,8 +734,8 @@ def _names_from_target(target: ast.AST) -> list:
 class _TrickleTraceFinder(importlib.abc.MetaPathFinder):
     """Meta path finder that intercepts user module imports for variable tracing."""
 
-    def find_module(self, fullname: str, path: Any = None) -> Any:
-        """Legacy find_module interface (Python 3.3 compat, still called)."""
+    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+        """Modern find_spec interface (Python 3.4+, required in 3.12+)."""
         if not _should_trace(fullname):
             return None
 
@@ -749,6 +749,25 @@ class _TrickleTraceFinder(importlib.abc.MetaPathFinder):
             return None
 
         # Final filepath check
+        if not _should_trace(fullname, spec.origin):
+            return None
+
+        # Replace the loader with our tracing loader
+        spec.loader = _TrickleTraceLoader(spec)
+        return spec
+
+    def find_module(self, fullname: str, path: Any = None) -> Any:
+        """Legacy find_module interface (Python < 3.12 compat)."""
+        if not _should_trace(fullname):
+            return None
+
+        spec = self._find_spec_default(fullname, path)
+        if spec is None or spec.origin is None:
+            return None
+
+        if not spec.origin.endswith(".py"):
+            return None
+
         if not _should_trace(fullname, spec.origin):
             return None
 
@@ -774,9 +793,40 @@ class _TrickleTraceLoader:
 
     def __init__(self, spec: Any):
         self.spec = spec
+        self._code: Any = None  # cached compiled code
+
+    def create_module(self, spec: Any) -> Optional[types.ModuleType]:
+        """Return None to use default module creation semantics."""
+        return None
+
+    def exec_module(self, module: types.ModuleType) -> None:
+        """Execute the transformed module source in the module's namespace."""
+        fullname = module.__name__
+        _traced_modules.add(fullname)
+
+        filepath = os.path.realpath(self.spec.origin)
+        module_name = fullname.rsplit(".", 1)[-1]
+
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+
+            transformed = _transform_module_source(source, filepath, module_name)
+            code = compile(transformed, filepath, "exec")
+            exec(code, module.__dict__)
+        except Exception:
+            logger.debug("trickle: failed to transform %s, falling back", fullname, exc_info=True)
+            # Fall back: execute original source
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    source = f.read()
+                code = compile(source, filepath, "exec")
+                exec(code, module.__dict__)
+            except Exception:
+                raise
 
     def load_module(self, fullname: str) -> types.ModuleType:
-        """Load and transform the module source with variable tracing."""
+        """Legacy load_module interface (Python < 3.12 compat)."""
         if fullname in sys.modules:
             return sys.modules[fullname]
 
@@ -793,7 +843,6 @@ class _TrickleTraceLoader:
             code = compile(transformed, filepath, "exec")
         except Exception:
             logger.debug("trickle: failed to transform %s, using default import", fullname, exc_info=True)
-            # Fall back to default import
             return self._default_import(fullname)
 
         # Create the module
