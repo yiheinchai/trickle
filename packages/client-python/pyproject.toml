@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trickle-observe"
-version = "0.2.63"
+version = "0.2.64"
 description = "Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values as you code."
 readme = "README.md"
 requires-python = ">=3.9"

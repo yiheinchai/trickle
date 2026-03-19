@@ -111,8 +111,15 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                 # Scalar tensor/numpy scalar — show actual value
                 sample = value.item() if hasattr(value, "item") else float(value)
             else:
-                # Use str(value) which picks up lovely-tensors formatting if installed
-                sample = str(value)[:200]
+                # Use lovely-tensors repr if available, otherwise our own compact format
+                s = str(value)[:200]
+                if s.startswith("tensor["):
+                    sample = s
+                else:
+                    parts = [f"shape={list(shape)}", f"dtype={value.dtype}"]
+                    if hasattr(value, "device"):
+                        parts.append(f"device={value.device}")
+                    sample = f'{type(value).__name__}({", ".join(parts)})'
         elif isinstance(value, (int, float, bool)):
             sample = value
         elif isinstance(value, str):
