@@ -33,6 +33,9 @@ from typing import Any, Dict, Optional, Set
 # Shared tracer state (single instance per kernel)
 # ---------------------------------------------------------------------------
 
+# Max characters for sample string values. Override with TRICKLE_SAMPLE_LEN env var.
+SAMPLE_LEN = int(os.environ.get("TRICKLE_SAMPLE_LEN", "200"))
+
 _tv_cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
 _tv_sample_count: Dict[str, int] = {}  # per-line sample count
 _MAX_SAMPLES = 5
@@ -112,7 +115,7 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                 sample = value.item() if hasattr(value, "item") else float(value)
             else:
                 # Use lovely-tensors repr if available, otherwise our own compact format
-                s = str(value)[:200]
+                s = str(value)[:SAMPLE_LEN]
                 if s.startswith("tensor["):
                     sample = s
                 else:
@@ -123,7 +126,7 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         elif isinstance(value, (int, float, bool)):
             sample = value
         elif isinstance(value, str):
-            sample = value[:200]
+            sample = value[:SAMPLE_LEN]
         elif isinstance(value, (list, tuple)):
             # Serialize list/tuple elements so the VSCode renderer can show them expandably
             try:
@@ -145,9 +148,9 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                 if len(value) > 30:
                     sample.append(f"... ({len(value)} total)")
             except Exception:
-                sample = str(value)[:200]
+                sample = str(value)[:SAMPLE_LEN]
         else:
-            sample = str(value)[:200]
+            sample = str(value)[:SAMPLE_LEN]
 
         record: dict = {
             "kind": "variable",
@@ -675,7 +678,7 @@ def _build_sample(value: Any) -> Any:
     if isinstance(value, (int, float, bool)):
         return value
     if isinstance(value, str):
-        return value[:200]
+        return value[:SAMPLE_LEN]
     if isinstance(value, (list, tuple)):
         try:
             items = []
@@ -690,7 +693,7 @@ def _build_sample(value: Any) -> Any:
                 items.append(f"... ({len(value)} total)")
             return items
         except Exception:
-            return str(value)[:200]
+            return str(value)[:SAMPLE_LEN]
     if isinstance(value, dict):
         try:
             d = {}
@@ -702,10 +705,10 @@ def _build_sample(value: Any) -> Any:
                         d[k] = v[:80]
                     else:
                         d[k] = str(v)[:80]
-            return d if d else str(value)[:200]
+            return d if d else str(value)[:SAMPLE_LEN]
         except Exception:
-            return str(value)[:200]
-    return str(value)[:200]
+            return str(value)[:SAMPLE_LEN]
+    return str(value)[:SAMPLE_LEN]
 
 
 def _quick_type_and_sample(val: Any) -> tuple:
@@ -724,7 +727,7 @@ def _quick_type_and_sample(val: Any) -> tuple:
     if isinstance(val, float):
         return {"kind": "primitive", "name": "number"}, val
     if isinstance(val, str):
-        return {"kind": "primitive", "name": "string"}, val[:200]
+        return {"kind": "primitive", "name": "string"}, val[:SAMPLE_LEN]
 
     # Tensors/ndarrays: show shape without deep inference
     if hasattr(val, "shape") and hasattr(val, "dtype"):
@@ -777,10 +780,10 @@ def _quick_type_and_sample(val: Any) -> tuple:
                     d[k] = v[:80]
                 else:
                     d[k] = str(v)[:80]
-        return {"kind": "primitive", "name": t.__name__}, d if d else str(val)[:200]
+        return {"kind": "primitive", "name": t.__name__}, d if d else str(val)[:SAMPLE_LEN]
 
     # Fallback: just stringify
-    return {"kind": "primitive", "name": t.__name__}, str(val)[:200]
+    return {"kind": "primitive", "name": t.__name__}, str(val)[:SAMPLE_LEN]
 
 
 def _capture_error_snapshot(exc: BaseException) -> None:

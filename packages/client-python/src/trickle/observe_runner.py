@@ -344,6 +344,7 @@ def main() -> None:
 
 def _quick_type_sample(val):
     """Lightweight type + sample for error snapshots. No heavy imports."""
+    _SL = int(os.environ.get("TRICKLE_SAMPLE_LEN", "200"))
     import types as _types
     if isinstance(val, (type, _types.ModuleType, _types.FunctionType, _types.BuiltinFunctionType)):
         return None, None
@@ -354,7 +355,7 @@ def _quick_type_sample(val):
     if isinstance(val, float):
         return {"kind": "primitive", "name": "number"}, val
     if isinstance(val, str):
-        return {"kind": "primitive", "name": "string"}, val[:200]
+        return {"kind": "primitive", "name": "string"}, val[:_SL]
     if hasattr(val, "shape") and hasattr(val, "dtype"):
         shape = val.shape
         parts = [f"shape={list(shape)}", f"dtype={val.dtype}"]
@@ -399,8 +400,8 @@ def _quick_type_sample(val):
                     d[k] = v[:80]
                 else:
                     d[k] = str(v)[:80]
-        return {"kind": "primitive", "name": type(val).__name__}, d if d else str(val)[:200]
-    return {"kind": "primitive", "name": type(val).__name__}, str(val)[:200]
+        return {"kind": "primitive", "name": type(val).__name__}, d if d else str(val)[:_SL]
+    return {"kind": "primitive", "name": type(val).__name__}, str(val)[:_SL]
 
 
 def _write_error_snapshots(exc: BaseException) -> None:

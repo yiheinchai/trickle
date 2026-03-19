@@ -27,6 +27,8 @@ import os
 import sys
 from typing import Any, Dict, Optional, Set
 
+SAMPLE_LEN = int(os.environ.get("TRICKLE_SAMPLE_LEN", "200"))
+
 
 def _install_traceback_rewriter(tmp_path: str, original_path: str) -> None:
     """Install a sys.excepthook that rewrites temp file paths and line numbers.
@@ -245,7 +247,7 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
                 v = value.item() if hasattr(value, "item") else float(value)
                 return v
             if not hasattr(shape, '__len__') or len(shape) > 0:
-                s = str(value)[:200]
+                s = str(value)[:SAMPLE_LEN]
                 if s.startswith("tensor["):
                     return s
                 parts = [f"shape={list(shape)}", f"dtype={value.dtype}"]
@@ -548,6 +550,7 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "_trickle_tv_count = {}",
             "_trickle_tv_file = None",
             "_TRICKLE_MAX_SAMPLES = 5",
+            f"_TRICKLE_SAMPLE_LEN = int(_trickle_os.environ.get('TRICKLE_SAMPLE_LEN', '200'))",
             "import time as _trickle_time",
             "def _trickle_tv(_val, _name, _line, _func=None):",
             "    global _trickle_tv_file",
@@ -592,7 +595,7 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            if hasattr(_sh, '__len__') and len(_sh) == 0:",
             "                _s = _val.item() if hasattr(_val, 'item') else float(_val)",
             "            else:",
-            "                _ss = str(_val)[:200]",
+            "                _ss = str(_val)[:_TRICKLE_SAMPLE_LEN]",
             "                if _ss.startswith('tensor['):",
             "                    _s = _ss",
             "                else:",

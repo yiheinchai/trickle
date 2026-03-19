@@ -166,6 +166,7 @@ _trickle_tv_cache = {{}}
 _trickle_tv_count = {{}}
 _trickle_tv_file = None
 _TRICKLE_MAX_SAMPLES = 5
+_TRICKLE_SAMPLE_LEN = int(_trickle_os.environ.get('TRICKLE_SAMPLE_LEN', '200'))
 import time as _trickle_time
 def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
@@ -209,7 +210,7 @@ def _trickle_tv(_val, _name, _line, _func=None):
             if hasattr(_sh, '__len__') and len(_sh) == 0:
                 _s = _val.item() if hasattr(_val, 'item') else float(_val)
             else:
-                _ss = str(_val)[:200]
+                _ss = str(_val)[:_TRICKLE_SAMPLE_LEN]
                 if _ss.startswith('tensor['):
                     _s = _ss
                 else:

@@ -3833,11 +3833,15 @@ function formatSample(sample: unknown): string {
   if (sample === undefined) return 'undefined';
   if (sample === null) return 'null';
 
+  const config = vscode.workspace.getConfiguration('trickle');
+  const maxLen = config.get<number>('sampleLength', 200);
+  // Use 10x for hover tooltips (JSON formatted), maxLen for inline
+  const hoverMax = maxLen * 10;
+
   try {
     const str = JSON.stringify(sample, null, 2);
-    // Truncate long samples
-    if (str.length > 2000) {
-      return str.substring(0, 2000) + '\n// ... truncated';
+    if (str.length > hoverMax) {
+      return str.substring(0, hoverMax) + '\n// ... truncated';
     }
     return str;
   } catch {
