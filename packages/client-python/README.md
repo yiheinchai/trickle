@@ -94,14 +94,14 @@ trickle run pytest tests/
 
 ## What Gets Traced
 
-- **Tensor shapes** — PyTorch (shape, dtype, device, memory, gradient norms), NumPy, pandas
+- **Tensor shapes** — PyTorch (shape, dtype, device, memory, gradient norms), MLX (shape, dtype, memory), NumPy, pandas
 - **All variable assignments** — simple, for-loops, function parameters, tuple unpacking, with-as
 - **Imported modules** — your local modules are traced too, not just the entry file
 - **Error snapshots** — all variables at crash time, including list comprehension scopes
 
 ## Supported Frameworks
 
-- **ML**: PyTorch, NumPy, pandas, scikit-learn, HuggingFace
+- **ML**: PyTorch, MLX, NumPy, pandas, scikit-learn, HuggingFace
 - **Web**: FastAPI, Flask, Django, Litestar
 - **LLM**: OpenAI, Anthropic, Google Gemini, LangChain, CrewAI
 

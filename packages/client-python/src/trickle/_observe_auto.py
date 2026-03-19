@@ -62,6 +62,7 @@ def _should_observe(fullname: str) -> bool:
         "numpy", "pandas", "scipy", "sklearn", "matplotlib",
         "torch", "torchvision", "torchaudio", "transformers",
         "tensorflow", "tf", "keras", "jax", "flax",
+        "mlx", "sentencepiece",
         # Typing
         "typing", "typing_extensions",
         # Stdlib categories

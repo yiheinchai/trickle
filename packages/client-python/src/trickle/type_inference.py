@@ -23,7 +23,7 @@ def _type_nodes_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
         a_cn = a.get("class_name")
         b_cn = b.get("class_name")
         _DISPLAY_CLASSES = {"ndarray", "Tensor", "DataFrame", "Series",
-                            "DatasetDict", "Dataset"}
+                            "DatasetDict", "Dataset", "mlx.array"}
         if a_cn and a_cn == b_cn and a_cn in _DISPLAY_CLASSES:
             return True
         a_props = a.get("properties", {})
@@ -214,6 +214,32 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
             except Exception:
                 pass
         return {"kind": "object", "properties": props, "class_name": "Tensor"}
+
+    # --- MLX array ---
+    _mlx_type = _get_mlx_array_type()
+    if _mlx_type is not None and isinstance(value, _mlx_type):
+        props = {
+            "shape": {"kind": "primitive", "name": str(list(value.shape))},
+            "dtype": {"kind": "primitive", "name": str(value.dtype)},
+        }
+        try:
+            nbytes = value.nbytes
+            if nbytes >= 1_073_741_824:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_073_741_824:.1f} GB"}
+            elif nbytes >= 1_048_576:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_048_576:.1f} MB"}
+            elif nbytes >= 1024:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1024:.1f} KB"}
+            else:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes} B"}
+        except Exception:
+            pass
+        if value.size <= 1:
+            try:
+                props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
+            except Exception:
+                pass
+        return {"kind": "object", "properties": props, "class_name": "mlx.array"}
 
     # --- NumPy ndarray ---
     _ndarray_type = _get_numpy_ndarray_type()
@@ -1271,6 +1297,25 @@ def _infer_index(value: Any) -> Dict[str, Any]:
             pass
 
     return {"kind": "object", "properties": props, "class_name": class_name}
+
+
+_mlx_array_type: Any = None
+_mlx_checked = False
+
+
+def _get_mlx_array_type() -> Any:
+    """Lazily resolve mlx.core.array to avoid import overhead when MLX isn't used."""
+    global _mlx_array_type, _mlx_checked
+    if _mlx_checked:
+        return _mlx_array_type
+    try:
+        import sys
+        if 'mlx.core' in sys.modules:
+            _mlx_array_type = sys.modules['mlx.core'].array
+            _mlx_checked = True
+    except Exception:
+        pass
+    return _mlx_array_type
 
 
 _numpy_ndarray_type: Any = None

@@ -34,6 +34,16 @@ import random as _random
 _sample_rate: float = float(_os.environ.get("TRICKLE_SAMPLE_RATE", "1.0"))
 _production_mode: bool = _os.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")
 
+# Per-function call counter for cooldown — after a function has been fully
+# observed and its type hash cached, skip expensive inference on subsequent
+# calls until the cache staleness window re-opens.
+# Maps function_key -> call count since last emit
+_fn_call_counts: dict[str, int] = {}
+# How many calls to skip between re-checking (grows exponentially)
+_fn_skip_until: dict[str, int] = {}
+_COOLDOWN_INITIAL = 8       # start skipping after 8 observations
+_COOLDOWN_MAX = 10_000      # max calls between re-checks
+
 
 def _get_environment() -> str:
     global _environment
@@ -136,6 +146,29 @@ def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kw
             raise
     _call_depth.value = depth + 1
     call_id = trace_call(func_name, func_module)
+
+    # Cooldown: skip expensive inference for hot functions already observed
+    function_key = f"{func_module}.{func_name}"
+    count = _fn_call_counts.get(function_key, 0)
+    skip_until = _fn_skip_until.get(function_key, _COOLDOWN_INITIAL)
+    if count > 0 and count < skip_until:
+        _fn_call_counts[function_key] = count + 1
+        start = time.perf_counter()
+        try:
+            result = fn(*args, **kwargs)
+            trace_return(call_id, func_name, func_module, (time.perf_counter() - start) * 1000)
+            return result
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            # Always capture errors even during cooldown
+            _fn_call_counts[function_key] = 0  # reset cooldown on error
+            all_paths_fns_empty: list = []
+            _emit(fn, func_name, func_module, args, kwargs, None, all_paths_fns_empty, exc, is_async=False, duration_ms=duration_ms)
+            trace_return(call_id, func_name, func_module, duration_ms, str(exc)[:200])
+            raise
+        finally:
+            _call_depth.value = depth
+
     try:
         tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
 
@@ -147,13 +180,22 @@ def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kw
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             error_exc = exc
+            _fn_call_counts[function_key] = 0  # reset on error
             _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False, duration_ms=duration_ms)
             trace_return(call_id, func_name, func_module, duration_ms, str(exc)[:200])
             raise
         else:
             duration_ms = (time.perf_counter() - start) * 1000
-            _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False, duration_ms=duration_ms)
+            sent = _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False, duration_ms=duration_ms)
             trace_return(call_id, func_name, func_module, duration_ms)
+            if not sent:
+                # Cache hit — this type signature was already observed.
+                # Start cooldown to skip expensive inference on subsequent calls.
+                _fn_call_counts[function_key] = 1
+                _fn_skip_until[function_key] = min(skip_until * 2, _COOLDOWN_MAX)
+            else:
+                # New observation sent — reset cooldown so we keep checking
+                _fn_call_counts[function_key] = 0
         return result
     finally:
         _call_depth.value = depth
@@ -476,8 +518,12 @@ def _emit(
     error_exc: Optional[Exception],
     is_async: bool = False,
     duration_ms: Optional[float] = None,
-) -> None:
-    """Build and enqueue an ingest payload.  Never raises."""
+) -> bool:
+    """Build and enqueue an ingest payload.  Never raises.
+
+    Returns True if the payload was actually sent (new observation),
+    False if it was a cache hit (duplicate suppressed).
+    """
     try:
         import traceback
 
@@ -530,7 +576,7 @@ def _emit(
 
         # For errors, always send. For happy path, check cache.
         if error_exc is None and not _cache.should_send(function_key, type_hash_val):
-            return
+            return False
 
         # Build sample input matching the argsType element order
         if param_names and original_kwargs:
@@ -579,7 +625,9 @@ def _emit(
 
         _cache.mark_sent(function_key, type_hash_val)
         enqueue(payload)
+        return True
 
     except Exception:
         # NEVER crash the user's application
         logger.debug("trickle: failed to emit payload", exc_info=True)
+        return False
