@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import { spawn, execSync, ChildProcess } from "child_process";
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
@@ -1366,10 +1367,10 @@ function injectObservation(
 }
 
 /**
- * Ensure the target Python can import trickle by adding the trickle package's
- * site-packages to PYTHONPATH. This handles the case where the user runs a venv
- * Python that doesn't have trickle-observe installed — we find it from the system
- * Python (or any Python that has it) and inject the path.
+ * Ensure the target Python can import trickle by creating an isolated temp
+ * directory with a symlink to just the trickle package and adding it to PYTHONPATH.
+ * This avoids polluting the target Python with the entire system site-packages,
+ * which would cause binary incompatibilities across Python versions.
  */
 function ensureTricklePythonPath(
   targetPython: string,
@@ -1390,13 +1391,19 @@ function ensureTricklePythonPath(
   const candidates = ["python3", "python", "python3.11", "python3.12", "python3.13", "python3.10"];
   for (const py of candidates) {
     try {
-      const sitePath = execSync(
-        `${py} -c "import trickle, os; print(os.path.dirname(os.path.dirname(trickle.__file__)))"`,
+      // Get the trickle package directory (e.g. /opt/anaconda3/.../site-packages/trickle)
+      const trickleDir = execSync(
+        `${py} -c "import trickle, os; print(os.path.dirname(trickle.__file__))"`,
         { encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
       ).trim();
-      if (sitePath) {
+      if (trickleDir && fs.existsSync(trickleDir)) {
+        // Create a temp directory with just a symlink to the trickle package.
+        // This ensures only trickle (pure Python) is visible, not incompatible
+        // binary packages from a different Python version's site-packages.
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "trickle-pypath-"));
+        fs.symlinkSync(trickleDir, path.join(tmpDir, "trickle"));
         const existing = env.PYTHONPATH || process.env.PYTHONPATH || "";
-        env.PYTHONPATH = existing ? `${sitePath}:${existing}` : sitePath;
+        env.PYTHONPATH = existing ? `${tmpDir}:${existing}` : tmpDir;
         return;
       }
     } catch {
