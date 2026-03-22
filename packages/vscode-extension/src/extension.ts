@@ -85,15 +85,21 @@ function findAllTrickleDirs(rootDir: string): string[] {
  */
 function findAllVariablesJsonlPaths(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) return [];
   const paths: string[] = [];
-  for (const folder of workspaceFolders) {
+  for (const folder of (workspaceFolders || [])) {
     const trickleDirs = findAllTrickleDirs(folder.uri.fsPath);
     for (const td of trickleDirs) {
       const jsonlPath = path.join(td, 'variables.jsonl');
       if (fs.existsSync(jsonlPath)) {
         paths.push(jsonlPath);
       }
+    }
+  }
+  // Also include .trickle dirs outside the workspace (e.g. subrepos, sibling projects)
+  for (const td of extraTrickleDirs) {
+    const jsonlPath = path.join(td, 'variables.jsonl');
+    if (fs.existsSync(jsonlPath) && !paths.includes(jsonlPath)) {
+      paths.push(jsonlPath);
     }
   }
   return paths;
@@ -105,15 +111,21 @@ function findAllVariablesJsonlPaths(): string[] {
  */
 function findAllErrorsJsonlPaths(): string[] {
   const workspaceFolders = vscode.workspace.workspaceFolders;
-  if (!workspaceFolders) return [];
   const paths: string[] = [];
-  for (const folder of workspaceFolders) {
+  for (const folder of (workspaceFolders || [])) {
     const trickleDirs = findAllTrickleDirs(folder.uri.fsPath);
     for (const td of trickleDirs) {
       const errorsPath = path.join(td, 'errors.jsonl');
       if (fs.existsSync(errorsPath)) {
         paths.push(errorsPath);
       }
+    }
+  }
+  // Also include .trickle dirs outside the workspace
+  for (const td of extraTrickleDirs) {
+    const errorsPath = path.join(td, 'errors.jsonl');
+    if (fs.existsSync(errorsPath) && !paths.includes(errorsPath)) {
+      paths.push(errorsPath);
     }
   }
   return paths;
@@ -436,6 +448,8 @@ let errorSnapshotIndex: Map<string, Map<number, VariableObservation[]>> = new Ma
 let lastErrorMessage: string | undefined;
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let errorFileWatcher: vscode.FileSystemWatcher | undefined;
+/** .trickle dirs discovered outside all workspace folders (e.g. files in a sibling/subrepo) */
+const extraTrickleDirs = new Set<string>();
 let statusBarItem: vscode.StatusBarItem;
 let modeStatusBarItem: vscode.StatusBarItem;
 let inlineHintsProvider: vscode.Disposable | undefined;
@@ -735,6 +749,29 @@ export function activate(context: vscode.ExtensionContext) {
       context.subscriptions.push(alertWatcher);
     }
   }
+
+  // Watch .trickle dirs for files opened outside workspace folders (subrepo support)
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      if (!editor || editor.document.uri.scheme !== 'file') return;
+      const fileDir = path.dirname(editor.document.uri.fsPath);
+      const trickleDir = findNearestTrickleDirCached(fileDir);
+      if (!trickleDir) return;
+      const workspaceFolders = vscode.workspace.workspaceFolders || [];
+      const isInWorkspace = workspaceFolders.some(f => trickleDir.startsWith(f.uri.fsPath));
+      if (isInWorkspace || extraTrickleDirs.has(trickleDir)) return;
+      extraTrickleDirs.add(trickleDir);
+      loadAllVariables();
+      const w = vscode.workspace.createFileSystemWatcher(path.join(trickleDir, 'variables.jsonl'));
+      w.onDidChange(() => { clearTrickleDirCache(); setTimeout(() => loadAllVariables(), 300); });
+      w.onDidCreate(() => { clearTrickleDirCache(); setTimeout(() => loadAllVariables(), 300); });
+      context.subscriptions.push(w);
+      const ew = vscode.workspace.createFileSystemWatcher(path.join(trickleDir, 'errors.jsonl'));
+      ew.onDidChange(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300); });
+      ew.onDidCreate(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300); });
+      context.subscriptions.push(ew);
+    })
+  );
 
   // Watch for source file edits — shift hint line numbers and invalidate edited lines
   context.subscriptions.push(

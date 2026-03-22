@@ -2,7 +2,7 @@
   "name": "trickle-vscode",
   "displayName": "Trickle - Runtime Variable Inspector",
   "description": "Hover over any variable to see its runtime type, tensor shape, and sample value captured by trickle",
-  "version": "0.1.84",
+  "version": "0.1.85",
   "publisher": "yiheinchai",
   "engines": {
     "vscode": "^1.80.0"
