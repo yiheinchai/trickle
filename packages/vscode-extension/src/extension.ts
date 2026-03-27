@@ -1581,12 +1581,17 @@ function findBestMatchingCell(cellText: string): Map<number, VariableObservation
   return findBestMatchingCellIn(cellText, notebookCellIndex);
 }
 
-/** Generic version: search any cell index for the best content match. */
+/** Generic version: search any cell index for the best content match.
+ * Uses ratio-based scoring (matched / total) so an entry where all variables
+ * match is preferred over one where only a few out of many match.
+ * Requires at least 50% of variables to match to avoid false positives
+ * from common variable names (e.g. `x`, `i`) appearing in unrelated cells. */
 function findBestMatchingCellIn(
   cellText: string,
   index: Map<string, Map<number, VariableObservation[]>>,
 ): Map<number, VariableObservation[]> | undefined {
   let bestMatch: Map<number, VariableObservation[]> | undefined;
+  let bestRatio = 0;
   let bestScore = 0;
   let bestCellNum = -1;
 
@@ -1596,6 +1601,8 @@ function findBestMatchingCellIn(
     for (const obsArr of lineMap.values()) {
       for (const obs of obsArr) {
         total++;
+        // Skip special names like <return> that won't appear literally in source
+        if (obs.varName.startsWith('<')) continue;
         const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
         if (varPattern.test(cellText)) {
           score++;
@@ -1603,18 +1610,25 @@ function findBestMatchingCellIn(
       }
     }
 
+    const ratio = total > 0 ? score / total : 0;
+
     // Extract cell number from key for tie-breaking (prefer most recent)
     const cellNumMatch = key.match(/cell_(\d+)/);
     const cellNum = cellNumMatch ? parseInt(cellNumMatch[1], 10) : 0;
 
-    if (total > 0 && (score > bestScore || (score === bestScore && cellNum > bestCellNum))) {
+    // Prefer higher ratio; on tie, prefer higher absolute score; then most recent cell
+    if (ratio > bestRatio ||
+        (ratio === bestRatio && score > bestScore) ||
+        (ratio === bestRatio && score === bestScore && cellNum > bestCellNum)) {
+      bestRatio = ratio;
       bestScore = score;
       bestMatch = lineMap;
       bestCellNum = cellNum;
     }
   }
 
-  if (bestMatch && bestScore > 0) return bestMatch;
+  // Require at least 50% of variables to match to avoid cross-cell contamination
+  if (bestMatch && bestRatio >= 0.5) return bestMatch;
   return undefined;
 }
 
@@ -3006,13 +3020,10 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
     if (document.uri.scheme === 'file') {
       snapLineMap = errorSnapshotIndex.get(document.uri.fsPath);
     } else if (document.uri.scheme === 'vscode-notebook-cell') {
-      // For notebooks, try content matching first, then fall back to
-      // using the single entry (common case: one error at a time)
+      // For notebooks, use content matching to find the right cell entry.
+      // Don't fall back to applying error snapshots to unrelated cells.
       const cellText = document.getText();
       snapLineMap = findBestMatchingCellIn(cellText, errorSnapshotIndex);
-      if (!snapLineMap && errorSnapshotIndex.size === 1) {
-        snapLineMap = errorSnapshotIndex.values().next().value;
-      }
     }
 
     if (!snapLineMap) return hints;
