@@ -169,7 +169,35 @@ interface TypeNode {
   properties?: Record<string, TypeNode>;
   resolved?: TypeNode;
   key?: TypeNode;
-  value?: TypeNode;
+  /** Map value type, or a captured literal's JS/JSON value. */
+  value?: TypeNode | unknown;
+  /** Inner type for `optional` / wrapped nodes. */
+  type?: TypeNode;
+  params?: TypeNode[] | Record<string, TypeNode>;
+  returnType?: TypeNode;
+}
+
+function isTypeNode(v: unknown): v is TypeNode {
+  return !!v && typeof v === 'object' && typeof (v as TypeNode).kind === 'string';
+}
+
+/** Format a captured literal TypeNode value (`"alice"`, `42`, `True`). */
+function formatLiteralValue(value: unknown, python: boolean = true): string {
+  if (value === null) return python ? 'None' : 'null';
+  if (value === undefined) return python ? 'None' : 'undefined';
+  if (typeof value === 'boolean') return python ? (value ? 'True' : 'False') : String(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return python ? 'float' : 'number';
+    return String(value);
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (isTypeNode(value)) return typeNodeToString(value, 3);
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /** Index: filePath -> Map<lineNumber, observation[]> */
@@ -1252,6 +1280,12 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             }
           }
 
+          // Captured literal types (`"alice"`, `42`) — same inline sample treatment
+          if (obs.type.kind === 'literal' && obs.sample !== undefined && obs.sample !== null) {
+            const scalar = formatScalarSample(obs.sample);
+            if (scalar) typeStr = scalar;
+          }
+
           // For class instances with a config, sample is a constructor-call string like
           // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
           if (obs.type.kind === 'object' && obs.type.class_name &&
@@ -1468,6 +1502,10 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
               typeStr = `"${obs.sample}"`;
             }
           }
+          if (obs.type.kind === 'literal' && obs.sample !== undefined && obs.sample !== null) {
+            const scalar = formatScalarSample(obs.sample);
+            if (scalar) typeStr = scalar;
+          }
           if (obs.type.kind === 'object' && obs.type.class_name &&
               typeof obs.sample === 'string' &&
               obs.sample.startsWith(obs.type.class_name + '(') &&
@@ -1621,6 +1659,15 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
   switch (node.kind) {
     case 'primitive':
       return node.name || 'unknown';
+
+    case 'literal':
+      return formatLiteralValue(node.value);
+
+    case 'optional':
+      if (node.type) {
+        return `${typeNodeToString(node.type, depth - 1, dimLabels)} | None`;
+      }
+      return 'None';
 
     case 'array':
       if (node.element) {
@@ -1825,7 +1872,7 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
 
     case 'map': {
       const keyType = node.key ? typeNodeToString(node.key, depth - 1) : 'string';
-      const valType = node.value ? typeNodeToString(node.value, depth - 1) : 'Any';
+      const valType = isTypeNode(node.value) ? typeNodeToString(node.value, depth - 1) : 'Any';
       return `dict[${keyType}, ${valType}]`;
     }
 
@@ -2135,6 +2182,9 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
     case 'primitive':
       return node.name || 'unknown';
 
+    case 'literal':
+      return typeNodeToString(node, 3, dimLabels);
+
     case 'array': {
       if (!node.element) return 'unknown[]';
       const inner = node.element;
@@ -2186,7 +2236,7 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
 
     case 'map': {
       const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
-      const valNode = node.value;
+      const valNode = isTypeNode(node.value) ? node.value : undefined;
       if (valNode && valNode.kind === 'object' && valNode.properties && Object.keys(valNode.properties).length > 2) {
         const valStr = typeNodeToPretty(valNode, indent + 1, dimLabels);
         return `dict[${keyType}, ${valStr}]`;
