@@ -6,50 +6,23 @@ import dataclasses
 import datetime
 import enum
 import inspect
+import math
 import warnings
 from typing import Any, Dict, Set
+
+from .type_ops import DISPLAY_CLASSES, types_equal, unify_all
+
+
+_LITERAL_INT_BOUND = 10_000
+_LITERAL_STR_MAX = 64
+_TUPLE_LIST_MAX = 16
+_MAP_KEY_THRESHOLD = 30
+_ARRAY_SAMPLE = 20
 
 
 def _type_nodes_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     """Check if two TypeNode dicts are structurally equivalent."""
-    if a.get("kind") != b.get("kind"):
-        return False
-    kind = a.get("kind")
-    if kind == "primitive":
-        return a.get("name") == b.get("name")
-    if kind == "object":
-        # Display-only types: metadata varies per instance but the
-        # structural type is the same (e.g. all ndarrays are "ndarray").
-        a_cn = a.get("class_name")
-        b_cn = b.get("class_name")
-        _DISPLAY_CLASSES = {"ndarray", "Tensor", "DataFrame", "Series",
-                            "DatasetDict", "Dataset", "mlx.array"}
-        if a_cn and a_cn == b_cn and a_cn in _DISPLAY_CLASSES:
-            return True
-        a_props = a.get("properties", {})
-        b_props = b.get("properties", {})
-        if set(a_props) != set(b_props):
-            return False
-        return all(_type_nodes_equal(a_props[k], b_props[k]) for k in a_props)
-    if kind in ("array", "set"):
-        return _type_nodes_equal(a.get("element", {}), b.get("element", {}))
-    if kind == "tuple":
-        a_els = a.get("elements", [])
-        b_els = b.get("elements", [])
-        if len(a_els) != len(b_els):
-            return False
-        return all(_type_nodes_equal(x, y) for x, y in zip(a_els, b_els))
-    if kind == "union":
-        a_m = a.get("members", [])
-        b_m = b.get("members", [])
-        if len(a_m) != len(b_m):
-            return False
-        return all(_type_nodes_equal(x, y) for x, y in zip(a_m, b_m))
-    if kind == "map":
-        return (_type_nodes_equal(a.get("key", {}), b.get("key", {}))
-                and _type_nodes_equal(a.get("value", {}), b.get("value", {})))
-    # For unknown kinds, fall back to dict equality
-    return a == b
+    return types_equal(a, b)
 
 
 def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) -> Dict[str, Any]:
@@ -79,22 +52,6 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
     if max_depth <= 0:
         return {"kind": "primitive", "name": "unknown"}
 
-    # Unwrap TrackedObject and proxy objects to get the actual object
-    try:
-        from trickle.attr_tracker import TrackedObject
-        if isinstance(value, TrackedObject):
-            value = object.__getattribute__(value, "_inner")
-    except Exception:
-        pass
-    try:
-        from trickle.db_observer import _TracedSqliteConnection, _TracedSqliteCursor
-        if isinstance(value, _TracedSqliteConnection):
-            value = object.__getattribute__(value, "_conn")
-        elif isinstance(value, _TracedSqliteCursor):
-            value = object.__getattribute__(value, "_cursor")
-    except Exception:
-        pass
-
     if _seen is None:
         _seen = set()
 
@@ -109,18 +66,28 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
 
     # --- bool (MUST come before int — bool is a subclass of int) ---
     if isinstance(value, bool):
-        return {"kind": "primitive", "name": "boolean"}
+        return {"kind": "literal", "value": value}
+
+    # --- Enum (before int: IntEnum is a subclass of int) ---
+    if isinstance(value, enum.Enum):
+        return _infer_enum(value)
 
     # --- int ---
     if isinstance(value, int):
+        if abs(value) < _LITERAL_INT_BOUND:
+            return {"kind": "literal", "value": value}
         return {"kind": "primitive", "name": "integer"}
 
     # --- float ---
     if isinstance(value, float):
+        if math.isfinite(value) and len(repr(value)) <= 16:
+            return {"kind": "literal", "value": value}
         return {"kind": "primitive", "name": "number"}
 
     # --- str ---
     if isinstance(value, str):
+        if len(value) <= _LITERAL_STR_MAX:
+            return {"kind": "literal", "value": value}
         return {"kind": "primitive", "name": "string"}
 
     # --- bytes / bytearray ---
@@ -134,10 +101,6 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
         return {"kind": "primitive", "name": "date"}
     if isinstance(value, datetime.time):
         return {"kind": "primitive", "name": "time"}
-
-    # --- Enum ---
-    if isinstance(value, enum.Enum):
-        return {"kind": "primitive", "name": "string"}
 
     # --- PyTorch Tensor ---
     _tensor_type = _get_torch_tensor_type()
@@ -369,23 +332,26 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
 
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
-        name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
-        return {"kind": "function", "name": name}
+        return _infer_function(value)
 
     # -- From here on, structures may be recursive, so register id --
     _seen = _seen | {obj_id}  # copy so siblings don't interfere
 
     # --- list ---
     if isinstance(value, list):
-        sample = value[:20]
-        element_type = _unify_element_types(sample, max_depth - 1, _seen)
-        # For small heterogeneous lists (like asyncio.gather() results), show per-element
-        # types as a positional tuple rather than array[union(...)]. This converts
-        # `array[union(int, str, list[int])]` → `list[int, str, list[int]]`.
-        if element_type.get("kind") == "union" and len(sample) <= 12:
-            elements = [_infer_type_inner(el, max_depth - 1, _seen) for el in sample]
-            return {"kind": "tuple", "elements": elements, "class_name": "list"}
-        return {"kind": "array", "element": element_type}
+        if not value:
+            return {"kind": "array", "element": {"kind": "primitive", "name": "unknown"}}
+        sample = value[:_ARRAY_SAMPLE]
+        element_types = [_infer_type_inner(el, max_depth - 1, _seen) for el in sample]
+        # Small heterogeneous lists look like positional tuples: [1, "a"] → tuple.
+        # Homogeneous / unifiable objects stay as array[unify(elements)].
+        if (
+            len(value) <= _TUPLE_LIST_MAX
+            and len(value) == len(sample)
+            and _looks_like_tuple(element_types)
+        ):
+            return {"kind": "tuple", "elements": element_types, "class_name": "list"}
+        return {"kind": "array", "element": unify_all(element_types)}
 
     # --- tuple ---
     if isinstance(value, tuple):
@@ -406,28 +372,27 @@ def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = N
 
     # --- dict ---
     if isinstance(value, dict):
-        props = {}
-        for k, v in value.items():
-            props[str(k)] = _infer_type_inner(v, max_depth - 1, _seen)
+        keys = list(value.keys())
+        str_keys = all(isinstance(k, str) for k in keys)
+        # Non-string keys, or widely varying string keys → map
+        if (not str_keys) or len(value) > _MAP_KEY_THRESHOLD:
+            sample_items = list(value.items())[:_ARRAY_SAMPLE]
+            key_types = [_infer_type_inner(k, max_depth - 1, _seen) for k, _ in sample_items]
+            val_types = [_infer_type_inner(v, max_depth - 1, _seen) for _, v in sample_items]
+            return {
+                "kind": "map",
+                "key": unify_all(key_types) if key_types else {"kind": "primitive", "name": "unknown"},
+                "value": unify_all(val_types) if val_types else {"kind": "primitive", "name": "unknown"},
+            }
 
-        # Large dicts with uniform value types → Dict[str, V] (map)
-        # instead of a named-property object that would generate hundreds
-        # of identical TypedDict classes.
-        _MAP_THRESHOLD = 8
-        if (
-            len(props) > _MAP_THRESHOLD
-            and all(isinstance(k, str) for k in value)
-        ):
-            val_types = list(props.values())
-            # Structural equality: compare the canonical JSON-like dict
-            first = val_types[0]
-            if all(_type_nodes_equal(v, first) for v in val_types[1:]):
-                return {"kind": "map", "key": {"kind": "primitive", "name": "string"}, "value": first}
+        props: Dict[str, Any] = {}
+        for k, v in value.items():
+            props[k] = _infer_type_inner(v, max_depth - 1, _seen)
 
         result: Dict[str, Any] = {"kind": "object", "properties": props}
         # For small dicts with string keys, set class_name so the renderer
         # can display inline values as {key: value} instead of {key: type}
-        if len(value) <= 20 and all(isinstance(k, str) for k in value):
+        if len(value) <= 20:
             result["class_name"] = "dict"
         return result
 
@@ -594,16 +559,19 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
             pass
 
     # If the module has a `config` attribute, surface its primitive fields first.
-    # This is the ML convention (GPT, BERT, T5, HuggingFace, etc.)
     try:
         config = getattr(value, "config", None)
         if config is not None and not isinstance(config, (int, float, bool, str, type)):
-            from trickle._auto_var_tracer import _extract_config_fields
-            config_fields = _extract_config_fields(config)
-            # Insert config fields at the top of props (they're the most informative)
+            raw = getattr(config, "__dict__", {}) or {}
+            if hasattr(config, "to_dict"):
+                try:
+                    raw = config.to_dict() or raw
+                except Exception:
+                    pass
             new_props: Dict[str, Any] = {}
-            for fname, val in list(config_fields.items())[:8]:
-                new_props[fname] = {"kind": "primitive", "name": str(val)}
+            for fname, val in list(raw.items())[:8]:
+                if isinstance(fname, str) and not fname.startswith("_") and isinstance(val, (int, float, bool, str)):
+                    new_props[fname] = {"kind": "primitive", "name": str(val)}
             new_props.update(props)
             props = new_props
     except Exception:
@@ -1388,10 +1356,15 @@ def _infer_hf_pretrained_config(value: Any) -> Dict[str, Any]:
     class_name = type(value).__name__
     props: Dict[str, Any] = {}
     try:
-        from trickle._auto_var_tracer import _extract_config_fields
-        fields = _extract_config_fields(value)
-        for fname, val in list(fields.items())[:10]:
-            props[fname] = {"kind": "primitive", "name": str(val)}
+        raw = getattr(value, "__dict__", {}) or {}
+        if hasattr(value, "to_dict"):
+            try:
+                raw = value.to_dict() or raw
+            except Exception:
+                pass
+        for fname, val in list(raw.items())[:10]:
+            if isinstance(fname, str) and not fname.startswith("_") and isinstance(val, (int, float, bool, str)):
+                props[fname] = {"kind": "primitive", "name": str(val)}
     except Exception:
         pass
     return {"kind": "object", "properties": props, "class_name": class_name}
@@ -1492,28 +1465,126 @@ def _infer_hf_dataset_dict(value: Any) -> Dict[str, Any]:
 def _unify_element_types(elements: list, max_depth: int, _seen: Set[int]) -> Dict[str, Any]:
     """Infer the unified type for a collection of elements.
 
-    If all elements share the same type node, return that single type.
-    Otherwise return a union of the distinct types.
+    Delegates to type_ops.unify so compatible objects merge (optional missing
+    keys, literal widening) instead of becoming a unique-repr union.
     """
     if not elements:
         return {"kind": "primitive", "name": "unknown"}
 
-    types: list[Dict[str, Any]] = []
-    seen_reprs: set[str] = set()
-    for el in elements:
-        t = _infer_type_inner(el, max_depth, _seen)
-        # Deduplicate by repr (cheap canonical form)
-        r = _stable_repr(t)
-        if r not in seen_reprs:
-            seen_reprs.add(r)
-            types.append(t)
-
-    if len(types) == 1:
-        return types[0]
-    return {"kind": "union", "members": types}
+    types = [_infer_type_inner(el, max_depth, _seen) for el in elements]
+    return unify_all(types)
 
 
 def _stable_repr(node: Dict[str, Any]) -> str:
     """Produce a deterministic string for a type node (for dedup only)."""
     import json
     return json.dumps(node, sort_keys=True)
+
+
+def _infer_enum(value: enum.Enum) -> Dict[str, Any]:
+    """Capture an enum instance as `{kind: enum, name, members}`."""
+    cls = type(value)
+    members: Dict[str, Any] = {}
+    try:
+        for member in cls:
+            members[member.name] = _enum_value_node(member.value)
+    except Exception:
+        members[value.name] = _enum_value_node(getattr(value, "value", value.name))
+    return {"kind": "enum", "name": cls.__name__, "members": members}
+
+
+def _enum_value_node(val: Any) -> Dict[str, Any]:
+    if val is None:
+        return {"kind": "primitive", "name": "null"}
+    if isinstance(val, bool):
+        return {"kind": "literal", "value": val}
+    if isinstance(val, int):
+        if abs(val) < _LITERAL_INT_BOUND:
+            return {"kind": "literal", "value": val}
+        return {"kind": "primitive", "name": "integer"}
+    if isinstance(val, float):
+        if math.isfinite(val) and len(repr(val)) <= 16:
+            return {"kind": "literal", "value": val}
+        return {"kind": "primitive", "name": "number"}
+    if isinstance(val, str):
+        if len(val) <= _LITERAL_STR_MAX:
+            return {"kind": "literal", "value": val}
+        return {"kind": "primitive", "name": "string"}
+    return {"kind": "primitive", "name": type(val).__name__}
+
+
+def _infer_function(value: Any) -> Dict[str, Any]:
+    """Capture a callable as `{kind: function, params, returnType}`."""
+    name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
+    params: list[Dict[str, Any]] = []
+    unknown = {"kind": "primitive", "name": "unknown"}
+    try:
+        sig = inspect.signature(value)
+        for p in sig.parameters.values():
+            if p.kind is inspect.Parameter.VAR_KEYWORD:
+                continue
+            params.append(dict(unknown))
+    except Exception:
+        try:
+            code = getattr(value, "__code__", None)
+            if code is not None:
+                params = [dict(unknown)] * int(code.co_argcount)
+        except Exception:
+            params = []
+    return {
+        "kind": "function",
+        "name": name,
+        "params": params,
+        "returnType": dict(unknown),
+    }
+
+
+def _looks_like_tuple(element_types: list[Dict[str, Any]]) -> bool:
+    """True when mixed types at fixed positions should stay positional.
+
+    Homogeneous primitives (including distinct literals of the same base) and
+    compatible objects (which unify into one object) stay as arrays.
+    """
+    if len(element_types) < 2:
+        return False
+    tags = [_base_tag(t) for t in element_types]
+    if len(set(tags)) <= 1:
+        return False
+    unified = unify_all(element_types)
+    if unified.get("kind") == "object":
+        return False
+    if unified.get("kind") != "union":
+        return False
+    return True
+
+
+def _base_tag(node: Dict[str, Any]) -> tuple:
+    """Coarse kind tag used to decide array vs positional tuple."""
+    kind = node.get("kind")
+    if kind == "literal":
+        value = node.get("value")
+        if isinstance(value, bool):
+            return ("primitive", "boolean")
+        if isinstance(value, int):
+            return ("primitive", "integer")
+        if isinstance(value, float):
+            return ("primitive", "number")
+        if isinstance(value, str):
+            return ("primitive", "string")
+        if value is None:
+            return ("primitive", "null")
+        return ("literal", type(value).__name__)
+    if kind == "primitive":
+        return ("primitive", node.get("name"))
+    if kind == "optional":
+        return _base_tag(node.get("type") or {})
+    if kind == "object":
+        cn = node.get("class_name")
+        if cn in DISPLAY_CLASSES:
+            return ("display", cn)
+        return ("object",)
+    if kind == "enum":
+        return ("enum", node.get("name"))
+    if kind == "null":
+        return ("primitive", "null")
+    return (kind,)

@@ -1,53 +1,35 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { spawn, execSync, ChildProcess } from "child_process";
+import { spawn, execSync } from "child_process";
 import chalk from "chalk";
-import { getBackendUrl } from "../config";
-import {
-  listFunctions,
-  listErrors,
-  fetchAnnotations,
-  fetchStubs,
-  FunctionRow,
-  ErrorRow,
-  AnnotationEntry,
-} from "../api-client";
-import { writeRunSummary } from "./summary";
 
 export interface RunOptions {
   module?: string;
   include?: string;
   exclude?: string;
-  stubs?: string;
-  annotate?: string;
   watch?: boolean;
 }
 
 // ── Auto-detect entry point ──
 
 function autoDetectEntryPoint(): string | null {
-  // Check package.json for start script or main field
   const pkgPath = path.resolve("package.json");
   if (fs.existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
-      // Try scripts.start (most common)
       if (pkg.scripts?.start && !pkg.scripts.start.includes("trickle")) {
-        // Extract the actual command from "node app.js" or "ts-node src/index.ts"
         const startCmd = pkg.scripts.start;
         if (startCmd.includes("node ") || startCmd.includes("ts-node ") || startCmd.includes("tsx ") || startCmd.includes("python ")) {
           return startCmd;
         }
       }
-      // Try main field
       if (pkg.main && fs.existsSync(path.resolve(pkg.main))) {
         return `node ${pkg.main}`;
       }
     } catch {}
   }
 
-  // Check for common entry files
   const candidates = [
     "app.js", "app.ts", "index.js", "index.ts", "server.js", "server.ts",
     "src/index.js", "src/index.ts", "src/app.js", "src/app.ts", "src/server.js", "src/server.ts",
@@ -55,11 +37,10 @@ function autoDetectEntryPoint(): string | null {
   ];
   for (const candidate of candidates) {
     if (fs.existsSync(path.resolve(candidate))) {
-      return candidate; // autoDetectCommand will add the runtime
+      return candidate;
     }
   }
 
-  // Check for pyproject.toml (Python project)
   if (fs.existsSync(path.resolve("pyproject.toml"))) {
     if (fs.existsSync(path.resolve("app.py"))) return "python app.py";
     if (fs.existsSync(path.resolve("main.py"))) return "python main.py";
@@ -71,8 +52,6 @@ function autoDetectEntryPoint(): string | null {
 // ── .tricklerc.json config ──
 
 interface TrickleConfig {
-  stubs?: string;
-  annotate?: string | string[];
   include?: string | string[];
   exclude?: string | string[];
 }
@@ -89,7 +68,6 @@ function loadProjectConfig(): TrickleConfig | null {
       }
     }
   }
-  // Also check package.json "trickle" field
   const pkgPath = path.resolve("package.json");
   if (fs.existsSync(pkgPath)) {
     try {
@@ -108,16 +86,6 @@ function mergeConfigWithOpts(opts: RunOptions, config: TrickleConfig | null): Ru
   if (!config) return opts;
   const merged = { ...opts };
 
-  // CLI flags override config
-  if (!merged.stubs && config.stubs) {
-    merged.stubs = config.stubs;
-  }
-  if (!merged.annotate && config.annotate) {
-    // If array, join first item (run --annotate takes a single path)
-    merged.annotate = Array.isArray(config.annotate)
-      ? config.annotate[0]
-      : config.annotate;
-  }
   if (!merged.include && config.include) {
     merged.include = Array.isArray(config.include)
       ? config.include.join(",")
@@ -131,60 +99,34 @@ function mergeConfigWithOpts(opts: RunOptions, config: TrickleConfig | null): Ru
   return merged;
 }
 
-// ── Detect if command is a single source file ──
-
-function detectSingleFile(command: string): string | null {
-  const sourceExts = [".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".py"];
-  const tokens = command.trim().split(/\s+/);
-
-  // Find the first token that looks like a source file (has a known extension and exists)
-  for (const token of tokens) {
-    // Skip flags
-    if (token.startsWith("-")) continue;
-    const ext = path.extname(token).toLowerCase();
-    if (!sourceExts.includes(ext)) continue;
-    const resolved = path.resolve(token);
-    if (fs.existsSync(resolved)) return resolved;
-  }
-
-  return null;
-}
-
 // ── Auto-detect runtime from file extension ──
 
 function autoDetectCommand(input: string): string {
-  // If it already starts with a known runtime, return as-is
   if (/^((?:[\w./~-]+\/)?(node|ts-node|tsx|nodemon|bun|deno|python3?(?:\.\d+)?|vitest|jest|mocha|npx|bunx|pytest|uvicorn|gunicorn|flask|django-admin))\b/.test(input)) {
     return input;
   }
 
-  // Check if the first token is a file path
   const parts = input.split(/\s+/);
   const file = parts[0];
   const rest = parts.slice(1).join(" ");
   const ext = path.extname(file).toLowerCase();
 
-  // Resolve relative to cwd
   const resolved = path.resolve(file);
   const fileExists = fs.existsSync(resolved);
 
   if (!fileExists) {
-    // Not a file — might be a custom command, return as-is
     return input;
   }
 
   switch (ext) {
     case ".js":
     case ".cjs":
-      return rest ? `node ${file} ${rest}` : `node ${file}`;
-
     case ".mjs":
       return rest ? `node ${file} ${rest}` : `node ${file}`;
 
     case ".ts":
     case ".tsx":
     case ".mts": {
-      // Find best available TS runtime
       const tsRunner = findTsRunner();
       return rest ? `${tsRunner} ${file} ${rest}` : `${tsRunner} ${file}`;
     }
@@ -198,15 +140,11 @@ function autoDetectCommand(input: string): string {
 }
 
 function findTsRunner(): string {
-  const { execSync } = require("child_process");
-
-  // Add node_modules/.bin to PATH so local binaries are found
   const binPath = path.join(process.cwd(), "node_modules", ".bin");
   const currentPath = process.env.PATH || "";
   const augmentedPath = currentPath.includes(binPath) ? currentPath : `${binPath}${path.delimiter}${currentPath}`;
   const execOpts = { stdio: "ignore" as const, env: { ...process.env, PATH: augmentedPath } };
 
-  // Check for tsx (fastest, most compatible)
   try {
     execSync("tsx --version", execOpts);
     return "tsx";
@@ -214,7 +152,6 @@ function findTsRunner(): string {
     // not available
   }
 
-  // Check for ts-node
   try {
     execSync("ts-node --version", execOpts);
     return "ts-node";
@@ -222,7 +159,6 @@ function findTsRunner(): string {
     // not available
   }
 
-  // Check for bun (supports TS natively)
   try {
     execSync("bun --version", execOpts);
     return "bun";
@@ -230,24 +166,20 @@ function findTsRunner(): string {
     // not available
   }
 
-  // Fallback to npx tsx
   return "npx tsx";
 }
 
 /**
  * `trickle run <command>` — Run any command with universal type observation.
  *
- * Auto-detects JS or Python, injects the right instrumentation, starts the
- * backend if needed, and shows a summary of captured types after exit.
- * With --stubs or --annotate, also generates type files automatically.
- * Reads .tricklerc.json for project defaults.
+ * Auto-detects JS or Python, injects the right instrumentation, and writes
+ * captured types to .trickle/ so VSCode, Jupyter, and `trickle hints` can show them.
  */
 export async function runCommand(
   command: string | undefined,
   opts: RunOptions,
 ): Promise<void> {
   if (!command) {
-    // Auto-detect: try package.json scripts, common entry points
     const detected = autoDetectEntryPoint();
     if (detected) {
       command = detected;
@@ -258,51 +190,22 @@ export async function runCommand(
       console.error(chalk.gray('    trickle run "node app.js"'));
       console.error(chalk.gray("    trickle run app.ts              # auto-detects TypeScript runtime"));
       console.error(chalk.gray("    trickle run script.py            # auto-detects Python"));
-      console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
       console.error(chalk.gray("    trickle run app.js --watch       # watch for changes and re-run"));
       console.error("");
       process.exit(1);
     }
   }
 
-  // Load project config
   const config = loadProjectConfig();
   opts = mergeConfigWithOpts(opts, config);
 
-  // Detect if command is a single file — if so, auto-generate sidecar types
-  const singleFile = detectSingleFile(command);
-
-  // Auto-detect runtime from file extension
   const resolvedCommand = autoDetectCommand(command);
 
-  const backendUrl = getBackendUrl();
-
-  // Auto-start backend if not running — fall back to local mode
-  let backendProc: ChildProcess | null = null;
-  let localMode = false;
-  const backendRunning = await checkBackend(backendUrl);
-  if (!backendRunning) {
-    // Only try auto-start if using default URL (custom URL means user manages their own backend)
-    const isCustomUrl = !!process.env.TRICKLE_BACKEND_URL &&
-      process.env.TRICKLE_BACKEND_URL !== "http://localhost:4888";
-    if (!isCustomUrl) {
-      backendProc = await autoStartBackend();
-    }
-    if (!backendProc) {
-      // Fall back to local/offline mode instead of exiting
-      localMode = true;
-      // Silent for first-time users — local mode is the default experience
-    }
-  }
-
-  // Detect language and inject instrumentation
   const { instrumentedCommand, env: extraEnv } = injectObservation(
     resolvedCommand,
-    backendUrl,
     opts,
   );
 
-  // Print header
   console.log("");
   console.log(chalk.bold(opts.watch ? "  trickle run --watch" : "  trickle run"));
   console.log(chalk.gray("  " + "─".repeat(50)));
@@ -315,19 +218,14 @@ export async function runCommand(
   if (instrumentedCommand !== resolvedCommand) {
     console.log(chalk.gray(`  Injected:  ${instrumentedCommand}`));
   }
-  if (localMode) {
-    console.log(chalk.gray(`  Mode:      local (offline)`));
-  } else {
-    console.log(chalk.gray(`  Backend:   ${backendUrl}`));
-  }
   if (config) {
     console.log(chalk.gray(`  Config:    .tricklerc.json`));
   }
-  if (opts.stubs) {
-    console.log(chalk.gray(`  Stubs:     ${opts.stubs}`));
+  if (opts.include) {
+    console.log(chalk.gray(`  Include:   ${opts.include}`));
   }
-  if (opts.annotate) {
-    console.log(chalk.gray(`  Annotate:  ${opts.annotate}`));
+  if (opts.exclude) {
+    console.log(chalk.gray(`  Exclude:   ${opts.exclude}`));
   }
   if (opts.watch) {
     console.log(chalk.gray(`  Watch:     enabled`));
@@ -335,242 +233,35 @@ export async function runCommand(
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 
-  // Shared env for all runs
   const runEnv: Record<string, string> = {
     ...extraEnv,
-    TRICKLE_BACKEND_URL: backendUrl,
+    TRICKLE_LOCAL: "1",
     TRICKLE_DEBUG: process.env.TRICKLE_DEBUG || "",
   };
-
-  // In local mode, set TRICKLE_LOCAL=1 so the client writes to JSONL
-  if (localMode) {
-    runEnv.TRICKLE_LOCAL = "1";
-    // Forward TRICKLE_LOCAL_DIR if set
-    if (process.env.TRICKLE_LOCAL_DIR) {
-      runEnv.TRICKLE_LOCAL_DIR = process.env.TRICKLE_LOCAL_DIR;
-    }
+  if (process.env.TRICKLE_LOCAL_DIR) {
+    runEnv.TRICKLE_LOCAL_DIR = process.env.TRICKLE_LOCAL_DIR;
   }
 
-  // Execute the single-run flow
-  const exitCode = await executeSingleRun(
-    instrumentedCommand,
-    runEnv,
-    opts,
-    singleFile,
-    localMode,
-  );
+  const exitCode = await executeSingleRun(instrumentedCommand, runEnv);
 
-  // If --watch, enter watch loop instead of exiting
   if (opts.watch) {
-    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, singleFile, backendProc, localMode);
-    // enterWatchLoop never returns (handles its own exit)
-  }
-
-  // Clean up
-  if (backendProc) {
-    backendProc.kill("SIGTERM");
-    await sleep(500);
+    await enterWatchLoop(command, instrumentedCommand, runEnv);
   }
 
   process.exit(exitCode);
 }
 
-/**
- * Execute a single observation run: run the command, wait for flush, show summary.
- */
 async function executeSingleRun(
   instrumentedCommand: string,
   env: Record<string, string>,
-  opts: RunOptions,
-  singleFile?: string | null,
-  localMode?: boolean,
 ): Promise<number> {
-  if (!localMode) {
-    // Snapshot functions before run (to compute delta)
-    let functionsBefore: FunctionRow[] = [];
-    let errorsBefore: ErrorRow[] = [];
-    try {
-      const fb = await listFunctions();
-      functionsBefore = fb.functions;
-      const eb = await listErrors();
-      errorsBefore = eb.errors;
-    } catch {
-      // Backend might not have data yet
-    }
-
-    // Start live type generation for backend mode
-    let liveStop: (() => void) | null = null;
-    if (opts.stubs) {
-      liveStop = startLiveStubsGeneration(opts.stubs);
-    } else if (singleFile) {
-      liveStop = startLiveBackendTypes(singleFile);
-    }
-
-    // Run the instrumented command
-    const exitCode = await runProcess(instrumentedCommand, env);
-
-    // Stop live watcher
-    if (liveStop) liveStop();
-
-    // Wait for transport to flush
-    console.log(chalk.gray("\n  Waiting for type data to flush..."));
-    await sleep(3000);
-
-    // Show summary with inline type signatures
-    const varsPath = path.join(
-      process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle"),
-      "variables.jsonl",
-    );
-    await showSummary(functionsBefore, errorsBefore, varsPath);
-
-    // Auto-generate stubs if --stubs was specified
-    if (opts.stubs) {
-      await autoGenerateStubs(opts.stubs);
-    }
-
-    // Auto-annotate if --annotate was specified
-    if (opts.annotate) {
-      await autoAnnotateFiles(opts.annotate);
-    }
-
-    // Auto-generate sidecar type file when invoked with a single file
-    // (unless --stubs was explicitly specified, which overrides this)
-    if (singleFile && !opts.stubs) {
-      await autoGenerateSidecar(singleFile);
-    }
-
-    // Auto-push to cloud if configured
-    await autoCloudPush();
-
-    // Generate post-run summary for AI agents
-    writeRunSummary({ exitCode, command: instrumentedCommand });
-
-    console.log("");
-    console.log(chalk.gray("  trickle summary      ") + "full analysis");
-    console.log(chalk.gray("  trickle why          ") + "trace any error to root cause");
-    console.log("");
-
-    return exitCode;
-  }
-
-  // ── Local/offline mode ──
-
-  const localDir = env.TRICKLE_LOCAL_DIR || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle");
-  const jsonlPath = path.join(localDir, "observations.jsonl");
-
-  const { generateLocalStubs, generateFromJsonl, readObservations } = await import("../local-codegen");
-
-  // Snapshot JSONL file sizes before the run so we only show new data in summary
-  const obsOffsetBefore = fs.existsSync(jsonlPath) ? fs.statSync(jsonlPath).size : 0;
-
-  // Check if stub generation is enabled (opt-in: TRICKLE_STUBS=1 enables .pyi/.d.ts files)
-  const stubsEnabled = (env.TRICKLE_STUBS || process.env.TRICKLE_STUBS || "0").toLowerCase() !== "0";
-
-  // Start live type generation — types update while the process runs
-  let liveTypesStop: (() => void) | null = null;
-  if (singleFile && stubsEnabled) {
-    liveTypesStop = startLiveLocalTypes(singleFile, jsonlPath, generateLocalStubs);
-  }
-
-  // Start live status display — shows observation counts during execution
-  const liveStatusStop = startLiveStatus(localDir);
-
-  // Run the instrumented command
   const exitCode = await runProcess(instrumentedCommand, env);
 
-  // Stop live watchers
-  liveStatusStop();
-  if (liveTypesStop) liveTypesStop();
-
-  // Brief pause for any async file writes to complete
   await sleep(500);
 
-  if (!fs.existsSync(jsonlPath)) {
-    console.log(chalk.gray("\n  No observations captured."));
-    return exitCode;
-  }
-
-  // Final type generation (catches any remaining observations)
-  if (singleFile && stubsEnabled) {
-    generateLocalStubs(singleFile, jsonlPath);
-  }
-
-  // Show local summary with only NEW function signatures from this run.
-  // Read only bytes appended after the pre-run snapshot to avoid showing stale data.
-  let observations = readObservations(jsonlPath);
-  if (obsOffsetBefore > 0 && fs.existsSync(jsonlPath)) {
-    const tmpPath = jsonlPath + ".run-delta";
-    try {
-      const fd = fs.openSync(jsonlPath, "r");
-      const totalSize = fs.fstatSync(fd).size;
-      const newSize = totalSize - obsOffsetBefore;
-      if (newSize > 0) {
-        const buf = Buffer.alloc(newSize);
-        fs.readSync(fd, buf, 0, newSize, obsOffsetBefore);
-        fs.closeSync(fd);
-        fs.writeFileSync(tmpPath, buf);
-        observations = readObservations(tmpPath);
-      } else {
-        fs.closeSync(fd);
-        observations = [];
-      }
-    } catch {
-      // Fall back to showing all observations
-    } finally {
-      try { fs.unlinkSync(tmpPath); } catch {}
-    }
-  }
-  const totalFunctions = observations.length;
-
-  console.log("");
-  console.log(chalk.bold("  trickle summary"));
-  console.log(chalk.gray("  " + "─".repeat(50)));
-
-  // ── Function signatures ──
-  if (totalFunctions > 0) {
-    console.log(`  ${chalk.bold("Function types")} — ${totalFunctions} observed`);
-    // Group by module
-    const byModule = new Map<string, typeof observations>();
-    for (const fn of observations) {
-      const mod = fn.module || "_default";
-      if (!byModule.has(mod)) byModule.set(mod, []);
-      byModule.get(mod)!.push(fn);
-    }
-
-    for (const [mod, fns] of byModule) {
-      if (byModule.size > 1) {
-        console.log(`  ${chalk.bold(mod)}`);
-      }
-      const shown = fns.slice(0, 15);
-      for (const fn of shown) {
-        const sig = _formatLocalSignature(fn);
-        console.log(`    ${chalk.green("→")} ${sig}`);
-      }
-      if (fns.length > 15) {
-        console.log(chalk.gray(`    ... and ${fns.length - 15} more`));
-      }
-    }
-
-    // Stub file status
-    if (singleFile && stubsEnabled) {
-      const ext = path.extname(singleFile).toLowerCase();
-      const isPython = ext === ".py";
-      const baseName = path.basename(singleFile, ext);
-      const stubExt = isPython ? ".pyi" : ".d.ts";
-      const stubFile = path.join(path.dirname(singleFile), `${baseName}${stubExt}`);
-      if (fs.existsSync(stubFile)) {
-        const relPath = path.relative(process.cwd(), stubFile);
-        console.log(`  ${chalk.green("✓")} Stub file: ${chalk.bold(relPath)} ${chalk.gray("(for type checkers)")}`);
-      }
-    } else if (singleFile && !stubsEnabled) {
-      console.log(chalk.gray(`  ⊘ Stub generation disabled (TRICKLE_STUBS=0)`));
-    }
-  } else {
-    console.log(chalk.gray(`  No functions observed.`));
-  }
-
-  // ── Variable/tensor summary ──
+  const localDir = env.TRICKLE_LOCAL_DIR || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle");
   const varsJsonlPath = path.join(localDir, "variables.jsonl");
+
   if (fs.existsSync(varsJsonlPath)) {
     try {
       const { showVarsSummary } = await import("./vars");
@@ -578,362 +269,25 @@ async function executeSingleRun(
     } catch {
       // vars module not available, skip
     }
-    console.log(chalk.gray(`  ↳ Variable data feeds VSCode inline hints`));
+    console.log("");
+    console.log(chalk.gray("  See types:"));
+    console.log(chalk.gray("    trickle hints          ") + "source with inline types");
+    console.log(chalk.gray("    trickle vars           ") + "table of captured variables");
+    console.log("");
+  } else {
+    console.log(chalk.gray("\n  No variable types captured."));
+    console.log(chalk.gray("  Open the file in VSCode after a successful run, or try:"));
+    console.log(chalk.gray("    trickle hints\n"));
   }
-
-  console.log(chalk.gray("  " + "─".repeat(50)));
-
-  // Show condensed insights if data exists, otherwise show next steps
-  try {
-    const { generateRunSummary } = await import("./summary");
-    const s = generateRunSummary({ dir: localDir });
-    const hasIssues = s.rootCauses.length > 0 || s.alerts.length > 0 || s.errors.length > 0;
-    if (hasIssues) {
-      console.log("");
-      if (s.rootCauses.length > 0) {
-        console.log(chalk.bold("  Issues detected:"));
-        for (const rc of s.rootCauses.slice(0, 3)) {
-          const icon = rc.severity === 'critical' ? chalk.red('✗') : chalk.yellow('⚠');
-          console.log(`    ${icon} ${rc.description}`);
-        }
-      }
-      if (s.counts.queries > 0) {
-        console.log(chalk.gray(`  ${s.counts.queries} queries captured${s.queries.nPlusOnePatterns.length > 0 ? ` (${s.queries.nPlusOnePatterns.length} N+1 pattern${s.queries.nPlusOnePatterns.length > 1 ? 's' : ''})` : ''}`));
-      }
-      console.log("");
-      console.log(chalk.gray("  Dig deeper:"));
-      console.log(chalk.gray("    trickle summary        ") + "root causes + fix recommendations");
-      console.log(chalk.gray("    trickle explain <file>  ") + "functions, call graph, data flow");
-    } else {
-      console.log("");
-      console.log(chalk.green("  ✓ No issues detected"));
-      if (s.counts.queries > 0) console.log(chalk.gray(`  ${s.counts.queries} queries captured`));
-      console.log("");
-      console.log(chalk.gray("  Explore:"));
-      console.log(chalk.gray("    trickle summary        ") + "full overview");
-      console.log(chalk.gray("    trickle explain <file>  ") + "understand a file");
-      console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
-    }
-    console.log("");
-  } catch {
-    console.log("");
-    console.log(chalk.gray("  Run trickle summary for full analysis"));
-    console.log("");
-  }
-
-  // Auto-push all data to cloud if configured
-  await autoCloudPush();
-
-  // Generate post-run summary for AI agents
-  writeRunSummary({ dir: localDir, exitCode, command: instrumentedCommand });
 
   return exitCode;
 }
 
-// ── Live type generation ──
-
-/**
- * Start a background watcher that regenerates type stubs whenever the
- * JSONL file changes. Returns a stop function.
- *
- * Uses polling (fs.watchFile) because the file is being appended to by
- * the child process and fs.watch can be unreliable with rapid appends.
- */
-
-async function autoCloudPush(): Promise<void> {
-  const configPath = path.join(process.env.HOME || "~", ".trickle", "cloud.json");
-  if (!fs.existsSync(configPath)) return;
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    if (config.url && config.token) {
-      // Suppress console output for auto-push to avoid noise
-      const origLog = console.log;
-      const origErr = console.error;
-      console.log = () => {};
-      console.error = () => {};
-      try {
-        const { cloudPush } = await import("./cloud");
-        await cloudPush();
-      } finally {
-        console.log = origLog;
-        console.error = origErr;
-      }
-    }
-  } catch {}
-}
-
-function startLiveLocalTypes(
-  sourceFile: string,
-  jsonlPath: string,
-  generateLocalStubs: (sourceFile: string, jsonlPath: string) => { written: string[]; functionCount: number },
-): () => void {
-  let lastSize = 0;
-  let lastFunctionCount = 0;
-  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  let stopped = false;
-
-  const regenerate = () => {
-    if (stopped) return;
-    try {
-      if (!fs.existsSync(jsonlPath)) return;
-
-      const stat = fs.statSync(jsonlPath);
-      if (stat.size === lastSize) return; // no new data
-      lastSize = stat.size;
-
-      const { written, functionCount } = generateLocalStubs(sourceFile, jsonlPath);
-      if (written.length > 0 && functionCount > lastFunctionCount) {
-        const newCount = functionCount - lastFunctionCount;
-        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
-        const relPath = path.relative(process.cwd(), written[0]);
-        console.log(
-          chalk.gray(`  [${ts}]`) +
-          chalk.green(` +${newCount} type(s)`) +
-          chalk.gray(` → ${relPath}`) +
-          chalk.gray(` (${functionCount} total)`),
-        );
-        lastFunctionCount = functionCount;
-      }
-    } catch {
-      // Never crash — this is a background helper
-    }
-  };
-
-  // Do an initial check after a short delay (catch fast-running scripts)
-  const initialTimer = setTimeout(regenerate, 800);
-
-  // Poll every 2 seconds
-  const interval = setInterval(regenerate, 2000);
-
-  // Also try fs.watchFile for faster response on changes
-  try {
-    fs.watchFile(jsonlPath, { interval: 1000 }, () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(regenerate, 200);
-    });
-  } catch {
-    // watchFile may fail if file doesn't exist yet — polling handles it
-  }
-
-  return () => {
-    stopped = true;
-    clearTimeout(initialTimer);
-    clearInterval(interval);
-    if (debounceTimer) clearTimeout(debounceTimer);
-    try { fs.unwatchFile(jsonlPath); } catch {}
-  };
-}
-
-/**
- * Start a background poller that fetches stubs from the backend and
- * writes sidecar type files while the process runs. Returns a stop function.
- */
-function startLiveBackendTypes(sourceFile: string): () => void {
-  let lastFunctionCount = 0;
-  let stopped = false;
-
-  const ext = path.extname(sourceFile).toLowerCase();
-  const isPython = ext === ".py";
-  const dir = path.dirname(sourceFile);
-  const baseName = path.basename(sourceFile, ext);
-  const sidecarName = isPython ? `${baseName}.pyi` : `${baseName}.d.ts`;
-  const sidecarPath = path.join(dir, sidecarName);
-  // Also check .trickle/types/ where auto-codegen now writes
-  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
-  const trickleTypesPath = path.join(trickleDir, 'types', `${baseName}.d.ts`);
-
-  const poll = async () => {
-    if (stopped) return;
-    try {
-      const { stubsCommand } = await import("./stubs");
-      await stubsCommand(dir, { silent: true });
-
-      // Check both old sidecar path and new .trickle/types/ path
-      const effectivePath = fs.existsSync(trickleTypesPath) ? trickleTypesPath : sidecarPath;
-      if (fs.existsSync(effectivePath)) {
-        const content = fs.readFileSync(effectivePath, "utf-8");
-        const funcCount = (content.match(/export declare function/g) || []).length;
-
-        if (funcCount > lastFunctionCount) {
-          const newCount = funcCount - lastFunctionCount;
-          const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
-          console.log(
-            chalk.gray(`  [${ts}]`) +
-            chalk.green(` +${newCount} type(s)`) +
-            chalk.gray(` → ${sidecarName}`) +
-            chalk.gray(` (${funcCount} total)`),
-          );
-          lastFunctionCount = funcCount;
-        }
-      }
-    } catch {
-      // Never crash — background helper
-    }
-  };
-
-  // Poll every 3 seconds (backend mode has higher overhead)
-  const interval = setInterval(poll, 3000);
-
-  return () => {
-    stopped = true;
-    clearInterval(interval);
-  };
-}
-
-// ── Live stubs generation during run ──
-
-function startLiveStubsGeneration(stubsDir: string): () => void {
-  let lastTotal = 0;
-  let stopped = false;
-
-  const poll = async () => {
-    if (stopped) return;
-    try {
-      const { stubsCommand } = await import("./stubs");
-      const result = await stubsCommand(stubsDir, { silent: true });
-
-      // Count .d.ts files in the stubs dir to track progress
-      const files = fs.readdirSync(stubsDir).filter(f => f.endsWith('.d.ts'));
-      let funcCount = 0;
-      for (const f of files) {
-        const content = fs.readFileSync(path.join(stubsDir, f), 'utf-8');
-        funcCount += (content.match(/export declare function/g) || []).length;
-      }
-
-      if (funcCount > lastTotal) {
-        const newCount = funcCount - lastTotal;
-        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
-        console.log(
-          chalk.gray(`  [${ts}]`) +
-          chalk.green(` +${newCount} type(s)`) +
-          chalk.gray(` → ${stubsDir}`) +
-          chalk.gray(` (${funcCount} total)`),
-        );
-        lastTotal = funcCount;
-      }
-    } catch {
-      // Never crash — background helper
-    }
-  };
-
-  const interval = setInterval(poll, 3000);
-  return () => {
-    stopped = true;
-    clearInterval(interval);
-  };
-}
-
-// ── Live status display during run ──
-
-function countJsonlLines(filePath: string): number {
-  try {
-    if (!fs.existsSync(filePath)) return 0;
-    const content = fs.readFileSync(filePath, "utf-8");
-    return content.trim().split("\n").filter(Boolean).length;
-  } catch { return 0; }
-}
-
-/**
- * Start a live status poller that shows observation counts during execution.
- * Prints a compact status line every few seconds to give developers real-time
- * feedback on what trickle is capturing — especially useful for long-running
- * processes (servers, training loops, agent workflows).
- */
-function startLiveStatus(localDir: string): () => void {
-  let stopped = false;
-  let lastPrintedStatus = "";
-
-  const poll = () => {
-    if (stopped) return;
-    try {
-      const fns = countJsonlLines(path.join(localDir, "observations.jsonl"));
-      const vars = countJsonlLines(path.join(localDir, "variables.jsonl"));
-      const queries = countJsonlLines(path.join(localDir, "queries.jsonl"));
-      const errors = countJsonlLines(path.join(localDir, "errors.jsonl"));
-      const llm = countJsonlLines(path.join(localDir, "llm.jsonl"));
-      const mcp = countJsonlLines(path.join(localDir, "mcp.jsonl"));
-      const agents = countJsonlLines(path.join(localDir, "agents.jsonl"));
-      const calltrace = countJsonlLines(path.join(localDir, "calltrace.jsonl"));
-
-      // Only print if there's data and something changed
-      const total = fns + vars + queries + errors + llm + mcp + agents + calltrace;
-      if (total === 0) return;
-
-      const parts: string[] = [];
-      if (fns > 0) parts.push(`${fns} fn`);
-      if (vars > 0) parts.push(`${vars} var`);
-      if (queries > 0) parts.push(`${queries} query`);
-      if (calltrace > 0) parts.push(`${calltrace} call`);
-      if (llm > 0) parts.push(`${llm} llm`);
-      if (mcp > 0) parts.push(`${mcp} mcp`);
-      if (agents > 0) parts.push(`${agents} agent`);
-      if (errors > 0) parts.push(chalk.red(`${errors} err`));
-
-      const status = parts.join(" | ");
-      if (status === lastPrintedStatus) return;
-      lastPrintedStatus = status;
-
-      const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
-      console.log(chalk.gray(`  [${ts}] trickle: ${status}`));
-    } catch { /* never crash */ }
-  };
-
-  // First check after 2s, then every 3s
-  const initialTimer = setTimeout(poll, 2000);
-  const interval = setInterval(poll, 3000);
-
-  return () => {
-    stopped = true;
-    clearTimeout(initialTimer);
-    clearInterval(interval);
-  };
-}
-
-// ── Auto-generate sidecar type file ──
-
-async function autoGenerateSidecar(filePath: string): Promise<void> {
-  try {
-    const ext = path.extname(filePath).toLowerCase();
-    const isPython = ext === ".py";
-    const dir = path.dirname(filePath);
-    const baseName = path.basename(filePath, ext);
-
-    // Determine sidecar filename
-    const sidecarName = isPython ? `${baseName}.pyi` : `${baseName}.d.ts`;
-    const sidecarPath = path.join(dir, sidecarName);
-
-    // Use the stubs command to generate stubs for the file's directory
-    const { stubsCommand } = await import("./stubs");
-    await stubsCommand(dir, { silent: true });
-
-    // Check if types were generated (either sidecar or .trickle/types/)
-    const tDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
-    const tTypesPath = path.join(tDir, 'types', `${baseName}.d.ts`);
-    const effectiveSidecar = fs.existsSync(tTypesPath) ? tTypesPath : sidecarPath;
-    const displayName = fs.existsSync(tTypesPath) ? `${baseName}.d.ts` : sidecarName;
-    if (fs.existsSync(effectiveSidecar)) {
-      const stats = fs.statSync(effectiveSidecar);
-      if (stats.size > 0) {
-        console.log(
-          chalk.green(`\n  Types written to ${chalk.bold(displayName)}`),
-        );
-      }
-    }
-  } catch {
-    // Don't fail the run if sidecar generation fails
-  }
-}
-
 // ── Watch mode ──
 
-/**
- * Find source files to watch based on the command.
- * Returns the directory to watch and specific file paths.
- */
 function findWatchTargets(command: string): { dir: string; file: string | null } {
   const parts = command.split(/\s+/);
 
-  // Find the first token that looks like a file path
   for (const part of parts) {
     const ext = path.extname(part).toLowerCase();
     if ([".js", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".py", ".jsx"].includes(ext)) {
@@ -950,17 +304,10 @@ function findWatchTargets(command: string): { dir: string; file: string | null }
   return { dir: process.cwd(), file: null };
 }
 
-/**
- * Enter watch mode — watch source files and re-run on changes.
- */
 async function enterWatchLoop(
   originalCommand: string,
   instrumentedCommand: string,
   env: Record<string, string>,
-  opts: RunOptions,
-  singleFile: string | null,
-  backendProc: ChildProcess | null,
-  localMode?: boolean,
 ): Promise<void> {
   const { dir: watchDir, file: watchFile } = findWatchTargets(originalCommand);
 
@@ -987,26 +334,23 @@ async function enterWatchLoop(
       console.log(chalk.gray("  " + "─".repeat(50)));
 
       try {
-        await executeSingleRun(instrumentedCommand, env, opts, singleFile, localMode);
+        await executeSingleRun(instrumentedCommand, env);
       } catch {
         console.log(chalk.red("  Run failed. Waiting for next change..."));
       }
 
       console.log("");
       console.log(chalk.gray("  Watching for changes..."));
-    }, 300); // 300ms debounce
+    }, 300);
   };
 
-  // Use fs.watch with recursive option (supported on macOS and Windows)
   try {
     const watcher = fs.watch(watchDir, { recursive: true }, (_eventType, filename) => {
       if (!filename) return;
 
-      // Check file extension
       const ext = path.extname(filename).toLowerCase();
       if (!watchExts.has(ext)) return;
 
-      // Skip ignored directories
       const parts = filename.split(path.sep);
       if (parts.some(p => ignoreDirs.has(p))) return;
 
@@ -1015,13 +359,9 @@ async function enterWatchLoop(
       triggerRerun();
     });
 
-    // Handle graceful shutdown
     const cleanup = () => {
       watcher.close();
       if (debounceTimer) clearTimeout(debounceTimer);
-      if (backendProc) {
-        backendProc.kill("SIGTERM");
-      }
       console.log(chalk.gray("\n  Watch stopped.\n"));
       process.exit(0);
     };
@@ -1029,10 +369,8 @@ async function enterWatchLoop(
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
 
-    // Keep the process alive
     await new Promise<never>(() => {});
-  } catch (err: unknown) {
-    // Fallback: if recursive watch isn't supported, watch just the target file
+  } catch {
     if (watchFile) {
       console.log(chalk.gray("  (Watching single file: " + path.basename(watchFile) + ")"));
 
@@ -1045,9 +383,6 @@ async function enterWatchLoop(
       const cleanup = () => {
         watcher.close();
         if (debounceTimer) clearTimeout(debounceTimer);
-        if (backendProc) {
-          backendProc.kill("SIGTERM");
-        }
         console.log(chalk.gray("\n  Watch stopped.\n"));
         process.exit(0);
       };
@@ -1058,170 +393,11 @@ async function enterWatchLoop(
       await new Promise<never>(() => {});
     }
 
-    // Can't watch anything
     console.error(chalk.red("  Could not set up file watcher."));
-    if (backendProc) backendProc.kill("SIGTERM");
     process.exit(1);
   }
 }
 
-// ── Auto-generate stubs ──
-
-async function autoGenerateStubs(dir: string): Promise<void> {
-  try {
-    const { stubsCommand } = await import("./stubs");
-    await stubsCommand(dir, {});
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      console.error(chalk.yellow(`\n  Stubs generation warning: ${err.message}`));
-    }
-  }
-}
-
-// ── Auto-annotate files ──
-
-async function autoAnnotateFiles(fileOrDir: string): Promise<void> {
-  try {
-    const { annotateCommand } = await import("./annotate");
-    const resolved = path.resolve(fileOrDir);
-
-    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
-      // Annotate all JS/TS/Python files in the directory
-      const files = findAnnotatableFiles(resolved);
-      if (files.length === 0) {
-        console.log(chalk.gray(`\n  No annotatable files found in ${fileOrDir}`));
-        return;
-      }
-      for (const file of files) {
-        await annotateCommand(file, {});
-      }
-    } else {
-      // Annotate a single file
-      await annotateCommand(fileOrDir, {});
-    }
-  } catch (err: unknown) {
-    if (err instanceof Error) {
-      console.error(chalk.yellow(`\n  Annotation warning: ${err.message}`));
-    }
-  }
-}
-
-function findAnnotatableFiles(dir: string): string[] {
-  const results: string[] = [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (["node_modules", "__pycache__", ".git", "dist", "build", ".trickle"].includes(entry.name)) continue;
-      results.push(...findAnnotatableFiles(fullPath));
-    } else if (entry.isFile()) {
-      const ext = path.extname(entry.name).toLowerCase();
-      if ([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"].includes(ext)) {
-        results.push(fullPath);
-      }
-    }
-  }
-  return results;
-}
-
-// ── Inline type signatures in summary ──
-
-async function fetchTypeSignatures(
-  newFunctions: FunctionRow[],
-): Promise<Record<string, AnnotationEntry>> {
-  try {
-    const { annotations } = await fetchAnnotations({});
-    return annotations || {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Format a compact type string from a TypeNode for terminal display.
- */
-function _compactType(node: import("../local-codegen").TypeNode, depth: number = 0): string {
-  if (!node) return "any";
-  const kind = node.kind;
-  if (kind === "primitive") return node.name || "any";
-  if (kind === "unknown") return "any";
-  if (depth >= 3) return "...";
-  if (kind === "array") return `${_compactType(node.element!, depth + 1)}[]`;
-  if (kind === "tuple") {
-    const els = (node.elements || []).map((e) => _compactType(e, depth + 1));
-    return `[${els.join(", ")}]`;
-  }
-  if (kind === "union") {
-    const members = (node.members || []).map((m) => _compactType(m, depth + 1));
-    return members.join(" | ");
-  }
-  if (kind === "object") {
-    if ((node as any).class_name && (node as any).class_name !== "dict") {
-      return (node as any).class_name;
-    }
-    const props = node.properties || {};
-    const keys = Object.keys(props);
-    if (keys.length === 0) return "{}";
-    if (keys.length <= 3) {
-      const entries = keys.map((k) => `${k}: ${_compactType(props[k], depth + 1)}`);
-      return `{ ${entries.join(", ")} }`;
-    }
-    const first = keys.slice(0, 2).map((k) => `${k}: ${_compactType(props[k], depth + 1)}`);
-    return `{ ${first.join(", ")}, ... }`;
-  }
-  if (kind === "map") return `Map<${_compactType(node.key!, depth + 1)}, ${_compactType(node.value!, depth + 1)}>`;
-  if (kind === "set") return `Set<${_compactType(node.element!, depth + 1)}>`;
-  if (kind === "promise") return `Promise<${_compactType(node.resolved!, depth + 1)}>`;
-  if (kind === "iterator") {
-    const inner = _compactType(node.element!, depth + 1);
-    return `${node.name || "Iterator"}<${inner}>`;
-  }
-  if (kind === "function") return "Function";
-  return "any";
-}
-
-/**
- * Format a function signature from local observations for terminal display.
- */
-function _formatLocalSignature(fn: import("../local-codegen").FunctionTypeData, maxLen: number = 90): string {
-  const paramNames = fn.paramNames || [];
-  const params: string[] = [];
-
-  if (fn.argsType.kind === "tuple") {
-    for (let i = 0; i < (fn.argsType.elements || []).length; i++) {
-      const pname = paramNames[i] || `arg${i}`;
-      const ptype = _compactType(fn.argsType.elements![i]);
-      params.push(`${pname}: ${ptype}`);
-    }
-  }
-
-  const ret = _compactType(fn.returnType);
-  const sig = `${fn.name}(${params.join(", ")}) → ${ret}`;
-  if (sig.length > maxLen) {
-    return sig.substring(0, maxLen - 1) + "…";
-  }
-  return sig;
-}
-
-function formatSignature(
-  fnName: string,
-  annotation: AnnotationEntry,
-  maxLen: number = 90,
-): string {
-  const params = annotation.params
-    .map((p) => `${p.name}: ${p.type}`)
-    .join(", ");
-  const sig = `${fnName}(${params}) → ${annotation.returnType}`;
-  if (sig.length > maxLen) {
-    return sig.substring(0, maxLen - 1) + "…";
-  }
-  return sig;
-}
-
-/**
- * Detect if a script file uses ES modules.
- */
 function isEsmFile(command: string): boolean {
   const parts = command.split(/\s+/);
   for (const part of parts) {
@@ -1262,9 +438,6 @@ function isEsmFile(command: string): boolean {
   return false;
 }
 
-/**
- * Detect the language and inject the appropriate auto-observation mechanism.
- */
 function extractFileFromCommand(command: string, runner: string): string | null {
   const rest = command.slice(runner.length).trim();
   const tokens = rest.split(/\s+/);
@@ -1278,9 +451,12 @@ function extractFileFromCommand(command: string, runner: string): string | null 
   return null;
 }
 
+/**
+ * Detect the language and inject the appropriate auto-observation mechanism.
+ * Python → `trickle.observe_runner`. Node → `-r trickle/observe`.
+ */
 function injectObservation(
   command: string,
-  backendUrl: string,
   opts: RunOptions,
 ): { instrumentedCommand: string; env: Record<string, string> } {
   const env: Record<string, string> = {};
@@ -1307,29 +483,23 @@ function injectObservation(
     const useEsm = isEsmFile(command) && observeEsmPath;
 
     if (useEsm) {
-      // ESM entry files: create a temp wrapper that registers hooks THEN imports the entry.
-      // This ensures the ESM loader hooks transform the entry module.
       const esmFile = extractFileFromCommand(command, runner);
       if (esmFile) {
-        const tmpDir = require("os").tmpdir();
+        const tmpDir = os.tmpdir();
         const tmpWrapper = path.join(tmpDir, `.trickle_esm_${Date.now()}.mjs`);
         const esmUrl = `file://${esmFile}`;
         const wrapperContent = `await import('${esmUrl}');\n`;
         fs.writeFileSync(tmpWrapper, wrapperContent);
-        // --import registers ESM hooks before the wrapper loads the entry module
         const modified = `${runner} -r ${observePath} --import ${observeEsmPath} ${tmpWrapper}`;
-        // Clean up temp file after process exits
         env.TRICKLE_ESM_WRAPPER = tmpWrapper;
         return { instrumentedCommand: modified, env };
       }
-      // Fallback
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
         `${runner} -r ${observePath} --import ${observeEsmPath} `,
       );
       return { instrumentedCommand: modified, env };
     } else if (runner === "tsx") {
-      // tsx always uses ESM internally — inject both CJS and ESM hooks
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
         `${runner} -r ${observePath} --import ${observeEsmPath} `,
@@ -1361,10 +531,7 @@ function injectObservation(
     const rest = command.slice(pyMatch[0].length);
     if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
     if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
-    // Auto-enable terminal type summary when running via trickle run
     if (!process.env.TRICKLE_SUMMARY) env.TRICKLE_SUMMARY = "1";
-    // Ensure trickle is importable even if the target Python is a venv without it.
-    // Find trickle's install location from any available system Python and inject via PYTHONPATH.
     ensureTricklePythonPath(python, env);
     return {
       instrumentedCommand: `${python} -c "from trickle.observe_runner import main; main()" ${rest}`,
@@ -1395,37 +562,29 @@ function injectObservation(
 /**
  * Ensure the target Python can import trickle by creating an isolated temp
  * directory with a symlink to just the trickle package and adding it to PYTHONPATH.
- * This avoids polluting the target Python with the entire system site-packages,
- * which would cause binary incompatibilities across Python versions.
  */
 function ensureTricklePythonPath(
   targetPython: string,
   env: Record<string, string>,
 ): void {
-  // First check if the target Python already has trickle
   try {
     execSync(
       `${targetPython} -c "import trickle" 2>/dev/null`,
       { stdio: "ignore", timeout: 5000 },
     );
-    return; // trickle is already importable
+    return;
   } catch {
     // Not available in target Python — find it elsewhere
   }
 
-  // Try common Python commands to find where trickle is installed
   const candidates = ["python3", "python", "python3.11", "python3.12", "python3.13", "python3.10"];
   for (const py of candidates) {
     try {
-      // Get the trickle package directory (e.g. /opt/anaconda3/.../site-packages/trickle)
       const trickleDir = execSync(
         `${py} -c "import trickle, os; print(os.path.dirname(trickle.__file__))"`,
         { encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
       ).trim();
       if (trickleDir && fs.existsSync(trickleDir)) {
-        // Create a temp directory with just a symlink to the trickle package.
-        // This ensures only trickle (pure Python) is visible, not incompatible
-        // binary packages from a different Python version's site-packages.
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "trickle-pypath-"));
         fs.symlinkSync(trickleDir, path.join(tmpDir, "trickle"));
         const existing = env.PYTHONPATH || process.env.PYTHONPATH || "";
@@ -1437,7 +596,6 @@ function ensureTricklePythonPath(
     }
   }
 
-  // trickle not found anywhere — warn the user
   console.error(
     chalk.yellow(
       "\n  ⚠ trickle Python package not found. Install it with:\n\n" +
@@ -1448,13 +606,13 @@ function ensureTricklePythonPath(
 
 function resolveObservePath(): string {
   try {
-    return require.resolve("trickle-observe/observe");
+    return require.resolve("trickle/observe");
   } catch {
     // Not in node_modules
   }
 
   try {
-    return require.resolve("trickle/observe");
+    return require.resolve("trickle-observe/observe");
   } catch {
     // Not in node_modules
   }
@@ -1469,10 +627,16 @@ function resolveObservePath(): string {
   );
   if (fs.existsSync(monorepoPath)) return monorepoPath;
 
-  return "trickle-observe/observe";
+  return "trickle/observe";
 }
 
 function resolveObserveEsmPath(): string | null {
+  try {
+    return require.resolve("trickle/observe-esm");
+  } catch {
+    // Not in node_modules
+  }
+
   try {
     return require.resolve("trickle-observe/observe-esm");
   } catch {
@@ -1497,7 +661,6 @@ function runProcess(
   env: Record<string, string>,
 ): Promise<number> {
   return new Promise((resolve) => {
-    // Add node_modules/.bin to PATH so local binaries (tsx, ts-node, etc.) are found
     const binPath = path.join(process.cwd(), "node_modules", ".bin");
     const currentPath = process.env.PATH || "";
     const augmentedPath = currentPath.includes(binPath) ? currentPath : `${binPath}${path.delimiter}${currentPath}`;
@@ -1517,181 +680,6 @@ function runProcess(
       resolve(code ?? 1);
     });
   });
-}
-
-/**
- * Show a summary of what was captured during the run, with inline type signatures.
- */
-async function showSummary(
-  functionsBefore: FunctionRow[],
-  errorsBefore: ErrorRow[],
-  varsJsonlPath?: string,
-): Promise<void> {
-  try {
-    const { functions } = await listFunctions();
-    const { errors } = await listErrors();
-
-    const beforeIds = new Set(functionsBefore.map((f) => f.id));
-    const newFunctions = functions.filter((f) => !beforeIds.has(f.id));
-
-    const beforeErrorIds = new Set(errorsBefore.map((e) => e.id));
-    const newErrors = errors.filter((e) => !beforeErrorIds.has(e.id));
-
-    // Fetch inline type signatures for the new functions
-    const annotations = await fetchTypeSignatures(newFunctions);
-
-    console.log("");
-    console.log(chalk.bold("  Summary"));
-    console.log(chalk.gray("  " + "─".repeat(50)));
-
-    // Count variable observations from variables.jsonl
-    let varCount = 0;
-    if (varsJsonlPath && fs.existsSync(varsJsonlPath)) {
-      try {
-        const content = fs.readFileSync(varsJsonlPath, "utf-8");
-        varCount = content.trim().split("\n").filter(l => {
-          try { return JSON.parse(l).kind === "variable"; } catch { return false; }
-        }).length;
-      } catch { /* ignore */ }
-    }
-
-    if (functions.length === 0) {
-      if (varCount > 0) {
-        console.log(
-          `  Variables traced: ${chalk.bold(String(varCount))} inline hints ready`,
-        );
-        console.log(chalk.gray("  Open the file in VSCode to see type hints inline."));
-      } else {
-        console.log(
-          chalk.yellow("  No functions captured. The command may not have"),
-        );
-        console.log(
-          chalk.yellow("  loaded any modules that could be instrumented."),
-        );
-      }
-    } else {
-      console.log(
-        `  Functions observed: ${chalk.bold(String(functions.length))} total, ${chalk.green(String(newFunctions.length) + " new")}`,
-      );
-      if (varCount > 0) {
-        console.log(`  Variables traced:   ${chalk.bold(String(varCount))} inline hints ready`);
-      }
-
-      if (newFunctions.length > 0) {
-        console.log("");
-        const shown = newFunctions.slice(0, 15);
-        for (const fn of shown) {
-          const annotation = annotations[fn.function_name];
-          if (annotation) {
-            // Show full type signature
-            const sig = formatSignature(fn.function_name, annotation);
-            console.log(`    ${chalk.green("+")} ${sig}`);
-            console.log(chalk.gray(`      ${fn.module} module`));
-          } else {
-            const moduleBadge = chalk.gray(`[${fn.module}]`);
-            console.log(
-              `    ${chalk.green("+")} ${fn.function_name} ${moduleBadge}`,
-            );
-          }
-        }
-        if (newFunctions.length > 15) {
-          console.log(
-            chalk.gray(`    ... and ${newFunctions.length - 15} more`),
-          );
-        }
-      }
-
-      if (newErrors.length > 0) {
-        console.log("");
-        console.log(
-          `  Errors captured: ${chalk.red(String(newErrors.length))}`,
-        );
-        const shownErrors = newErrors.slice(0, 5);
-        for (const err of shownErrors) {
-          const fn = functions.find((f) => f.id === err.function_id);
-          const fnName = fn ? fn.function_name : "unknown";
-          console.log(
-            `    ${chalk.red("!")} ${fnName}: ${chalk.gray(err.error_message.substring(0, 80))}`,
-          );
-        }
-      }
-
-      console.log("");
-      console.log(chalk.gray("  Explore results:"));
-      console.log(
-        chalk.gray(
-          "    trickle functions          # list all captured functions",
-        ),
-      );
-      if (newFunctions.length > 0) {
-        const example = newFunctions[0].function_name;
-        console.log(
-          chalk.gray(
-            `    trickle types ${example}  # see types + sample data`,
-          ),
-        );
-      }
-      if (newErrors.length > 0) {
-        console.log(
-          chalk.gray(
-            "    trickle errors             # see captured errors",
-          ),
-        );
-      }
-    }
-
-    console.log(chalk.gray("  " + "─".repeat(50)));
-    console.log("");
-  } catch {
-    console.log(chalk.gray("\n  Could not fetch summary from backend.\n"));
-  }
-}
-
-async function checkBackend(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${url}/api/health`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function autoStartBackend(): Promise<ChildProcess | null> {
-  const backendPaths = [
-    path.resolve("packages/backend/dist/index.js"),
-    path.resolve("node_modules/trickle-backend/dist/index.js"),
-  ];
-
-  for (const p of backendPaths) {
-    if (fs.existsSync(p)) {
-      console.log(chalk.gray("  Auto-starting trickle backend..."));
-      const proc = spawn("node", [p], {
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
-        detached: false,
-      });
-
-      proc.stdout?.on("data", () => {});
-      proc.stderr?.on("data", () => {});
-      proc.unref();
-
-      for (let i = 0; i < 20; i++) {
-        await sleep(500);
-        const ready = await checkBackend(getBackendUrl());
-        if (ready) {
-          console.log(chalk.gray("  Backend started ✓\n"));
-          return proc;
-        }
-      }
-
-      proc.kill("SIGTERM");
-      return null;
-    }
-  }
-
-  return null;
 }
 
 function sleep(ms: number): Promise<void> {

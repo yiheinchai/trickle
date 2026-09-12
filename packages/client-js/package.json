@@ -1,7 +1,7 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.140",
-  "description": "Zero-code runtime observability for JavaScript/TypeScript. Auto-instruments Express, Fastify, Koa, Hono, OpenAI, Anthropic, Gemini, MCP. Captures functions, variables, LLM calls, agent workflows.",
+  "version": "0.2.141",
+  "description": "Runtime type capture for JavaScript/TypeScript. Use node -r trickle/observe to record argument, return, and variable types for VS Code and the CLI.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -9,22 +9,11 @@
     "./register": "./register.js",
     "./observe": "./observe.js",
     "./observe-esm": "./observe-esm.mjs",
-    "./auto": "./auto.js",
-    "./auto-env": "./auto-env.js",
-    "./auto-esm": "./auto-esm.mjs",
-    "./vite-plugin": {
-      "import": "./dist-esm/vite-plugin.js",
-      "require": "./dist/vite-plugin.js"
-    },
-    "./trace-var": "./dist/trace-var.js",
-    "./lambda": "./dist/lambda.js",
-    "./metro-transformer": "./dist/metro-transformer.js",
-    "./next-plugin": "./dist/next-plugin.js",
-    "./next-loader": "./dist/next-loader.js"
+    "./trace-var": "./dist/trace-var.js"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.esm.json",
-    "test": "npm run build && node --experimental-strip-types --test src/vite-plugin.test.ts src/lambda.test.ts src/metro-transformer.test.ts src/next-plugin.test.ts",
+    "build": "tsc",
+    "test": "npm run build",
     "prepublishOnly": "npm run build"
   },
   "optionalDependencies": {
@@ -34,11 +23,11 @@
     "typescript": "^5.4.0"
   },
   "keywords": [
-    "observability",
     "types",
     "runtime",
-    "lambda",
-    "express"
+    "typescript",
+    "javascript",
+    "inference"
   ],
   "license": "MIT"
 }

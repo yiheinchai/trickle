@@ -68,6 +68,4 @@ When trickle knows `t` is a Tensor, typing `t.` gives completions for `shape`, `
 
 - Tensor shapes, dtypes, devices, memory
 - Simple assignments, for-loops, function parameters, tuple unpacking
-- Gradient norms (via backward hook)
-- Optimizer state, learning rate schedules
 - Only your code — torch/numpy internals are skipped

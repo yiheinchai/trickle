@@ -1,11 +1,7 @@
-import { configure as configureTransport, flush } from './transport';
+import { configure as configureTransport } from './transport';
 import { wrapFunction } from './wrap';
 import { detectEnvironment } from './env-detect';
 import { GlobalOpts, TrickleOpts, WrapOptions } from './types';
-import { instrumentExpress, trickleMiddleware } from './express';
-import { instrumentFastify, tricklePlugin } from './fastify';
-import { instrumentKoa, instrumentKoaRouter } from './koa';
-import { instrumentHono, trickleHonoMiddleware } from './hono';
 
 let globalOpts: GlobalOpts = {
   backendUrl: 'http://localhost:4888',
@@ -71,132 +67,6 @@ export function trickle(...args: any[]): any {
 }
 
 /**
- * Wrap a Lambda handler function.
- * Same as trickle() but automatically flushes the transport after each invocation,
- * since Lambda may freeze the process between invocations.
- */
-export function trickleHandler<T extends (...args: any[]) => any>(handler: T, opts?: TrickleOpts): T {
-  const wrapped = trickle(handler, {
-    ...opts,
-    name: opts?.name || handler.name || 'handler',
-  });
-
-  const flushing = function (this: any, ...args: any[]): any {
-    const result = wrapped.apply(this, args);
-
-    // If the handler returns a promise, flush after it resolves
-    if (result !== null && result !== undefined && typeof result === 'object' && typeof result.then === 'function') {
-      return result.then(
-        async (resolved: unknown) => {
-          await flush().catch(() => {});
-          return resolved;
-        },
-        async (err: unknown) => {
-          await flush().catch(() => {});
-          throw err;
-        },
-      );
-    }
-
-    // Synchronous handler — flush and return
-    flush().catch(() => {});
-    return result;
-  };
-
-  Object.defineProperty(flushing, 'name', { value: handler.name || 'handler', configurable: true });
-  Object.defineProperty(flushing, 'length', { value: handler.length, configurable: true });
-
-  return flushing as unknown as T;
-}
-
-/**
- * Instrument an Express app by monkey-patching route methods to capture types.
- *
- * Must be called BEFORE defining routes:
- *
- *   const app = express();
- *   trickleExpress(app);
- *   app.get('/api/users', (req, res) => { ... });
- *
- * Each handler is wrapped to capture:
- * - Input: `{ body, params, query }` from the request
- * - Output: data passed to `res.json()` or `res.send()`
- * - Errors: thrown exceptions or `next(err)` calls
- */
-export function trickleExpress(
-  app: any,
-  opts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
-): void {
-  instrumentExpress(app, {
-    enabled: opts?.enabled ?? globalOpts.enabled,
-    environment: opts?.environment ?? globalOpts.environment ?? detectEnvironment(),
-    sampleRate: opts?.sampleRate ?? 1,
-    maxDepth: opts?.maxDepth ?? 5,
-  });
-}
-
-/**
- * Auto-instrument a framework app. Supports Express, Fastify, Koa, and Hono.
- *
- * Usage:
- *   import { instrument } from 'trickle';
- *   instrument(app);
- *
- * Detects the framework automatically:
- * - Express: has `app.listen`, `app.get`, `app.use`, `app.set`
- * - Fastify: has `app.route`, `app.register`, `app.addHook`
- * - Koa: has `app.use`, `app.listen`, `app.context` (but no `app.get` method on the app itself)
- */
-export function instrument(
-  app: any,
-  opts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
-): void {
-  if (!app) {
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn('[trickle] instrument(): received null/undefined app');
-    }
-    return;
-  }
-
-  const mergedOpts = {
-    enabled: opts?.enabled ?? globalOpts.enabled,
-    environment: opts?.environment ?? globalOpts.environment ?? detectEnvironment(),
-    sampleRate: opts?.sampleRate ?? 1,
-    maxDepth: opts?.maxDepth ?? 5,
-  };
-
-  // Detect Hono: has .fetch (bound method), .route(), .get(), but NOT .listen() on the app itself
-  // Hono apps use serve() from @hono/node-server rather than app.listen()
-  if (typeof app.fetch === 'function' && typeof app.get === 'function' && typeof app.route === 'function' && typeof app.fire === 'function') {
-    instrumentHono(app, mergedOpts);
-    return;
-  }
-
-  // Detect Fastify: has .route(), .register(), .addHook()
-  if (typeof app.route === 'function' && typeof app.register === 'function' && typeof app.addHook === 'function') {
-    instrumentFastify(app, mergedOpts);
-    return;
-  }
-
-  // Detect Koa: has .use(), .listen(), .context (but NOT .get as a route method on the app object)
-  // Koa apps have a .context property and .use() but .get is only defined on koa-router
-  if (typeof app.use === 'function' && typeof app.listen === 'function' && app.context !== undefined && typeof app.set !== 'function') {
-    instrumentKoa(app, mergedOpts);
-    return;
-  }
-
-  // Detect Express: has .listen(), .get(), .use(), .set()
-  if (typeof app.listen === 'function' && typeof app.get === 'function' && typeof app.use === 'function') {
-    trickleExpress(app, mergedOpts);
-    return;
-  }
-
-  if (typeof console !== 'undefined' && console.warn) {
-    console.warn('[trickle] instrument(): could not detect a supported framework on the provided object');
-  }
-}
-
-/**
  * Attempt to infer the module name from the call stack.
  * Falls back to 'unknown' if we can't determine it.
  */
@@ -209,13 +79,10 @@ function inferModule(): string {
     // Skip first 3 lines: "Error", trickle internals
     for (let i = 3; i < lines.length; i++) {
       const line = lines[i].trim();
-      // Look for a file path
       const match = line.match(/(?:at\s+)?(?:.*?\s+\()?(.+?)(?::\d+:\d+)?\)?$/);
       if (match) {
         let filePath = match[1];
-        // Strip node_modules paths
         if (filePath.includes('node_modules')) continue;
-        // Extract just the filename or relative path
         const parts = filePath.split('/');
         const filename = parts[parts.length - 1];
         if (filename && !filename.startsWith('<')) {
@@ -229,13 +96,9 @@ function inferModule(): string {
   return 'unknown';
 }
 
-// Re-export public types
 export type { TypeNode, GlobalOpts, TrickleOpts, IngestPayload } from './types';
 export { flush } from './transport';
-export { instrumentExpress, trickleMiddleware } from './express';
-export { instrumentFastify, tricklePlugin } from './fastify';
-export { instrumentKoa, instrumentKoaRouter } from './koa';
-export { instrumentHono, trickleHonoMiddleware } from './hono';
 export { observe, observeFn } from './observe';
 export type { ObserveOpts } from './observe';
 export { wrapFunction } from './wrap';
+export { inferType } from './type-inference';

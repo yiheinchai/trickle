@@ -2,9 +2,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const _EXPLODING_THRESHOLD = 100.0;
-const _VANISHING_THRESHOLD = 1e-6;
-
 /**
  * Walk up from `startDir` looking for a `.trickle` directory.
  * Stops at the workspace root (or filesystem root). Returns the
@@ -172,17 +169,35 @@ interface TypeNode {
   properties?: Record<string, TypeNode>;
   resolved?: TypeNode;
   key?: TypeNode;
-  value?: TypeNode;
+  /** Map value type, or a captured literal's JS/JSON value. */
+  value?: TypeNode | unknown;
+  /** Inner type for `optional` / wrapped nodes. */
+  type?: TypeNode;
+  params?: TypeNode[] | Record<string, TypeNode>;
+  returnType?: TypeNode;
 }
 
-/** A dimension label record from variables.jsonl */
-interface DimLabelRecord {
-  kind: 'dim_labels';
-  varName: string;
-  labels: string[];
-  line: number;
-  file: string;
-  funcName?: string;
+function isTypeNode(v: unknown): v is TypeNode {
+  return !!v && typeof v === 'object' && typeof (v as TypeNode).kind === 'string';
+}
+
+/** Format a captured literal TypeNode value (`"alice"`, `42`, `True`). */
+function formatLiteralValue(value: unknown, python: boolean = true): string {
+  if (value === null) return python ? 'None' : 'null';
+  if (value === undefined) return python ? 'None' : 'undefined';
+  if (typeof value === 'boolean') return python ? (value ? 'True' : 'False') : String(value);
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return python ? 'float' : 'number';
+    return String(value);
+  }
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'string') return JSON.stringify(value);
+  if (isTypeNode(value)) return typeNodeToString(value, 3);
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /** Index: filePath -> Map<lineNumber, observation[]> */
@@ -190,9 +205,6 @@ type VarIndex = Map<string, Map<number, VariableObservation[]>>;
 
 /** Index for notebook cells: "notebookPath#cell_N" -> Map<lineNumber, observation[]> */
 type NotebookCellIndex = Map<string, Map<number, VariableObservation[]>>;
-
-/** Index: filePath -> Map<varName, DimLabelRecord> (most recent per var per file+func) */
-type DimLabelIndex = Map<string, Map<string, DimLabelRecord>>;
 
 /** A local variable captured at the crash frame */
 interface CrashLocalVar {
@@ -216,230 +228,8 @@ interface ErrorRecord {
   frames: { file: string; line: number; function: string }[];
 }
 
-/** A gradient flow record emitted after loss.backward() */
-interface GradientLayer {
-  name: string;
-  norm: number;
-  vanishing: boolean;
-  exploding: boolean;
-}
-
-interface GradientRecord {
-  kind: 'gradient';
-  file: string;
-  line: number;
-  model_var: string;
-  layers: GradientLayer[];
-  max_norm: number;
-  min_norm: number;
-  num_layers: number;
-  vanishing: string[];
-  exploding: string[];
-  timestamp: number;
-}
-
-/** A learning rate schedule record emitted after scheduler.step() */
-interface LrScheduleRecord {
-  kind: 'lr_schedule';
-  file: string;
-  line: number;
-  lrs: number[];
-  step_num: number;
-  context: Record<string, number>;
-  timestamp: number;
-  scheduler_class: string;
-}
-
-/** A model checkpoint record emitted after torch.save / save_pretrained */
-interface CheckpointRecord {
-  kind: 'checkpoint';
-  file: string;
-  line: number;
-  path: string;
-  metrics: Record<string, number | string>;
-  timestamp: number;
-  save_count: number;
-}
-
-/** An optimizer step record emitted after optimizer.step() */
-interface OptimizerParamStat {
-  lr: number;
-  n_params: number;
-  param_norm: number;
-  param_mean: number;
-  param_std: number;
-}
-
-interface OptimizerStepRecord {
-  kind: 'optimizer_step';
-  file: string;
-  line: number;
-  grad_norm: number;
-  update_norm: number;
-  param_stats: OptimizerParamStat[];
-  step_num: number;
-  context: Record<string, number>;
-  optimizer_class: string;
-  exploding: boolean;
-  vanishing: boolean;
-  timestamp: number;
-}
-
-/** Attention statistics record emitted after each attention softmax call */
-interface AttentionStatsRecord {
-  kind: 'attention_stats';
-  file: string;
-  line: number;
-  n_heads: number;
-  seq_len: number;
-  mean_entropy: number;
-  max_entropy: number;
-  head_entropies: number[];
-  dead_heads: number;
-  sharp_heads: number;
-  mean_max_pos: number;
-  diag_attn: number;
-  call_count: number;
-  timestamp: number;
-}
-
-/** Loss probe record emitted after each loss.backward() call */
-interface LossProbeRecord {
-  kind: 'loss_probe';
-  file: string;
-  line: number;
-  loss: number;
-  loss_avg: number;
-  loss_delta: number;
-  loss_std: number;
-  pattern: 'decreasing' | 'increasing' | 'plateau' | 'oscillating' | 'diverging' | 'stable' | 'unknown';
-  step: number;
-  timestamp: number;
-}
-
-/** Activation statistics record emitted after each nn.Module forward pass */
-interface ActivationStatsRecord {
-  kind: 'activation_stats';
-  file: string;
-  line: number;
-  module_name: string;
-  call_count: number;
-  mean: number;
-  std: number;
-  min: number;
-  max: number;
-  numel: number;
-  shape: number[];
-  zero_frac?: number;
-  sat_frac?: number;
-  vanishing?: boolean;
-  exploding?: boolean;
-  timestamp: number;
-}
-
-/** A DataLoader batch shape record emitted on each iteration */
-interface DataloaderBatchShape {
-  shape?: number[];
-  dtype?: string;
-  index?: number;
-  key?: string;
-}
-
-interface DataloaderBatchRecord {
-  kind: 'dataloader_batch';
-  file: string;
-  line: number;
-  shapes: DataloaderBatchShape[];
-  batch_num: number;
-  timestamp: number;
-}
-
-/** Training throughput record emitted by the DataLoader hook */
-interface TrainingThroughputRecord {
-  kind: 'training_throughput';
-  file: string;
-  line: number;
-  samples_per_sec: number;
-  batches_per_sec: number;
-  batch_size: number;
-  batch_count: number;
-  total_batches?: number;
-  eta_seconds?: number;
-  timestamp: number;
-}
-
-/** React component render tracking record emitted by the Vite plugin */
-interface ReactRenderRecord {
-  kind: 'react_render';
-  file: string;
-  line: number;
-  component: string;
-  renderCount: number;
-  props?: Record<string, unknown>;
-  propKeys?: string[];
-  changedProps?: Array<{ key: string; from: unknown; to: unknown }>;
-  timestamp: number;
-}
-
-/** React hook invocation record emitted by the Vite plugin */
-interface ReactHookRecord {
-  kind: 'react_hook';
-  file: string;
-  line: number;
-  hookName: string;
-  invokeCount: number;
-  timestamp: number;
-}
-
-/** React useState update record emitted by the Vite plugin */
-interface ReactStateRecord {
-  kind: 'react_state';
-  file: string;
-  line: number;
-  stateName: string;
-  updateCount: number;
-  value: unknown;
-  timestamp: number;
-}
-
-/** A training progress record emitted by trickle.progress() */
-interface ProgressRecord {
-  kind: 'progress';
-  file: string;
-  line: number;
-  metrics: Record<string, number | boolean | string>;
-  timestamp: number;
-  call_count: number;
-}
-
 let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
-let dimLabelIndex: DimLabelIndex = new Map();
-let latestProgress: ProgressRecord | null = null;
-/** Gradient flow records: filePath -> lineNo -> GradientRecord (latest per line) */
-let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
-/** Checkpoint records: filePath -> lineNo -> CheckpointRecord[] (all saves at that line) */
-let checkpointIndex: Map<string, Map<number, CheckpointRecord[]>> = new Map();
-/** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
-let lrScheduleIndex: Map<string, Map<number, LrScheduleRecord>> = new Map();
-/** Optimizer step records: filePath -> lineNo -> OptimizerStepRecord (latest) */
-let optimizerIndex: Map<string, Map<number, OptimizerStepRecord>> = new Map();
-/** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
-let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
-/** Training throughput: filePath -> lineNo -> TrainingThroughputRecord (latest) */
-let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Map();
-/** Activation statistics: filePath -> lineNo -> ActivationStatsRecord[] (latest per module_name) */
-let activationIndex: Map<string, Map<number, ActivationStatsRecord[]>> = new Map();
-/** Loss probe records: filePath -> lineNo -> LossProbeRecord (latest) */
-let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
-/** Attention statistics: filePath -> lineNo -> AttentionStatsRecord (latest) */
-let attentionIndex: Map<string, Map<number, AttentionStatsRecord>> = new Map();
-/** React render counts: filePath -> lineNo -> ReactRenderRecord (latest) */
-let reactRenderIndex: Map<string, Map<number, ReactRenderRecord>> = new Map();
-/** React hook invocation counts: filePath -> lineNo -> ReactHookRecord (latest) */
-let reactHookIndex: Map<string, Map<number, ReactHookRecord>> = new Map();
-/** React useState update counts: filePath -> lineNo -> ReactStateRecord (latest) */
-let reactStateIndex: Map<string, Map<number, ReactStateRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 /** Error snapshot observations: same structure as varIndex but captured at crash time */
@@ -516,93 +306,6 @@ function saveTypeHistory(hashes: Map<string, string>): void {
   }
 }
 
-/**
- * CodeLens provider that shows LLM cost and eval score inline.
- * Reads .trickle/llm.jsonl to find which functions made LLM calls
- * and displays cost/token info above them.
- */
-class TrickleCostCodeLensProvider implements vscode.CodeLensProvider {
-  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-    const lenses: vscode.CodeLens[] = [];
-    const fileDir = path.dirname(document.uri.fsPath);
-    const trickleDir = findNearestTrickleDirCached(fileDir);
-    if (!trickleDir) return lenses;
-
-    // Read LLM data
-    const llmPath = path.join(trickleDir, 'llm.jsonl');
-    if (!fs.existsSync(llmPath)) return lenses;
-
-    let llmCalls: any[];
-    try {
-      llmCalls = fs.readFileSync(llmPath, 'utf-8').split('\n').filter(Boolean)
-        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-    } catch { return lenses; }
-
-    if (llmCalls.length === 0) return lenses;
-
-    // Aggregate: total cost, calls, tokens
-    const totalCost = llmCalls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
-    const totalTokens = llmCalls.reduce((s: number, c: any) => s + (c.totalTokens || 0), 0);
-    const errorCount = llmCalls.filter((c: any) => c.error).length;
-    const models = [...new Set(llmCalls.map((c: any) => c.model))];
-
-    // Show summary CodeLens at line 0
-    const costStr = totalCost > 0 ? `$${totalCost.toFixed(4)}` : '$0';
-    const tokStr = totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : String(totalTokens);
-    const errStr = errorCount > 0 ? ` | ${errorCount} errors` : '';
-    const modelStr = models.length <= 2 ? models.join(', ') : `${models.length} models`;
-
-    const title = `$(zap) trickle: ${llmCalls.length} LLM calls | ${costStr} | ${tokStr} tokens | ${modelStr}${errStr}`;
-    const lens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
-      title,
-      command: 'trickle.showCostReport',
-      tooltip: 'Click to see full LLM cost report (trickle cost-report)',
-    });
-    lenses.push(lens);
-
-    // Read eval data if available
-    const agentsPath = path.join(trickleDir, 'agents.jsonl');
-    if (fs.existsSync(agentsPath)) {
-      try {
-        const agentEvents = fs.readFileSync(agentsPath, 'utf-8').split('\n').filter(Boolean)
-          .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-        if (agentEvents.length > 0) {
-          const crewStarts = agentEvents.filter((e: any) => e.event === 'crew_start' || e.event === 'chain_start');
-          const errors = agentEvents.filter((e: any) => e.event?.includes('error'));
-          const toolCalls = agentEvents.filter((e: any) => e.event === 'tool_start');
-          const evalLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
-            title: `$(beaker) trickle eval: ${crewStarts.length} agent runs | ${toolCalls.length} tool calls | ${errors.length} errors`,
-            command: 'trickle.showEval',
-            tooltip: 'Click to see agent evaluation (trickle eval)',
-          });
-          lenses.push(evalLens);
-        }
-      } catch {}
-    }
-
-    // Read alerts for security
-    const alertsPath = path.join(trickleDir, 'alerts.jsonl');
-    if (fs.existsSync(alertsPath)) {
-      try {
-        const alerts = fs.readFileSync(alertsPath, 'utf-8').split('\n').filter(Boolean)
-          .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-        const critical = alerts.filter((a: any) => a.severity === 'critical');
-        const warnings = alerts.filter((a: any) => a.severity === 'warning');
-        if (critical.length > 0 || warnings.length > 0) {
-          const secLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
-            title: `$(shield) trickle security: ${critical.length} critical | ${warnings.length} warnings`,
-            command: 'trickle.showSecurity',
-            tooltip: 'Click to see security scan (trickle security)',
-          });
-          lenses.push(secLens);
-        }
-      } catch {}
-    }
-
-    return lenses;
-  }
-}
-
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   statusBarItem.command = 'trickle.refreshVariables';
@@ -623,7 +326,6 @@ export function activate(context: vscode.ExtensionContext) {
   // Load variable data
   loadAllVariables();
   loadErrors();
-  loadAlerts();
 
   // Register hover provider for all common file types (JS/TS and Python)
   const selector: vscode.DocumentSelector = [
@@ -665,30 +367,6 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  // Register CodeLens provider for LLM cost + eval insights
-  context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()),
-  );
-
-  // Register CodeLens commands
-  context.subscriptions.push(
-    vscode.commands.registerCommand('trickle.showCostReport', () => {
-      const terminal = vscode.window.createTerminal('trickle');
-      terminal.sendText('trickle cost-report');
-      terminal.show();
-    }),
-    vscode.commands.registerCommand('trickle.showEval', () => {
-      const terminal = vscode.window.createTerminal('trickle');
-      terminal.sendText('trickle eval');
-      terminal.show();
-    }),
-    vscode.commands.registerCommand('trickle.showSecurity', () => {
-      const terminal = vscode.window.createTerminal('trickle');
-      terminal.sendText('trickle security');
-      terminal.show();
-    }),
-  );
-
   // Watch for changes to variables.jsonl in ANY subdirectory (not just workspace root)
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders) {
@@ -726,7 +404,7 @@ export function activate(context: vscode.ExtensionContext) {
       const debouncedErrorReload = () => {
         if (errorReloadTimer) clearTimeout(errorReloadTimer);
         clearTrickleDirCache();
-        errorReloadTimer = setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300);
+        errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
       };
 
       errWatcher.onDidChange(debouncedErrorReload);
@@ -740,13 +418,6 @@ export function activate(context: vscode.ExtensionContext) {
       });
       context.subscriptions.push(errWatcher);
       if (!errorFileWatcher) errorFileWatcher = errWatcher;
-
-      // Watch alerts.jsonl for security/agent alerts
-      const alertPattern = new vscode.RelativePattern(folder, '**/.trickle/alerts.jsonl');
-      const alertWatcher = vscode.workspace.createFileSystemWatcher(alertPattern);
-      alertWatcher.onDidChange(() => setTimeout(loadAlerts, 300));
-      alertWatcher.onDidCreate(() => setTimeout(loadAlerts, 300));
-      context.subscriptions.push(alertWatcher);
     }
   }
 
@@ -767,8 +438,8 @@ export function activate(context: vscode.ExtensionContext) {
       w.onDidCreate(() => { clearTrickleDirCache(); setTimeout(() => loadAllVariables(), 300); });
       context.subscriptions.push(w);
       const ew = vscode.workspace.createFileSystemWatcher(path.join(trickleDir, 'errors.jsonl'));
-      ew.onDidChange(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300); });
-      ew.onDidCreate(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); loadAlerts(); refreshInlineHints(); }, 300); });
+      ew.onDidChange(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300); });
+      ew.onDidCreate(() => { clearTrickleDirCache(); setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300); });
       context.subscriptions.push(ew);
     })
   );
@@ -957,49 +628,7 @@ function countVars(): number {
   return count;
 }
 
-/** Ordered list of common training metric keys — shown first in status bar. */
-const PROGRESS_KEY_ORDER = ['epoch', 'step', 'batch', 'iter', 'loss', 'train_loss',
-  'val_loss', 'acc', 'accuracy', 'val_acc', 'lr', 'f1', 'auc'];
-
-/** Format a single metric value for the status bar (compact). */
-function formatProgressValue(val: number | boolean | string): string {
-  if (typeof val === 'boolean') return val ? 'true' : 'false';
-  if (typeof val === 'number') {
-    if (Number.isInteger(val)) return String(val);
-    return val.toFixed(4).replace(/\.?0+$/, '');
-  }
-  return String(val);
-}
-
 function updateStatusBar() {
-  // Show training progress when a recent trickle.progress() record exists (< 120 s)
-  if (latestProgress) {
-    const ageSeconds = Date.now() / 1000 - latestProgress.timestamp;
-    if (ageSeconds < 120) {
-      const m = latestProgress.metrics;
-      const parts: string[] = [];
-
-      // Priority keys first, then any remaining ones
-      for (const key of PROGRESS_KEY_ORDER) {
-        if (key in m) {
-          parts.push(`${key} ${formatProgressValue(m[key])}`);
-        }
-      }
-      for (const [key, val] of Object.entries(m)) {
-        if (!PROGRESS_KEY_ORDER.includes(key)) {
-          parts.push(`${key} ${formatProgressValue(val)}`);
-        }
-      }
-
-      if (parts.length > 0) {
-        statusBarItem.text = `$(sync~spin) Training: ${parts.join(' | ')}`;
-        statusBarItem.tooltip = `Training progress from trickle.progress()\n${latestProgress.file}:${latestProgress.line}\nCall #${latestProgress.call_count}\nClick to refresh`;
-        statusBarItem.show();
-        return;
-      }
-    }
-  }
-
   const count = countVars();
   if (count > 0) {
     statusBarItem.text = `$(symbol-variable) Trickle: ${count} vars`;
@@ -1043,20 +672,6 @@ function loadAllVariables() {
   notebookCellIndex.clear();
   errorSnapshotIndex.clear();
   lastErrorMessage = undefined;
-  dimLabelIndex.clear();
-  latestProgress = null;
-  gradientIndex.clear();
-  checkpointIndex.clear();
-  lrScheduleIndex.clear();
-  dataloaderIndex.clear();
-  optimizerIndex.clear();
-  throughputIndex.clear();
-  activationIndex.clear();
-  lossProbeIndex.clear();
-  attentionIndex.clear();
-  reactRenderIndex.clear();
-  reactHookIndex.clear();
-  reactStateIndex.clear();
 
   // Find all variables.jsonl files across all workspace folders and subdirectories
   const allJsonlPaths = findAllVariablesJsonlPaths();
@@ -1074,202 +689,6 @@ function loadAllVariables() {
       for (const line of lines) {
         try {
           const record = JSON.parse(line);
-
-          // Handle progress records from trickle.progress()
-          if (record.kind === 'progress') {
-            const pr = record as ProgressRecord;
-            if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
-              latestProgress = pr;
-            }
-            continue;
-          }
-
-          // Handle LR schedule records emitted after scheduler.step()
-          if (record.kind === 'lr_schedule') {
-            const lr = record as LrScheduleRecord;
-            if (!lrScheduleIndex.has(lr.file)) {
-              lrScheduleIndex.set(lr.file, new Map());
-            }
-            const lineMap = lrScheduleIndex.get(lr.file)!;
-            const existing = lineMap.get(lr.line);
-            if (!existing || lr.timestamp > existing.timestamp) {
-              lineMap.set(lr.line, lr);
-            }
-            continue;
-          }
-
-          // Handle checkpoint records emitted after torch.save / save_pretrained
-          if (record.kind === 'checkpoint') {
-            const cr = record as CheckpointRecord;
-            if (!checkpointIndex.has(cr.file)) {
-              checkpointIndex.set(cr.file, new Map());
-            }
-            const lineMap = checkpointIndex.get(cr.file)!;
-            if (!lineMap.has(cr.line)) {
-              lineMap.set(cr.line, []);
-            }
-            lineMap.get(cr.line)!.push(cr);
-            continue;
-          }
-
-          // Handle gradient flow records emitted after loss.backward()
-          if (record.kind === 'gradient') {
-            const gr = record as GradientRecord;
-            if (!gradientIndex.has(gr.file)) {
-              gradientIndex.set(gr.file, new Map());
-            }
-            const lineMap = gradientIndex.get(gr.file)!;
-            const existing = lineMap.get(gr.line);
-            if (!existing || gr.timestamp > existing.timestamp) {
-              lineMap.set(gr.line, gr);
-            }
-            continue;
-          }
-
-          // Handle optimizer step records
-          if (record.kind === 'optimizer_step') {
-            const op = record as OptimizerStepRecord;
-            if (!optimizerIndex.has(op.file)) {
-              optimizerIndex.set(op.file, new Map());
-            }
-            const lineMap = optimizerIndex.get(op.file)!;
-            const existing = lineMap.get(op.line);
-            if (!existing || op.timestamp > existing.timestamp) {
-              lineMap.set(op.line, op);
-            }
-            continue;
-          }
-
-          // Handle DataLoader batch shape records
-          if (record.kind === 'dataloader_batch') {
-            const dl = record as DataloaderBatchRecord;
-            if (!dataloaderIndex.has(dl.file)) {
-              dataloaderIndex.set(dl.file, new Map());
-            }
-            const lineMap = dataloaderIndex.get(dl.file)!;
-            const existing = lineMap.get(dl.line);
-            if (!existing || dl.timestamp > existing.timestamp) {
-              lineMap.set(dl.line, dl);
-            }
-            continue;
-          }
-
-          // Handle attention statistics records
-          if (record.kind === 'attention_stats') {
-            const at = record as AttentionStatsRecord;
-            if (!attentionIndex.has(at.file)) {
-              attentionIndex.set(at.file, new Map());
-            }
-            const lineMap = attentionIndex.get(at.file)!;
-            const existing = lineMap.get(at.line);
-            if (!existing || at.timestamp > existing.timestamp) {
-              lineMap.set(at.line, at);
-            }
-            continue;
-          }
-
-          // Handle loss probe records
-          if (record.kind === 'loss_probe') {
-            const lp = record as LossProbeRecord;
-            if (!lossProbeIndex.has(lp.file)) {
-              lossProbeIndex.set(lp.file, new Map());
-            }
-            const lineMap = lossProbeIndex.get(lp.file)!;
-            const existing = lineMap.get(lp.line);
-            if (!existing || lp.timestamp > existing.timestamp) {
-              lineMap.set(lp.line, lp);
-            }
-            continue;
-          }
-
-          // Handle activation statistics records
-          if (record.kind === 'activation_stats') {
-            const ac = record as ActivationStatsRecord;
-            if (!activationIndex.has(ac.file)) {
-              activationIndex.set(ac.file, new Map());
-            }
-            const lineMap = activationIndex.get(ac.file)!;
-            const existing = lineMap.get(ac.line);
-            if (!existing) {
-              lineMap.set(ac.line, [ac]);
-            } else {
-              existing.push(ac);
-            }
-            continue;
-          }
-
-          // Handle React hook invocation records
-          if (record.kind === 'react_hook') {
-            const rh = record as ReactHookRecord;
-            let rhPath = rh.file;
-            try { rhPath = fs.realpathSync(rhPath); } catch { /* keep original */ }
-            if (!reactHookIndex.has(rhPath)) {
-              reactHookIndex.set(rhPath, new Map());
-            }
-            const lineMap = reactHookIndex.get(rhPath)!;
-            const existing = lineMap.get(rh.line);
-            if (!existing || rh.invokeCount > existing.invokeCount) {
-              lineMap.set(rh.line, rh);
-            }
-            continue;
-          }
-
-          // Handle React useState update records
-          if (record.kind === 'react_state') {
-            const rs = record as ReactStateRecord;
-            let rsPath = rs.file;
-            try { rsPath = fs.realpathSync(rsPath); } catch { /* keep original */ }
-            if (!reactStateIndex.has(rsPath)) {
-              reactStateIndex.set(rsPath, new Map());
-            }
-            const lineMap = reactStateIndex.get(rsPath)!;
-            const existing = lineMap.get(rs.line);
-            if (!existing || rs.updateCount > existing.updateCount) {
-              lineMap.set(rs.line, rs);
-            }
-            continue;
-          }
-
-          // Handle React render records
-          if (record.kind === 'react_render') {
-            const rr = record as ReactRenderRecord;
-            let rrPath = rr.file;
-            try { rrPath = fs.realpathSync(rrPath); } catch { /* keep original */ }
-            if (!reactRenderIndex.has(rrPath)) {
-              reactRenderIndex.set(rrPath, new Map());
-            }
-            const lineMap = reactRenderIndex.get(rrPath)!;
-            const existing = lineMap.get(rr.line);
-            if (!existing || rr.renderCount > existing.renderCount) {
-              lineMap.set(rr.line, rr);
-            }
-            continue;
-          }
-
-          // Handle training throughput records
-          if (record.kind === 'training_throughput') {
-            const tp = record as TrainingThroughputRecord;
-            if (!throughputIndex.has(tp.file)) {
-              throughputIndex.set(tp.file, new Map());
-            }
-            const lineMap = throughputIndex.get(tp.file)!;
-            const existing = lineMap.get(tp.line);
-            if (!existing || tp.timestamp > existing.timestamp) {
-              lineMap.set(tp.line, tp);
-            }
-            continue;
-          }
-
-          // Handle dim_labels records
-          if (record.kind === 'dim_labels') {
-            const dl = record as DimLabelRecord;
-            const key = dl.funcName ? `${dl.file}:${dl.funcName}:${dl.varName}` : `${dl.file}::${dl.varName}`;
-            if (!dimLabelIndex.has(dl.file)) {
-              dimLabelIndex.set(dl.file, new Map());
-            }
-            dimLabelIndex.get(dl.file)!.set(key, dl);
-            continue;
-          }
 
           // Handle error snapshot records (captured at crash time)
           if (record.kind === 'error_snapshot') {
@@ -1493,66 +912,6 @@ function loadErrors() {
   }
 }
 
-/**
- * Load security alerts and agent warnings from alerts.jsonl.
- * Surfaces them as VS Code diagnostics (yellow/red squiggles).
- */
-function loadAlerts() {
-  const allAlertPaths: string[] = [];
-  for (const folder of (vscode.workspace.workspaceFolders || [])) {
-    const trickleDir = findNearestTrickleDirCached(folder.uri.fsPath);
-    if (trickleDir) {
-      const alertsPath = path.join(trickleDir, 'alerts.jsonl');
-      if (fs.existsSync(alertsPath)) allAlertPaths.push(alertsPath);
-    }
-  }
-
-  for (const alertsPath of allAlertPaths) {
-    try {
-      const content = fs.readFileSync(alertsPath, 'utf8');
-      const lines = content.split('\n').filter(l => l.trim());
-      const workspaceRoot = path.dirname(path.dirname(alertsPath));
-
-      // Find active editor file to attach diagnostics
-      const activeFile = vscode.window.activeTextEditor?.document.uri.fsPath;
-      if (!activeFile) continue;
-
-      const diags: vscode.Diagnostic[] = [];
-      for (const line of lines) {
-        try {
-          const alert = JSON.parse(line);
-          if (alert.kind !== 'alert') continue;
-          // Only surface critical and warning alerts as diagnostics
-          if (alert.severity !== 'critical' && alert.severity !== 'warning') continue;
-
-          // Skip non-security alerts that don't have actionable location
-          const isSecurityAlert = ['prompt_injection', 'privilege_escalation', 'data_exfiltration',
-            'secret', 'sql_injection', 'llm_errors', 'llm_cost_spike', 'agent_tool_retry',
-            'agent_tool_errors', 'agent_failure'].includes(alert.category);
-          if (!isSecurityAlert) continue;
-
-          const severity = alert.severity === 'critical'
-            ? vscode.DiagnosticSeverity.Error
-            : vscode.DiagnosticSeverity.Warning;
-
-          const message = `[trickle] ${alert.message}${alert.suggestion ? '\n💡 ' + alert.suggestion : ''}`;
-          const range = new vscode.Range(0, 0, 0, 1000); // Top of file
-          const diag = new vscode.Diagnostic(range, message, severity);
-          diag.source = 'trickle-security';
-          diags.push(diag);
-        } catch { /* skip malformed */ }
-      }
-
-      if (diags.length > 0 && activeFile) {
-        // Merge with existing diagnostics (don't overwrite error diagnostics)
-        const existing = diagnosticCollection.get(vscode.Uri.file(activeFile)) || [];
-        const merged = [...existing.filter(d => d.source !== 'trickle-security'), ...diags];
-        diagnosticCollection.set(vscode.Uri.file(activeFile), merged);
-      }
-    } catch { /* file read error */ }
-  }
-}
-
 /** Get the line map for a document, handling both regular files and notebook cells. */
 function getLineMapForDocument(document: vscode.TextDocument): Map<number, VariableObservation[]> | undefined {
   // Regular file
@@ -1698,8 +1057,7 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     const shapeFlowShown = new Set<string>();
 
     for (const obs of candidates) {
-      const labels = getDimLabels(obs);
-      const typeStr = typeNodeToString(obs.type, 3, labels);
+      const typeStr = typeNodeToString(obs.type, 3);
       const className = obs.type?.class_name;
       const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
 
@@ -1717,8 +1075,7 @@ class TrickleHoverProvider implements vscode.HoverProvider {
           parts.push(`**\`${obs.varName}\`**${funcCtx} — shape flow:`);
           const flowLines: string[] = [];
           for (const fo of flowObs) {
-            const foLabels = getDimLabels(fo);
-            const shape = extractShapeStr(fo.type, foLabels);
+            const shape = extractShapeStr(fo.type);
             const stats = formatTensorStats(fo.type);
             const marker = fo.line === obs.line ? ' **←**' : '';
             const callStr = fo.callFlow ? ` ← ${fo.callFlow.callee}(${fo.callFlow.calleeClass || ''})` : '';
@@ -1726,14 +1083,14 @@ class TrickleHoverProvider implements vscode.HoverProvider {
           }
           parts.push(flowLines.join('\n\n'));
           if (obs.callFlow) {
-            parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+            parts.push(formatCallFlow(obs.callFlow, obs.type));
           }
         } else {
           parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
           const stats = formatTensorStats(obs.type);
           if (stats) parts.push(stats);
           if (obs.callFlow) {
-            parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+            parts.push(formatCallFlow(obs.callFlow, obs.type));
           }
         }
       } else if (className === 'Tensor' || className === 'ndarray') {
@@ -1741,12 +1098,12 @@ class TrickleHoverProvider implements vscode.HoverProvider {
         const stats = formatTensorStats(obs.type);
         if (stats) parts.push(stats);
         if (obs.callFlow) {
-          parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+          parts.push(formatCallFlow(obs.callFlow, obs.type));
         }
       } else {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         if (obs.callFlow) {
-          parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+          parts.push(formatCallFlow(obs.callFlow, obs.type));
         }
         if (showSamples && obs.sample !== undefined) {
           const sampleStr = formatSample(obs.sample);
@@ -1761,178 +1118,6 @@ class TrickleHoverProvider implements vscode.HoverProvider {
 
     return new vscode.Hover(markdown, wordRange);
   }
-}
-
-/**
- * Match activation stats records to nn.Sequential layer declaration lines.
- *
- * Given a forward-call line (e.g. `features = self.features(x)`) and the activation
- * records that fired on that line, find the nn.Sequential(...) block that defines the
- * layers and return a mapping from each layer declaration line to its activation record.
- *
- * Strategy:
- * 1. Extract the attribute name from the forward call line (e.g. "features")
- * 2. Find the `self.<attr> = nn.Sequential(` block in the document
- * 3. Parse the layer declaration lines to get ordered (lineIndex, layerType) pairs
- * 4. From all activation records, extract the last complete forward pass
- *    (last N records by timestamp, where N = number of layers)
- * 5. Match by type occurrence order: 1st Linear record -> 1st nn.Linear line, etc.
- */
-function matchSequentialLayers(
-  document: vscode.TextDocument,
-  forwardCallLine: number,
-  leafRecords: ActivationStatsRecord[],
-): { layerLineNo: number; record: ActivationStatsRecord }[] {
-  const results: { layerLineNo: number; record: ActivationStatsRecord }[] = [];
-
-  // Extract the attribute name from the forward call line, e.g. "self.features(x)" -> "features"
-  const callLineText = document.lineAt(forwardCallLine - 1).text;
-  const attrMatch = /self\.(\w+)\s*\(/.exec(callLineText);
-  if (!attrMatch) return results;
-  const attrName = attrMatch[1];
-
-  // Search the document for the Sequential declaration: `self.<attr> = nn.Sequential(`
-  const seqPattern = new RegExp(`self\\.${escapeRegex(attrName)}\\s*=\\s*nn\\.Sequential\\s*\\(`);
-  let seqStartLine = -1;
-  const totalLines = document.lineCount;
-  for (let i = 0; i < totalLines; i++) {
-    if (seqPattern.test(document.lineAt(i).text)) {
-      seqStartLine = i;
-      break;
-    }
-  }
-  if (seqStartLine < 0) return results;
-
-  // Parse the layer lines inside the Sequential block.
-  // Each layer line matches nn.<LayerType>(...) — collect (lineIndex, layerType)
-  const layerLines: { lineIndex: number; layerType: string }[] = [];
-  const layerPattern = /nn\.(\w+)\s*\(/;
-
-  // Walk lines from seqStartLine+1 until we find the closing paren
-  let parenDepth = 0;
-  // Count parens on the opening line
-  for (const ch of document.lineAt(seqStartLine).text) {
-    if (ch === '(') parenDepth++;
-    if (ch === ')') parenDepth--;
-  }
-
-  for (let i = seqStartLine + 1; i < totalLines && parenDepth > 0; i++) {
-    const lineText = document.lineAt(i).text;
-    const layerMatch = layerPattern.exec(lineText);
-    if (layerMatch) {
-      layerLines.push({ lineIndex: i, layerType: layerMatch[1] });
-    }
-    for (const ch of lineText) {
-      if (ch === '(') parenDepth++;
-      if (ch === ')') parenDepth--;
-    }
-  }
-
-  if (layerLines.length === 0) return results;
-
-  const numLayers = layerLines.length;
-
-  // Build the expected type counts from the source
-  const expectedTypeCounts = new Map<string, number>();
-  for (const { layerType } of layerLines) {
-    expectedTypeCounts.set(layerType, (expectedTypeCounts.get(layerType) || 0) + 1);
-  }
-
-  // Sort all records by timestamp to find the last complete forward pass
-  const sortedAll = [...leafRecords].sort((a, b) => a.timestamp - b.timestamp);
-
-  // Extract the last N records (one forward pass) where N = numLayers
-  // We take the last `numLayers` records and verify the type counts match
-  let lastPassRecords: ActivationStatsRecord[] | null = null;
-
-  if (sortedAll.length >= numLayers) {
-    const candidate = sortedAll.slice(-numLayers);
-    // Verify type counts match
-    const candidateTypeCounts = new Map<string, number>();
-    for (const r of candidate) {
-      candidateTypeCounts.set(r.module_name, (candidateTypeCounts.get(r.module_name) || 0) + 1);
-    }
-    let countsMatch = true;
-    for (const [type, count] of expectedTypeCounts) {
-      if ((candidateTypeCounts.get(type) || 0) !== count) {
-        countsMatch = false;
-        break;
-      }
-    }
-    if (countsMatch && candidateTypeCounts.size === expectedTypeCounts.size) {
-      lastPassRecords = candidate;
-    }
-  }
-
-  // If we couldn't extract a clean last pass, fall back to using
-  // the latest record per (module_name, occurrence_index)
-  if (!lastPassRecords) {
-    // Group records by module_name, keep latest N per type where N = expected count
-    const typeGroups = new Map<string, ActivationStatsRecord[]>();
-    for (const r of sortedAll) {
-      if (!typeGroups.has(r.module_name)) {
-        typeGroups.set(r.module_name, []);
-      }
-      typeGroups.get(r.module_name)!.push(r);
-    }
-
-    // For each type, take the last expectedCount records (sorted by timestamp)
-    lastPassRecords = [];
-    for (const { layerType } of layerLines) {
-      const group = typeGroups.get(layerType);
-      if (!group) return results; // Can't match — bail
-    }
-
-    // Build by occurrence order: for each type, pick the last N records
-    const typePickCounters = new Map<string, number>();
-    const typeLatest = new Map<string, ActivationStatsRecord[]>();
-    for (const [type, count] of expectedTypeCounts) {
-      const group = typeGroups.get(type);
-      if (!group || group.length < count) return results;
-      // Take the last `count` records for this type
-      typeLatest.set(type, group.slice(-count));
-      typePickCounters.set(type, 0);
-    }
-
-    // Now assign to layer lines by type occurrence
-    for (const { lineIndex, layerType } of layerLines) {
-      const pickIdx = typePickCounters.get(layerType) || 0;
-      const latest = typeLatest.get(layerType)!;
-      if (pickIdx < latest.length) {
-        results.push({
-          layerLineNo: lineIndex + 1,
-          record: latest[pickIdx],
-        });
-      }
-      typePickCounters.set(layerType, pickIdx + 1);
-    }
-    return results;
-  }
-
-  // We have a clean last-pass set of records. Match by type occurrence order.
-  // Group them by type, preserving timestamp order within each type.
-  const typeToRecords = new Map<string, ActivationStatsRecord[]>();
-  for (const r of lastPassRecords) {
-    if (!typeToRecords.has(r.module_name)) {
-      typeToRecords.set(r.module_name, []);
-    }
-    typeToRecords.get(r.module_name)!.push(r);
-  }
-
-  const typeCounters = new Map<string, number>();
-  for (const { lineIndex, layerType } of layerLines) {
-    const count = typeCounters.get(layerType) || 0;
-    const records = typeToRecords.get(layerType);
-    if (records && count < records.length) {
-      results.push({
-        layerLineNo: lineIndex + 1,
-        record: records[count],
-      });
-    }
-    typeCounters.set(layerType, count + 1);
-  }
-
-  return results;
 }
 
 /** Inline hints (inlay hints) — show type after variable declarations */
@@ -1969,8 +1154,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         // Handle return value traces — show at end of return line
         if (obs.varName === '<return>' || obs.varName.startsWith('<return:')) {
           if (!/\breturn\b/.test(lineText)) continue;
-          const retLabels = getDimLabels(obs);
-          const typeStr = typeNodeToString(obs.type, 3, retLabels);
+          const typeStr = typeNodeToString(obs.type, 3);
           // For <return:varname>, show the individual element type
           const label = obs.varName === '<return>'
             ? ` -> ${typeStr}`
@@ -2076,9 +1260,8 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           if ((isFuncParam || isArrowParam) && afterVar.startsWith(':')) continue;
         }
 
-        const obsLabels = getDimLabels(obs);
-        const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
-        let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
+        const fullTypeStr = typeNodeToString(obs.type, 3);
+        let typeStr = typeNodeToStringCompact(obs.type, undefined, obs.sample);
         const hintMode = config.get<string>('inlineHintMode', 'auto');
 
         if (hintMode !== 'type') {
@@ -2095,6 +1278,12 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
               typeStr = `"${obs.sample}"`;
             }
+          }
+
+          // Captured literal types (`"alice"`, `42`) — same inline sample treatment
+          if (obs.type.kind === 'literal' && obs.sample !== undefined && obs.sample !== null) {
+            const scalar = formatScalarSample(obs.sample);
+            if (scalar) typeStr = scalar;
           }
 
           // For class instances with a config, sample is a constructor-call string like
@@ -2146,14 +1335,14 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         // Show full type in tooltip when inline was compacted
         if (fullTypeStr !== typeStr) {
           if (obs.type && isComplexType(obs.type)) {
-            const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+            const prettyType = typeNodeToPretty(obs.type, 0);
             tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
           } else {
             tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
           }
         } else if (obs.type && isComplexType(obs.type)) {
           // Even when not compacted, show pretty-printed hover for complex types
-          const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+          const prettyType = typeNodeToPretty(obs.type, 0);
           tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
         }
         const stats = formatTensorStats(obs.type);
@@ -2165,7 +1354,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           tooltipParts.push(`**RAM:** \`${obs.cpu_memory_mb.toFixed(1)}MB\``);
         }
         if (obs.callFlow) {
-          tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
+          tooltipParts.push(formatCallFlow(obs.callFlow, obs.type));
         }
         if (config.get('showSampleValues', true) && obs.sample !== undefined) {
           if (obs.previousSamples && obs.previousSamples.length > 0) {
@@ -2182,778 +1371,6 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         hints.push(hint);
-      }
-    }
-
-    // Add LR schedule inlay hints at scheduler.step() lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const lrLines = lrScheduleIndex.get(filePath);
-      if (lrLines) {
-        for (const [lineNo, lr] of lrLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Format LRs: single value or array
-          const lrStr = lr.lrs.length === 1
-            ? lr.lrs[0].toExponential(3)
-            : `[${lr.lrs.map(v => v.toExponential(2)).join(', ')}]`;
-
-          // Add context (epoch/step) if available
-          const ctxParts: string[] = [];
-          for (const key of ['epoch', 'step', 'global_step', 'iteration']) {
-            if (key in lr.context) {
-              ctxParts.push(`${key}=${lr.context[key]}`);
-              if (ctxParts.length >= 2) break;
-            }
-          }
-          const ctxStr = ctxParts.length > 0 ? ` | ${ctxParts.join(' | ')}` : '';
-          const label = ` 📈 lr=${lrStr}${ctxStr}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const allCtx = Object.entries(lr.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
-            const md = new vscode.MarkdownString(
-              `### 📈 Learning Rate: \`${lr.scheduler_class}\`\n\n` +
-              `Current LR: \`${lrStr}\`\n\n` +
-              (lr.lrs.length > 1 ? `Param groups: ${lr.lrs.map((v, i) => `group ${i}: \`${v.toExponential(3)}\``).join(', ')}\n\n` : '') +
-              (allCtx ? `Context: ${allCtx}\n\n` : '') +
-              `Step: ${lr.step_num}`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line out of range
-          }
-        }
-      }
-    }
-
-    // Add checkpoint inlay hints at torch.save / save_pretrained lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const ckptLines = checkpointIndex.get(filePath);
-      if (ckptLines) {
-        for (const [lineNo, saves] of ckptLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-          if (saves.length === 0) continue;
-
-          // Show info from the most recent save at this line
-          const latest = saves[saves.length - 1];
-          const total = latest.save_count;
-          const basename = latest.path.split('/').pop() || latest.path;
-
-          // Build metrics string from the most recent save
-          const PRIORITY_KEYS = ['epoch', 'step', 'loss', 'val_loss', 'acc', 'lr'];
-          const metricParts: string[] = [];
-          for (const key of PRIORITY_KEYS) {
-            if (key in latest.metrics) {
-              const v = latest.metrics[key];
-              metricParts.push(`${key}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
-            }
-          }
-          // Add any remaining metrics not in the priority list
-          for (const [k, v] of Object.entries(latest.metrics)) {
-            if (!PRIORITY_KEYS.includes(k) && metricParts.length < 5) {
-              metricParts.push(`${k}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
-            }
-          }
-
-          const metricsStr = metricParts.length > 0 ? ` | ${metricParts.join(' | ')}` : '';
-          const countStr = total > 1 ? ` (×${total})` : '';
-          const label = ` 💾 ${basename}${metricsStr}${countStr}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            // Tooltip with history of all saves at this line
-            const historyRows = saves.map((s, i) => {
-              const mStr = Object.entries(s.metrics).map(([k, v]) => `${k}=${v}`).join(', ');
-              const d = new Date(s.timestamp * 1000).toLocaleTimeString();
-              return `${i + 1}. \`${s.path.split('/').pop()}\` — ${mStr || 'no metrics'} @ ${d}`;
-            });
-            const md = new vscode.MarkdownString(
-              `### 💾 Checkpoint Saves\n\n${historyRows.join('\n\n')}`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add gradient flow inlay hints at the loss.backward() call line
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const gradLines = gradientIndex.get(filePath);
-      if (gradLines) {
-        for (const [lineNo, gr] of gradLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-          if (gr.layers.length === 0) continue;
-
-          // Build compact label showing gradient health
-          const parts: string[] = [];
-
-          if (gr.exploding.length > 0) {
-            parts.push(`⚡ exploding: ${gr.exploding.slice(0, 2).join(', ')}`);
-          }
-          if (gr.vanishing.length > 0) {
-            parts.push(`↓ vanishing: ${gr.vanishing.slice(0, 2).join(', ')}`);
-          }
-          if (parts.length === 0) {
-            // All healthy — show top 3 layer norms
-            const top = gr.layers.slice(0, 3).map(l => `${l.name}=${l.norm.toExponential(2)}`);
-            parts.push(`${gr.num_layers} layers | ${top.join(' | ')}`);
-          }
-
-          const label = ` ∇ ${gr.model_var}: ${parts.join(' | ')}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            // Tooltip with full per-layer breakdown
-            const layerRows = gr.layers.map(l => {
-              const flag = l.exploding ? ' ⚡' : l.vanishing ? ' ↓' : '';
-              return `| \`${l.name}\` | \`${l.norm.toExponential(3)}\`${flag} |`;
-            });
-            const md = new vscode.MarkdownString(
-              `### ∇ Gradient Norms: \`${gr.model_var}\`\n\n` +
-              `| Layer | Grad Norm |\n|---|---|\n${layerRows.join('\n')}\n\n` +
-              `max: \`${gr.max_norm.toExponential(3)}\` · min: \`${gr.min_norm.toExponential(3)}\`\n\n` +
-              (gr.exploding.length > 0 ? `⚡ **Exploding** (>${_EXPLODING_THRESHOLD}): ${gr.exploding.join(', ')}\n\n` : '') +
-              (gr.vanishing.length > 0 ? `↓ **Vanishing** (<${_VANISHING_THRESHOLD}): ${gr.vanishing.join(', ')}` : ''),
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add optimizer step inlay hints at optimizer.step() lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const optLines = optimizerIndex.get(filePath);
-      if (optLines) {
-        for (const [lineNo, op] of optLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Build compact label
-          const gradStr = op.grad_norm.toExponential(3);
-          const healthIcon = op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙';
-
-          const parts: string[] = [`grad=${gradStr}`];
-          if (op.update_norm > 0) {
-            parts.push(`Δθ=${op.update_norm.toExponential(3)}`);
-          }
-          if (op.param_stats.length > 0) {
-            const s = op.param_stats[0];
-            parts.push(`σ=${s.param_std.toExponential(2)}`);
-          }
-          const label = ` ${healthIcon} ${parts.join(' | ')}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            // Build detailed tooltip
-            const groupRows = op.param_stats.map((s, i) =>
-              `| group ${i} | lr=\`${s.lr}\` | norm=\`${s.param_norm.toFixed(4)}\` | μ=\`${s.param_mean.toFixed(4)}\` | σ=\`${s.param_std.toFixed(4)}\` | params=\`${s.n_params.toLocaleString()}\` |`,
-            ).join('\n');
-
-            const ctxStr = Object.entries(op.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
-
-            const md = new vscode.MarkdownString(
-              `### ${op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙'} Optimizer: \`${op.optimizer_class}\`\n\n` +
-              `**Gradient norm:** \`${op.grad_norm.toExponential(4)}\`` +
-              (op.exploding ? ' — ⚡ **EXPLODING**' : op.vanishing ? ' — ↓ **VANISHING**' : '') + '\n\n' +
-              (op.update_norm > 0 ? `**Weight update:** \`||Δθ|| = ${op.update_norm.toExponential(4)}\`\n\n` : '') +
-              (groupRows ? `**Parameter groups:**\n\n| Group | LR | Norm | Mean | Std | #Params |\n|---|---|---|---|---|---|\n${groupRows}\n\n` : '') +
-              (ctxStr ? `**Context:** ${ctxStr}\n\n` : '') +
-              `Step #${op.step_num}`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add DataLoader batch shape inlay hints at for-loop lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const dlLines = dataloaderIndex.get(filePath);
-      if (dlLines) {
-        for (const [lineNo, dl] of dlLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-          if (dl.shapes.length === 0) continue;
-
-          // Format shapes compactly
-          const isDict = dl.shapes.some(s => s.key !== undefined);
-          let shapeStr: string;
-
-          if (isDict) {
-            // Dict batch: {input_ids[32,512] int64, attention_mask[32,512]}
-            const parts = dl.shapes.map(s => {
-              const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
-              const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
-              return `${s.key}${shapeRepr}${dtypeRepr}`;
-            });
-            shapeStr = `{${parts.join(', ')}}`;
-          } else {
-            // Tuple/list/single tensor batch: [32,3,224,224] float32, [32] int64
-            const parts = dl.shapes.map(s => {
-              const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
-              const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
-              return `${shapeRepr}${dtypeRepr}`;
-            });
-            shapeStr = parts.join(', ');
-          }
-
-          const label = ` ⬛ ${shapeStr}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            // Tooltip with full shape breakdown
-            const shapeRows = dl.shapes.map(s => {
-              const nameStr = s.key !== undefined ? `\`${s.key}\`` : `item ${s.index ?? 0}`;
-              const shapeRepr = s.shape ? `\`[${s.shape.join(', ')}]\`` : 'n/a';
-              const dtypeStr = s.dtype ? ` · \`${s.dtype}\`` : '';
-              return `${nameStr}: ${shapeRepr}${dtypeStr}`;
-            });
-            const md = new vscode.MarkdownString(
-              `### ⬛ DataLoader Batch Shapes\n\n` +
-              shapeRows.join('\n\n') +
-              `\n\n*Batch #${dl.batch_num} captured by trickle*`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add training throughput inlay hints at DataLoader for-loop lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const tpLines = throughputIndex.get(filePath);
-      if (tpLines) {
-        for (const [lineNo, tp] of tpLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Format samples/sec compactly: 1234 → "1.23k", 45678 → "45.7k"
-          const fmtRate = (n: number): string => {
-            if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 1 : 2)}k`;
-            return n.toFixed(1);
-          };
-
-          const fmtEta = (s: number): string => {
-            const h = Math.floor(s / 3600);
-            const m = Math.floor((s % 3600) / 60);
-            const sec = Math.floor(s % 60);
-            if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-            return `${m}:${String(sec).padStart(2, '0')}`;
-          };
-
-          let label = ` ⚡ ${fmtRate(tp.samples_per_sec)} smp/s`;
-          if (tp.eta_seconds !== undefined) {
-            label += ` | ETA ${fmtEta(tp.eta_seconds)}`;
-          }
-          if (tp.total_batches !== undefined) {
-            const pct = Math.round((tp.batch_count / tp.total_batches) * 100);
-            label += ` (${pct}%)`;
-          }
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const tooltipLines = [
-              `**Samples/sec:** \`${tp.samples_per_sec.toFixed(1)}\``,
-              `**Batches/sec:** \`${tp.batches_per_sec.toFixed(3)}\``,
-              `**Batch size:** \`${tp.batch_size}\``,
-              `**Batches done:** \`${tp.batch_count}${tp.total_batches ? ' / ' + tp.total_batches : ''}\``,
-            ];
-            if (tp.eta_seconds !== undefined) {
-              tooltipLines.push(`**ETA:** \`${fmtEta(tp.eta_seconds)}\``);
-            }
-            const md = new vscode.MarkdownString(
-              `### ⚡ Training Throughput\n\n` + tooltipLines.join('\n\n') +
-              `\n\n*Tracked by trickle (rolling avg)*`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add attention statistics inlay hints at F.softmax / attention call lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const atLines = attentionIndex.get(filePath);
-      if (atLines) {
-        for (const [lineNo, at] of atLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          const entropyPct = at.max_entropy > 0
-            ? Math.round((at.mean_entropy / at.max_entropy) * 100)
-            : 0;
-
-          let label = ` 🎯 H=${at.mean_entropy.toFixed(2)}/${at.max_entropy.toFixed(2)}`;
-          if (at.sharp_heads > 0) label += ` | sharp:${at.sharp_heads}`;
-          if (at.dead_heads > 0) label += ` | dead:${at.dead_heads}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            // Per-head entropy breakdown
-            const headRows = at.head_entropies.map((h, i) => {
-              const pct = Math.round((h / at.max_entropy) * 100);
-              const flag = h > 0.95 * at.max_entropy ? ' 💤 dead'
-                : h < 0.10 * at.max_entropy ? ' ⚡ sharp' : '';
-              return `head ${i}: \`${h.toFixed(3)}\` (${pct}%${flag})`;
-            });
-
-            const tooltipLines = [
-              `**Heads:** \`${at.n_heads}\` · **Seq len:** \`${at.seq_len}\``,
-              `**Mean entropy:** \`${at.mean_entropy.toFixed(4)}\` / \`${at.max_entropy.toFixed(4)}\` (${entropyPct}% of max)`,
-              `**Sharp heads** (< 10% entropy): \`${at.sharp_heads}\``,
-              `**Dead heads** (> 95% entropy): \`${at.dead_heads}\``,
-              `**Mean max-attended position:** \`${at.mean_max_pos.toFixed(1)}\``,
-              `**Diagonal attention (self):** \`${(at.diag_attn * 100).toFixed(1)}%\``,
-              `\n**Per-head entropy:**\n${headRows.join('\n')}`,
-              `\n*Sampled at call #${at.call_count} by trickle*`,
-            ];
-            const md = new vscode.MarkdownString(
-              `### 🎯 Attention Pattern Stats\n\n` + tooltipLines.join('\n\n'),
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add loss probe inlay hints at loss.backward() call lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const lpLines = lossProbeIndex.get(filePath);
-      if (lpLines) {
-        for (const [lineNo, lp] of lpLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          const patternIcon: Record<string, string> = {
-            decreasing: '↘', increasing: '↗', plateau: '—',
-            oscillating: '〰', diverging: '⚠', stable: '→', unknown: '?',
-          };
-          const patternTip: Record<string, string> = {
-            plateau: 'try raising LR or check gradient vanishing',
-            oscillating: 'try lowering LR or add gradient clipping',
-            increasing: 'check LR, data, or possible bug',
-            diverging: 'NaN/Inf detected — lower LR or add gradient clipping',
-            decreasing: 'training healthy',
-            stable: '', unknown: '',
-          };
-
-          const icon = patternIcon[lp.pattern] ?? '?';
-          const fmtLoss = (v: number): string => {
-            if (!isFinite(v)) return String(v);
-            if (Math.abs(v) >= 100) return v.toFixed(1);
-            if (Math.abs(v) >= 10) return v.toFixed(2);
-            return v.toFixed(4);
-          };
-          const deltaStr = lp.loss_delta !== 0
-            ? ` Δ=${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta.toFixed(4)}/step`
-            : '';
-          const patternNote = ['plateau', 'oscillating', 'increasing', 'diverging'].includes(lp.pattern)
-            ? ` [${lp.pattern}]` : '';
-
-          let label = ` ${icon} loss=${fmtLoss(lp.loss)}${deltaStr}${patternNote}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const tip = patternTip[lp.pattern] ?? '';
-            const tooltipLines = [
-              `**Pattern:** \`${lp.pattern}\`${tip ? '  —  ' + tip : ''}`,
-              `**Current loss:** \`${lp.loss}\``,
-              `**Moving avg:** \`${lp.loss_avg}\``,
-              `**Std (window):** \`${lp.loss_std}\``,
-              `**Δ/step:** \`${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta}\``,
-              `**Step:** \`${lp.step}\``,
-            ];
-            const md = new vscode.MarkdownString(
-              `### ${icon} Loss Landscape\n\n` + tooltipLines.join('\n\n') +
-              `\n\n*Tracked by trickle (20-step rolling window)*`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add activation statistics inlay hints at nn.Module forward call lines
-    // AND distribute per-layer stats to nn.Sequential declaration lines
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const actLines = activationIndex.get(filePath);
-      if (actLines) {
-        // Helper to format a number compactly
-        const fmtNum = (n: number): string => {
-          const a = Math.abs(n);
-          if (a >= 100) return n.toFixed(1);
-          if (a >= 10) return n.toFixed(2);
-          if (a >= 1) return n.toFixed(3);
-          return n.toFixed(4);
-        };
-
-        // Helper to format a signed mean with +/- prefix
-        const fmtMean = (n: number): string => {
-          const s = fmtNum(n);
-          return n >= 0 ? `+${s}` : s;
-        };
-
-        // Helper to build a compact label for a single activation record
-        const buildActivationLabel = (ac: ActivationStatsRecord, includeShape: boolean): string => {
-          const shapeStr = includeShape ? `[${ac.shape.join(',')}] ` : '';
-          let lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)}`;
-
-          if (ac.exploding) {
-            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)} explode!`;
-          } else if (ac.vanishing) {
-            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)} vanish!`;
-          } else if (ac.zero_frac !== undefined && ac.zero_frac > 0.3) {
-            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} dead:${Math.round(ac.zero_frac * 100)}%`;
-          } else if (ac.sat_frac !== undefined && ac.sat_frac > 0.3) {
-            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} sat:${Math.round(ac.sat_frac * 100)}%`;
-          }
-          return lbl;
-        };
-
-        // Helper to build a tooltip for a single activation record
-        const buildActivationTooltip = (ac: ActivationStatsRecord): vscode.MarkdownString => {
-          const tooltipLines = [
-            `**Module:** \`${ac.module_name}\``,
-            `**Shape:** \`[${ac.shape.join(', ')}]\``,
-            `**Mean:** \`${ac.mean}\``,
-            `**Std:** \`${ac.std}\``,
-            `**Min:** \`${ac.min}\` \u00b7 **Max:** \`${ac.max}\``,
-          ];
-          if (ac.zero_frac !== undefined && ac.zero_frac > 0) {
-            tooltipLines.push(`**Zero fraction:** \`${(ac.zero_frac * 100).toFixed(1)}%\` ${ac.zero_frac > 0.5 ? '\u26a0 dead neurons detected' : ''}`);
-          }
-          if (ac.sat_frac !== undefined) {
-            tooltipLines.push(`**Saturation (|x|>0.9):** \`${(ac.sat_frac * 100).toFixed(1)}%\` ${ac.sat_frac > 0.5 ? '\u26a0 saturated' : ''}`);
-          }
-          if (ac.vanishing) tooltipLines.push('\u26a0 **Vanishing activations** (std < 1e-5)');
-          if (ac.exploding) tooltipLines.push('\u26a0 **Exploding activations** (|max| > 1e3)');
-          tooltipLines.push(`*Sampled at call #${ac.call_count} by trickle*`);
-          const md = new vscode.MarkdownString(
-            `### \u25c6 Activation Stats\n\n` + tooltipLines.join('\n\n'),
-          );
-          md.isTrusted = true;
-          return md;
-        };
-
-        // Container module names to skip when matching to Sequential layers
-        const CONTAINER_MODULES = new Set(['Sequential', 'ModuleList', 'ModuleDict']);
-
-        // Track which lines already received Sequential-distributed hints
-        const sequentialHintLines = new Set<number>();
-
-        for (const [lineNo, records] of actLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Filter out container modules for per-layer stats
-          const leafRecords = records.filter(r => !CONTAINER_MODULES.has(r.module_name));
-
-          // Check if there are multiple distinct layer types — candidate for Sequential distribution
-          if (leafRecords.length > 1) {
-            // Try to find an nn.Sequential block whose layers map to these activations.
-            // Scan upward from the activation line to find the Sequential declaration and its layer lines.
-            const sequentialMatches = matchSequentialLayers(document, lineNo, leafRecords);
-            if (sequentialMatches.length > 0) {
-              for (const { layerLineNo, record } of sequentialMatches) {
-                if (layerLineNo - 1 < range.start.line || layerLineNo - 1 > range.end.line) continue;
-                sequentialHintLines.add(layerLineNo);
-                try {
-                  const layerLine = document.lineAt(layerLineNo - 1);
-                  const position = new vscode.Position(layerLineNo - 1, layerLine.text.trimEnd().length);
-                  const label = ` \u2192 ${buildActivationLabel(record, true)}`;
-                  const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-                  hint.paddingLeft = true;
-                  hint.tooltip = buildActivationTooltip(record);
-                  hints.push(hint);
-                } catch {
-                  // Skip if line out of range
-                }
-              }
-              // Still show a summary hint on the forward-call line itself
-              // using the container Sequential record if present
-              const seqRecords = records.filter(r => r.module_name === 'Sequential');
-              const seqRecord = seqRecords.length > 0
-                ? seqRecords.reduce((a, b) => a.timestamp > b.timestamp ? a : b)
-                : undefined;
-              if (seqRecord) {
-                try {
-                  const line = document.lineAt(lineNo - 1);
-                  const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-                  const label = ` \u25c6 \u03bc=${fmtMean(seqRecord.mean)} \u03c3=${fmtNum(seqRecord.std)}`;
-                  const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-                  hint.paddingLeft = true;
-                  hint.tooltip = buildActivationTooltip(seqRecord);
-                  hints.push(hint);
-                } catch { /* skip */ }
-              }
-              continue; // Don't show the fallback single-record hint
-            }
-          }
-
-          // Fallback: show a single hint on the forward-call line (original behavior)
-          // Use the record with the highest call_count (most representative)
-          const ac = leafRecords.length > 0
-            ? leafRecords.reduce((a, b) => a.call_count > b.call_count ? a : b)
-            : records[0];
-          if (!ac) continue;
-
-          let label = ` \u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)}`;
-          if (ac.exploding) {
-            label = ` \u26a1\u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)} [explode]`;
-          } else if (ac.vanishing) {
-            label = ` \u2193\u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)} [vanish]`;
-          } else if (ac.zero_frac !== undefined && ac.zero_frac > 0.5) {
-            label += ` [dead:${Math.round(ac.zero_frac * 100)}%]`;
-          } else if (ac.sat_frac !== undefined && ac.sat_frac > 0.5) {
-            label += ` [sat:${Math.round(ac.sat_frac * 100)}%]`;
-          }
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-            hint.tooltip = buildActivationTooltip(ac);
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add React hook invocation count inlay hints
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const rhLines = reactHookIndex.get(filePath);
-      if (rhLines) {
-        for (const [lineNo, rh] of rhLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          const hookIcon: Record<string, string> = {
-            useEffect: '⚡',
-            useMemo: '💾',
-            useCallback: '🎯',
-          };
-          const hookVerb: Record<string, string> = {
-            useEffect: 'ran',
-            useMemo: 'computed',
-            useCallback: 'called',
-          };
-          const icon = hookIcon[rh.hookName] ?? '🪝';
-          const verb = hookVerb[rh.hookName] ?? 'invoked';
-          const label = ` ${icon} ${verb} ×${rh.invokeCount}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const tipByHook: Record<string, string> = {
-              useEffect: 'Each invocation = effect ran (deps changed or first mount)',
-              useMemo: 'Each invocation = cache miss (expensive value recomputed)',
-              useCallback: 'Each invocation = callback was actually called by user code',
-            };
-            const md = new vscode.MarkdownString(
-              `### ${icon} \`${rh.hookName}\` Hook Invocations\n\n` +
-              `**${verb.charAt(0).toUpperCase() + verb.slice(1)}:** \`${rh.invokeCount}×\`\n\n` +
-              `${tipByHook[rh.hookName] ?? ''}\n\n` +
-              `*Tracked by trickle (cumulative since dev server start)*`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add React useState update count inlay hints
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const rsLines = reactStateIndex.get(filePath);
-      if (rsLines) {
-        for (const [lineNo, rs] of rsLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Format value for display
-          const valDisplay = rs.value === null ? 'null'
-            : rs.value === undefined ? 'undefined'
-            : typeof rs.value === 'string' ? `"${(rs.value as string).length > 15 ? (rs.value as string).slice(0, 15) + '…' : rs.value}"`
-            : String(rs.value);
-          const label = ` 📊 ×${rs.updateCount} → ${valDisplay}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const md = new vscode.MarkdownString(
-              `### 📊 \`${rs.stateName}\` State Updates\n\n` +
-              `**Updated:** \`${rs.updateCount}×\`\n\n` +
-              `**Latest value:** \`${valDisplay}\`\n\n` +
-              `*Tracked by trickle — each invocation of the setter is counted*`,
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
-      }
-    }
-
-    // Add React component render count inlay hints
-    if (document.uri.scheme === 'file') {
-      const filePath = document.uri.fsPath;
-      const rrLines = reactRenderIndex.get(filePath);
-      if (rrLines) {
-        for (const [lineNo, rr] of rrLines) {
-          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
-
-          // Build compact prop summary for label: prefer showing changed props
-          let propSummary = '';
-          if (rr.changedProps && rr.changedProps.length > 0) {
-            // Show which props caused re-render with old→new for primitives
-            const MAX_CHANGED = 3;
-            const shown = rr.changedProps.slice(0, MAX_CHANGED).map(cp => {
-              const { key: k, from, to } = cp;
-              const isPrim = (v: unknown) => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string';
-              if (isPrim(from) && isPrim(to) && String(from).length + String(to).length < 20) {
-                return `${k}: ${from}→${to}`;
-              }
-              return `↑${k}`;
-            });
-            propSummary = ` | ${shown.join(' ')}`;
-            if (rr.changedProps.length > MAX_CHANGED) propSummary += ` +${rr.changedProps.length - MAX_CHANGED}`;
-          } else if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
-            const MAX_PROPS = 3;
-            const shown = rr.propKeys.slice(0, MAX_PROPS).map(k => {
-              const v = rr.props![k];
-              if (typeof v === 'string') return `${k}="${v.length > 12 ? v.slice(0, 12) + '…' : v}"`;
-              if (typeof v === 'number' || typeof v === 'boolean') return `${k}=${v}`;
-              if (v === null || v === undefined) return `${k}=${v}`;
-              return `${k}=…`;
-            });
-            propSummary = ` | ${shown.join(' ')}`;
-            if (rr.propKeys.length > MAX_PROPS) propSummary += ` +${rr.propKeys.length - MAX_PROPS}`;
-          }
-          const label = ` 🔄 ×${rr.renderCount}${propSummary}`;
-
-          try {
-            const line = document.lineAt(lineNo - 1);
-            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
-            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
-            hint.paddingLeft = true;
-
-            const tooltipLines = [
-              `**Component:** \`${rr.component}\``,
-              `**Render count:** \`${rr.renderCount}\``,
-            ];
-            if (rr.changedProps && rr.changedProps.length > 0) {
-              const changedRows = rr.changedProps.map(cp => {
-                const fromStr = typeof cp.from === 'string' ? `"${cp.from}"` : String(cp.from);
-                const toStr = typeof cp.to === 'string' ? `"${cp.to}"` : String(cp.to);
-                return `- **\`${cp.key}\`**: \`${fromStr}\` → \`${toStr}\``;
-              });
-              tooltipLines.push(`**Changed props (last re-render):**\n${changedRows.join('\n')}`);
-            }
-            if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
-              const propRows = rr.propKeys.map(k => {
-                const v = rr.props![k];
-                const display = typeof v === 'string' ? `"${v}"` : String(v);
-                return `- **\`${k}\`**: \`${display}\``;
-              });
-              tooltipLines.push(`**Props (current):**\n${propRows.join('\n')}`);
-            }
-            tooltipLines.push('*Tracked by trickle (cumulative since dev server start)*');
-
-            const md = new vscode.MarkdownString(
-              `### 🔄 React Component Renders\n\n` + tooltipLines.join('\n\n'),
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-            hints.push(hint);
-          } catch {
-            // Skip if line is out of range
-          }
-        }
       }
     }
 
@@ -3058,8 +1475,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             const tooltipParts: string[] = [];
             tooltipParts.push(`**Error mode** — values at crash time`);
             if (lastErrorMessage) tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
-            const obsLabels = getDimLabels(obs);
-            tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+            tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3)}\``);
             if (obs.sample !== undefined) {
               tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
             }
@@ -3071,9 +1487,8 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           const varEnd = match.index + obs.varName.length;
 
           // Format type string like auto mode
-          const obsLabels = getDimLabels(obs);
-          const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
-          let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
+          const fullTypeStr = typeNodeToString(obs.type, 3);
+          let typeStr = typeNodeToStringCompact(obs.type, undefined, obs.sample);
 
           // Show sample values inline like auto mode
           if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
@@ -3086,6 +1501,10 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
               typeStr = `"${obs.sample}"`;
             }
+          }
+          if (obs.type.kind === 'literal' && obs.sample !== undefined && obs.sample !== null) {
+            const scalar = formatScalarSample(obs.sample);
+            if (scalar) typeStr = scalar;
           }
           if (obs.type.kind === 'object' && obs.type.class_name &&
               typeof obs.sample === 'string' &&
@@ -3108,7 +1527,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           }
           if (fullTypeStr !== typeStr) {
             if (obs.type && isComplexType(obs.type)) {
-              const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+              const prettyType = typeNodeToPretty(obs.type, 0);
               tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
             } else {
               tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
@@ -3212,24 +1631,6 @@ function extractShapeStr(type: TypeNode, dimLabels?: string[]): string {
   return result;
 }
 
-/** Look up dimension labels for a tensor variable from the dimLabelIndex. */
-function getDimLabels(obs: VariableObservation): string[] | undefined {
-  const fileLabels = dimLabelIndex.get(obs.file);
-  if (!fileLabels) return undefined;
-  // Try func-scoped key first, then file-scoped
-  const funcKey = obs.funcName ? `${obs.file}:${obs.funcName}:${obs.varName}` : `${obs.file}::${obs.varName}`;
-  const record = fileLabels.get(funcKey);
-  if (record) return record.labels;
-  // Also try without func for attribute vars like "self.x" -> look up "x"
-  if (obs.varName.includes('.')) {
-    const baseName = obs.varName.split('.').pop()!;
-    const baseKey = obs.funcName ? `${obs.file}:${obs.funcName}:${baseName}` : `${obs.file}::${baseName}`;
-    const baseRecord = fileLabels.get(baseKey);
-    if (baseRecord) return baseRecord.labels;
-  }
-  return undefined;
-}
-
 function registerInlineHints(context: vscode.ExtensionContext, selector: vscode.DocumentSelector) {
   inlineHintsProvider?.dispose();
 
@@ -3258,6 +1659,15 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
   switch (node.kind) {
     case 'primitive':
       return node.name || 'unknown';
+
+    case 'literal':
+      return formatLiteralValue(node.value);
+
+    case 'optional':
+      if (node.type) {
+        return `${typeNodeToString(node.type, depth - 1, dimLabels)} | None`;
+      }
+      return 'None';
 
     case 'array':
       if (node.element) {
@@ -3462,7 +1872,7 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
 
     case 'map': {
       const keyType = node.key ? typeNodeToString(node.key, depth - 1) : 'string';
-      const valType = node.value ? typeNodeToString(node.value, depth - 1) : 'Any';
+      const valType = isTypeNode(node.value) ? typeNodeToString(node.value, depth - 1) : 'Any';
       return `dict[${keyType}, ${valType}]`;
     }
 
@@ -3772,6 +2182,9 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
     case 'primitive':
       return node.name || 'unknown';
 
+    case 'literal':
+      return typeNodeToString(node, 3, dimLabels);
+
     case 'array': {
       if (!node.element) return 'unknown[]';
       const inner = node.element;
@@ -3823,7 +2236,7 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
 
     case 'map': {
       const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
-      const valNode = node.value;
+      const valNode = isTypeNode(node.value) ? node.value : undefined;
       if (valNode && valNode.kind === 'object' && valNode.properties && Object.keys(valNode.properties).length > 2) {
         const valStr = typeNodeToPretty(valNode, indent + 1, dimLabels);
         return `dict[${keyType}, ${valStr}]`;

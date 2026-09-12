@@ -76,12 +76,11 @@ trickle run python -m pytest tests/
 trickle run python manage.py runserver
 ```
 
-| Flag                   | Description                             |
-| ---------------------- | --------------------------------------- |
-| `--include <patterns>` | Only observe matching modules           |
-| `--exclude <patterns>` | Skip matching modules                   |
-| `--stubs <dir>`        | Auto-generate .pyi type stubs after run |
-| `-w, --watch`          | Watch and re-run on changes             |
+| Flag                   | Description                   |
+| ---------------------- | ----------------------------- |
+| `--include <patterns>` | Only observe matching modules |
+| `--exclude <patterns>` | Skip matching modules         |
+| `-w, --watch`          | Watch and re-run on changes   |
 
 ### `trickle hints`
 
