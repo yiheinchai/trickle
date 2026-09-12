@@ -151,21 +151,9 @@ def _generate_module_tracer(filename: str, module_name: str) -> str:
     avoid Python's name mangling inside class bodies.
     """
     return f"""
-# --- trickle variable tracer + function wrapper ---
+# --- trickle variable tracer ---
 import os as _trickle_os
 import json as _trickle_json
-import functools as _trickle_functools
-import inspect as _trickle_inspect
-def _trickle_wrap(__fn, __name):
-    try:
-        from trickle.decorator import _wrap
-        return _wrap(__fn, name=__name, module={module_name!r})
-    except Exception:
-        return __fn
-def _trickle_wrap_decorator(__name):
-    def _decorator(__fn):
-        return _trickle_wrap(__fn, __name)
-    return _decorator
 _trickle_tv_cache = {{}}
 _trickle_tv_count = {{}}
 _trickle_tv_file = None
@@ -288,7 +276,6 @@ try:
     import torch._dynamo as _trickle_dynamo
     _trickle_tv = _trickle_dynamo.disable(_trickle_tv)
     _trickle_dl = _trickle_dynamo.disable(_trickle_dl)
-    _trickle_wrap = _trickle_dynamo.disable(_trickle_wrap)
 except (ImportError, AttributeError):
     pass
 # --- end trickle variable tracer ---
@@ -296,57 +283,20 @@ except (ImportError, AttributeError):
 
 
 def _transform_body(body: list, class_name: str = "") -> list:
-    """Insert trace calls after assignments and wrap functions in a module/class body.
+    """Insert trace calls after assignments in a module/class body.
 
     Also recurses into compound statements (for, if, while, with, try) so that
-    variable assignments and for-loop iteration variables are traced.
+    variable assignments and for-loop iteration variables are traced. Function
+    bodies are handled separately by ``_transform_functions_with_context``.
     """
     new_body: list = []
     for node in body:
         new_body.append(node)
 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Skip private/dunder methods
-            if node.name.startswith("_"):
-                continue
-            # Skip @classmethod, @staticmethod, @property
-            _skip_decorators = {"classmethod", "staticmethod", "property"}
-            if any(
-                (isinstance(d, ast.Name) and d.id in _skip_decorators)
-                or (isinstance(d, ast.Attribute) and d.attr in _skip_decorators)
-                for d in node.decorator_list
-            ):
-                continue
-            # Wrap function for observation.
-            obs_name = f"{class_name}.{node.name}" if class_name else node.name
-            if node.decorator_list:
-                # Has decorators (e.g. @app.route): insert _trickle_wrap as the
-                # INNERMOST decorator so it wraps BEFORE other decorators consume it.
-                # This ensures Flask/FastAPI/etc. get the wrapped function.
-                wrap_decorator = ast.Call(
-                    func=ast.Name(id="_trickle_wrap_decorator", ctx=ast.Load()),
-                    args=[ast.Constant(value=obs_name)],
-                    keywords=[],
-                )
-                node.decorator_list.append(wrap_decorator)
-            else:
-                # No decorators: use post-hoc assignment (simpler, avoids scope issues)
-                wrap_stmt = ast.Assign(
-                    targets=[ast.Name(id=node.name, ctx=ast.Store())],
-                    value=ast.Call(
-                        func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
-                        args=[
-                            ast.Name(id=node.name, ctx=ast.Load()),
-                            ast.Constant(value=obs_name),
-                        ],
-                        keywords=[],
-                    ),
-                )
-                new_body.append(wrap_stmt)
             continue
 
         if isinstance(node, ast.ClassDef):
-            # Recurse into class body to wrap its methods
             node.body = _transform_body(node.body, class_name=node.name)
             continue
         if isinstance(node, (ast.For, ast.AsyncFor)):
@@ -919,22 +869,6 @@ class _TrickleTraceLoader:
         finally:
             if finder and finder not in sys.meta_path:
                 sys.meta_path.insert(0, finder)
-        # Auto-patch database drivers when they're imported
-        _DB_DRIVERS = {
-            "psycopg2": "patch_psycopg2",
-            "pymysql": "patch_pymysql",
-            "mysql.connector": "patch_mysql_connector",
-            "redis": "patch_redis",
-            "pymongo": "patch_pymongo",
-        }
-        if fullname in _DB_DRIVERS:
-            try:
-                from trickle import db_observer
-                patcher = getattr(db_observer, _DB_DRIVERS[fullname], None)
-                if patcher:
-                    patcher(module)
-            except Exception:
-                pass
         return module
 
 

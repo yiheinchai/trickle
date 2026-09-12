@@ -1,21 +1,12 @@
-"""AST transformation for entry file deep observation.
+"""AST transformation for entry-file variable tracing.
 
-When ``trickle run script.py`` is used, the entry file is executed via
-``runpy.run_path()`` — which means ``builtins.__import__`` never fires
-for functions defined in the entry file itself.  Those functions would
-be invisible to trickle.
+When ``trickle run script.py`` is used, this module:
 
-This module solves the problem by:
+1. Parses the entry file's source with Python's ``ast`` module
+2. Inserts ``_trickle_tv()`` calls after each variable assignment
+3. Writes transformed source and executes it via ``runpy``
 
-1. Parsing the entry file's source with Python's ``ast`` module
-2. Finding all function/async function definitions
-3. Inserting wrapper calls immediately after each definition
-4. Inserting variable trace calls after each assignment statement
-5. Compiling and executing the transformed AST
-
-The result is that ALL functions in the entry file are observed and
-ALL variable assignments are traced with their runtime types/shapes,
-matching the deep observation behavior for imported modules.
+Imported modules are handled separately by ``_trace_import_hook``.
 """
 
 from __future__ import annotations
@@ -76,10 +67,10 @@ def run_entry_with_observation(
     module_name: Optional[str] = None,
     trace_vars: bool = True,
 ) -> None:
-    """Execute a Python script with all its functions wrapped for observation.
+    """Execute a Python script with variable tracing via AST transformation.
 
-    This replaces ``runpy.run_path()`` for entry files, adding automatic
-    function wrapping via AST transformation and variable tracing.
+    This replaces ``runpy.run_path()`` for entry files, inserting
+    ``_trickle_tv()`` calls after assignments.
 
     Instead of using exec() with custom globals (which breaks complex imports
     like torch), this writes a transformed source file and runs it with
@@ -308,12 +299,11 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
 def _transform_to_source(source: str, filename: str, module_name: str, trace_vars: bool = True) -> str:
     """Parse and transform source, returning the transformed Python source string.
 
-    This generates a self-contained Python source with the tracer/wrapper
+    This generates a self-contained Python source with the tracer
     setup code prepended, so it can be written to a file and run with runpy.
     """
     tree = ast.parse(source, filename)
 
-    # Transform the top-level body (recurses into class bodies for method wrapping)
     tree.body = _transform_body(tree.body, trace_vars=trace_vars)
 
     # Transform function bodies for variable tracing (including parameter traces)
@@ -364,7 +354,7 @@ def _transform_functions_with_context(node: ast.AST, class_name: str | None) -> 
 
 
 def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> str:
-    """Generate the Python source code that sets up _trickle_wrap and _trickle_tv.
+    """Generate the Python source code that sets up _trickle_tv.
 
     Uses single-underscore prefix (_trickle_tv, not __trickle_tv) to avoid
     Python's name mangling inside class bodies.
@@ -374,174 +364,6 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
         "import os as _trickle_os",
         "import json as _trickle_json",
     ]
-
-    # Function wrapper — captures arg/return types for .pyi generation.
-    # Uses a lightweight wrapper that infers types without proxying arguments
-    # (TrackedObject breaks PyTorch tensors, so we skip attribute tracking here).
-    if trace_vars:
-        lines.extend([
-            "import functools as _trickle_functools",
-            "import inspect as _trickle_inspect",
-            "import types as _trickle_types",
-            "def _trickle_wrap(__fn, __name):",
-            "    if _trickle_inspect.iscoroutinefunction(__fn):",
-            "        @_trickle_functools.wraps(__fn)",
-            "        async def _aw(*args, **kwargs):",
-            "            import time as _t",
-            "            from trickle.call_trace import trace_call as _tc, trace_return as _tr",
-            "            _cid = _tc(__name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '')",
-            "            _start = _t.perf_counter()",
-            "            try:",
-            "                _result = await __fn(*args, **kwargs)",
-            "            except Exception as _e:",
-            "                _dur = (_t.perf_counter() - _start) * 1000",
-            "                _tr(_cid, __name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '', _dur, str(_e)[:200])",
-            "                _trickle_record_error(__name, __fn, _e)",
-            "                raise",
-            "            _dur = (_t.perf_counter() - _start) * 1000",
-            "            _tr(_cid, __name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '', _dur)",
-            "            _trickle_emit_obs(__fn, __name, args, kwargs, _result, is_async=True)",
-            "            return _result",
-            "        return _aw",
-            "    elif _trickle_inspect.isgeneratorfunction(__fn):",
-            "        @_trickle_functools.wraps(__fn)",
-            "        def _gw(*args, **kwargs):",
-            "            _gen = __fn(*args, **kwargs)",
-            "            _first = True",
-            "            for _val in _gen:",
-            "                if _first:",
-            "                    _first = False",
-            "                    _trickle_emit_gen_obs(__fn, __name, args, kwargs, _val, is_async=False)",
-            "                yield _val",
-            "            if _first:",
-            "                _trickle_emit_gen_obs(__fn, __name, args, kwargs, None, is_async=False, empty=True)",
-            "        return _gw",
-            "    elif _trickle_inspect.isasyncgenfunction(__fn):",
-            "        @_trickle_functools.wraps(__fn)",
-            "        async def _agw(*args, **kwargs):",
-            "            _gen = __fn(*args, **kwargs)",
-            "            _first = True",
-            "            async for _val in _gen:",
-            "                if _first:",
-            "                    _first = False",
-            "                    _trickle_emit_gen_obs(__fn, __name, args, kwargs, _val, is_async=True)",
-            "                yield _val",
-            "            if _first:",
-            "                _trickle_emit_gen_obs(__fn, __name, args, kwargs, None, is_async=True, empty=True)",
-            "        return _agw",
-            "    else:",
-            "        @_trickle_functools.wraps(__fn)",
-            "        def _sw(*args, **kwargs):",
-            "            import time as _t",
-            "            from trickle.call_trace import trace_call as _tc, trace_return as _tr",
-            "            _cid = _tc(__name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '')",
-            "            _start = _t.perf_counter()",
-            "            try:",
-            "                _result = __fn(*args, **kwargs)",
-            "            except Exception as _e:",
-            "                _dur = (_t.perf_counter() - _start) * 1000",
-            "                _tr(_cid, __name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '', _dur, str(_e)[:200])",
-            "                _trickle_record_error(__name, __fn, _e)",
-            "                raise",
-            "            _dur = (_t.perf_counter() - _start) * 1000",
-            "            _tr(_cid, __name, __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '', _dur)",
-            "            _trickle_emit_obs(__fn, __name, args, kwargs, _result, is_async=False, duration_ms=_dur)",
-            "            return _result",
-            "        return _sw",
-            "def _trickle_wrap_decorator(__name):",
-            "    def _decorator(__fn):",
-            "        return _trickle_wrap(__fn, __name)",
-            "    return _decorator",
-            "def _trickle_record_error(__name, __fn, __exc):",
-            "    try:",
-            "        import traceback as _tb",
-            "        _err = {",
-            "            'kind': 'error',",
-            "            'type': type(__exc).__name__,",
-            "            'message': str(__exc)[:500],",
-            "            'function': __name,",
-            "            'module': __fn.__module__ if hasattr(__fn, '__module__') and __fn.__module__ else '',",
-            f"            'file': {filename!r},",
-            "            'line': __fn.__code__.co_firstlineno if hasattr(__fn, '__code__') else 0,",
-            "            'stack': ''.join(_tb.format_exception(type(__exc), __exc, __exc.__traceback__))[-1000:],",
-            "            'timestamp': int(_trickle_time.time() * 1000),",
-            "        }",
-            "        _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')",
-            "        _trickle_os.makedirs(_d, exist_ok=True)",
-            "        with open(_trickle_os.path.join(_d, 'errors.jsonl'), 'a') as _f:",
-            "            _f.write(_trickle_json.dumps(_err) + '\\n')",
-            "    except Exception:",
-            "        pass",
-            "def _trickle_emit_obs(__fn, __name, args, kwargs, result, is_async=False, duration_ms=None):",
-            "    try:",
-            "        from trickle.type_inference import infer_type",
-            "        from trickle.type_hash import hash_type",
-            "        from trickle.transport import configure as _tc, enqueue",
-            "        _tc()  # ensure local mode file path is set",
-            "        _elements = [infer_type(a) for a in args]",
-            "        if kwargs:",
-            "            _kw_props = {k: infer_type(v) for k, v in kwargs.items()}",
-            "            _elements.append({'kind': 'object', 'properties': _kw_props})",
-            "        _args_type = {'kind': 'tuple', 'elements': _elements}",
-            "        _return_type = infer_type(result)",
-            "        _type_hash = hash_type(_args_type, _return_type)",
-            "        _param_names = []",
-            "        try:",
-            "            _sig = _trickle_inspect.signature(__fn)",
-            "            _param_names = [p.name for p in _sig.parameters.values() if p.kind in (_trickle_inspect.Parameter.POSITIONAL_ONLY, _trickle_inspect.Parameter.POSITIONAL_OR_KEYWORD)]",
-            "        except Exception:",
-            "            pass",
-            f"        _payload = {{'functionName': __name, 'module': {module_name!r}, 'language': 'python', 'typeHash': _type_hash, 'argsType': _args_type, 'returnType': _return_type}}",
-            "        if duration_ms is not None: _payload['durationMs'] = round(duration_ms, 2)",
-            "        if is_async: _payload['isAsync'] = True",
-            "        if _param_names: _payload['paramNames'] = _param_names",
-            "        enqueue(_payload)",
-            "    except Exception:",
-            "        pass",
-            "def _trickle_emit_gen_obs(__fn, __name, args, kwargs, first_yield, is_async=False, empty=False):",
-            "    try:",
-            "        from trickle.type_inference import infer_type",
-            "        from trickle.type_hash import hash_type",
-            "        from trickle.transport import configure as _tc, enqueue",
-            "        _tc()",
-            "        _elements = [infer_type(a) for a in args]",
-            "        if kwargs:",
-            "            _kw_props = {k: infer_type(v) for k, v in kwargs.items()}",
-            "            _elements.append({'kind': 'object', 'properties': _kw_props})",
-            "        _args_type = {'kind': 'tuple', 'elements': _elements}",
-            "        if empty:",
-            "            _elem_type = {'kind': 'unknown'}",
-            "        else:",
-            "            _elem_type = infer_type(first_yield)",
-            "        _iter_name = 'AsyncIterator' if is_async else 'Iterator'",
-            "        _return_type = {'kind': 'iterator', 'element': _elem_type, 'name': _iter_name}",
-            "        _type_hash = hash_type(_args_type, _return_type)",
-            "        _param_names = []",
-            "        try:",
-            "            _sig = _trickle_inspect.signature(__fn)",
-            "            _param_names = [p.name for p in _sig.parameters.values() if p.kind in (_trickle_inspect.Parameter.POSITIONAL_ONLY, _trickle_inspect.Parameter.POSITIONAL_OR_KEYWORD)]",
-            "        except Exception:",
-            "            pass",
-            f"        _payload = {{'functionName': __name, 'module': {module_name!r}, 'language': 'python', 'typeHash': _type_hash, 'argsType': _args_type, 'returnType': _return_type}}",
-            "        if is_async: _payload['isAsync'] = True",
-            "        if _param_names: _payload['paramNames'] = _param_names",
-            "        enqueue(_payload)",
-            "    except Exception:",
-            "        pass",
-        ])
-    else:
-        lines.extend([
-            "def _trickle_wrap(__fn, __name):",
-            "    try:",
-            "        from trickle.decorator import _wrap",
-            f"        return _wrap(__fn, name=__name, module={module_name!r})",
-            "    except Exception:",
-            "        return __fn",
-            "def _trickle_wrap_decorator(__name):",
-            "    def _decorator(__fn):",
-            "        return _trickle_wrap(__fn, __name)",
-            "    return _decorator",
-        ])
 
     if trace_vars:
         lines.extend([
@@ -710,52 +532,20 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "    pass",
         ])
 
-    # Backward hook: re-emit nn.Module variables with gradient info after loss.backward()
-    # Suppress fd 2 during install to silence C-level torch/numpy warnings
-    if trace_vars:
-        lines.extend([
-            "try:",
-            "    _trickle_devnull = _trickle_os.open(_trickle_os.devnull, _trickle_os.O_WRONLY)",
-            "    _trickle_old_fd2 = _trickle_os.dup(2)",
-            "    _trickle_os.dup2(_trickle_devnull, 2)",
-            "    try:",
-            "        from trickle._backward_hook import install as _trickle_bh_install",
-            f"        _trickle_bh_install(trace_fn=_trickle_tv, file_path={filename!r})",
-            "    except Exception:",
-            "        pass",
-            "    finally:",
-            "        _trickle_os.dup2(_trickle_old_fd2, 2)",
-            "        _trickle_os.close(_trickle_old_fd2)",
-            "        _trickle_os.close(_trickle_devnull)",
-            "except Exception:",
-            "    pass",
-        ])
-
     lines.append("# --- end trickle preamble ---")
     return "\n".join(lines)
 
 
 def _transform_source(source: str, filename: str, trace_vars: bool = True) -> Any:
-    """Parse and transform source to wrap all function definitions and trace variables.
-
-    For each function/async function definition at any level, inserts
-    a re-assignment statement immediately after::
-
-        def process_data(items):
-            ...
-        process_data = _trickle_wrap(process_data, 'process_data')  # inserted
+    """Parse and transform source to insert variable trace calls.
 
     For each variable assignment, inserts a trace call::
 
         x = some_computation()
-        __trickle_tv(x, 'x', 42)  # inserted — line 42
-
-    Only wraps top-level and class-level functions (not nested functions,
-    which are handled by their parent's observation).
+        _trickle_tv(x, 'x', 42)  # inserted — line 42
     """
     tree = ast.parse(source, filename)
 
-    # Transform the top-level body (recurses into class bodies for method wrapping)
     tree.body = _transform_body(tree.body, trace_vars=trace_vars)
 
     # Transform function bodies for variable tracing (including parameter traces)
@@ -767,14 +557,12 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
 
 
 def _transform_body(body: list, trace_vars: bool = True, class_name: str = "") -> list:
-    """Insert wrapper calls after function defs and trace calls after assignments.
+    """Insert trace calls after assignments.
 
     Also recurses into compound statements (for, if, while, with, try) at
     module/class level so that variable assignments and for-loop iteration
-    variables inside those blocks are traced.
-
-    When class_name is set, methods are wrapped with 'ClassName.method' names
-    so observations are correctly grouped by class.
+    variables inside those blocks are traced. Function bodies are handled
+    separately by ``_transform_functions_with_context``.
     """
     new_body: list = []
 
@@ -782,50 +570,9 @@ def _transform_body(body: list, trace_vars: bool = True, class_name: str = "") -
         new_body.append(node)
 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            # Skip private/dunder methods
-            if node.name.startswith("_"):
-                continue
-            # Skip @classmethod and @staticmethod — wrapping breaks descriptors
-            _skip_decorators = {"classmethod", "staticmethod", "property"}
-            if any(
-                (isinstance(d, ast.Name) and d.id in _skip_decorators)
-                or (isinstance(d, ast.Attribute) and d.attr in _skip_decorators)
-                for d in node.decorator_list
-            ):
-                continue
-
-            # Use 'ClassName.method' format when inside a class
-            obs_name = f"{class_name}.{node.name}" if class_name else node.name
-
-            if node.decorator_list:
-                # For decorated functions (e.g. @app.route, @login_required),
-                # inject _trickle_wrap as the innermost decorator so it wraps
-                # the raw function BEFORE framework decorators apply.
-                # This ensures Flask/FastAPI/etc. register the wrapped version.
-                wrap_decorator = ast.Call(
-                    func=ast.Name(id="_trickle_wrap_decorator", ctx=ast.Load()),
-                    args=[ast.Constant(value=obs_name)],
-                    keywords=[],
-                )
-                node.decorator_list.append(wrap_decorator)
-            else:
-                # No decorators: wrap after definition (original behavior)
-                wrap_stmt = ast.Assign(
-                    targets=[ast.Name(id=node.name, ctx=ast.Store())],
-                    value=ast.Call(
-                        func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
-                        args=[
-                            ast.Name(id=node.name, ctx=ast.Load()),
-                            ast.Constant(value=obs_name),
-                        ],
-                        keywords=[],
-                    ),
-                )
-                new_body.append(wrap_stmt)
             continue
 
         if isinstance(node, ast.ClassDef):
-            # Recurse into class body to wrap its methods
             node.body = _transform_body(node.body, trace_vars=trace_vars, class_name=node.name)
             continue
 
