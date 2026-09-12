@@ -269,8 +269,6 @@ def unify(a: TypeNode, b: TypeNode) -> TypeNode:
         arr = b if ka == "tuple" else a
         elems = list(tup.get("elements") or [])
         elem_u = unify_all(elems + [arr.get("element") or unknown()]) if elems else (arr.get("element") or unknown())
-        if elems:
-            elem_u = unify_all(list(elems) + [arr.get("element") or unknown()])
         return {"kind": "array", "element": elem_u}
 
     if {ka, kb} == {"object", "map"}:
