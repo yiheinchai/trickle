@@ -1,3 +1,3 @@
 // Entry point for: require('trickle/auto')
-// One line. No config. Types appear.
-require('./dist/auto-register');
+process.env.TRICKLE_LOCAL = process.env.TRICKLE_LOCAL || '1';
+require('./dist/observe-register');
