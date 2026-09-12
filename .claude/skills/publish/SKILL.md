@@ -14,7 +14,6 @@ Publishes all packages in the trickle monorepo. Default bump is `patch`.
 | ---------------- | -------------- | --------------------------- | --------------------------- |
 | JS Client        | npm            | `trickle-observe`           | `packages/client-js`        |
 | CLI              | npm            | `trickle-cli`               | `packages/cli`              |
-| Backend          | npm            | `trickle-backend`           | `packages/backend`          |
 | Python Client    | PyPI           | `trickle-observe`           | `packages/client-python`    |
 | VSCode Extension | VS Marketplace | `yiheinchai.trickle-vscode` | `packages/vscode-extension` |
 
@@ -34,12 +33,11 @@ Read `.env` at the start to get these values.
 
 Determine the bump type from the argument (default: `patch`).
 
-**npm packages** (JS client, CLI, backend, VSCode extension):
+**npm packages** (JS client, CLI, VSCode extension):
 
 ```bash
 cd packages/client-js && npm version <bump> --no-git-tag-version
 cd packages/cli && npm version <bump> --no-git-tag-version
-cd packages/backend && npm version <bump> --no-git-tag-version
 cd packages/vscode-extension && npm version <bump> --no-git-tag-version
 ```
 
@@ -52,7 +50,6 @@ Run all builds **in parallel**:
 ```bash
 cd packages/client-js && npm run build
 cd packages/cli && npm run build
-cd packages/backend && npm run build
 cd packages/vscode-extension && npm run build
 cd packages/client-python && rm -rf dist/ && python3 -m build
 ```
@@ -72,7 +69,6 @@ Then publish each package (can run in parallel):
 ```bash
 cd packages/client-js && npm publish
 cd packages/cli && npm publish
-cd packages/backend && npm publish
 ```
 
 **Clean up after**: `rm -f ~/.npmrc`
@@ -128,7 +124,7 @@ Then tell user to reload VSCode (Cmd+Shift+P -> "Developer: Reload Window").
 ### 7. Commit and push
 
 ```bash
-git add packages/backend/package.json packages/cli/package.json packages/client-js/package.json packages/client-python/pyproject.toml packages/vscode-extension/package.json package-lock.json
+git add packages/cli/package.json packages/client-js/package.json packages/client-python/pyproject.toml packages/vscode-extension/package.json package-lock.json
 git commit -m "Bump versions for publish: <list versions>"
 git push
 ```

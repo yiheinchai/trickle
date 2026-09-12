@@ -33,11 +33,9 @@ Based on the focus area (or pick one), create a realistic multi-file project:
 **Python/ML:**
 - Multi-file project: data loading, model definition, training loop, metrics
 - Use PyTorch, numpy, sklearn as appropriate
-- Run with `import trickle.auto` at top of entry file
+- Run with `trickle run python train.py` (or `%load_ext trickle` in notebooks)
 - Use conda base env: `eval "$(conda shell.zsh hook 2>/dev/null)" && conda activate base`
-- Check generated `.pyi` stub files
-- Test `trickle layers` for nn.Sequential observability
-- Test `trickle vars` and `trickle functions`
+- Check `.trickle/variables.jsonl`, `trickle vars`, and `trickle hints`
 
 **Express/Backend:**
 - Multi-route Express app with middleware
@@ -89,7 +87,6 @@ Per mission.md, after each fix/feature is pushed:
 | `trickle-cli` | `packages/cli` | npm |
 | `trickle-observe` (JS) | `packages/client-js` | npm |
 | `trickle-observe` (Python) | `packages/client-python` | PyPI |
-| `trickle-backend` | `packages/backend` | npm |
 | `trickle-vscode` | `packages/vscode-extension` | VS Code Marketplace |
 
 ### Common issues found in past sessions
