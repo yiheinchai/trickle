@@ -1,6 +1,6 @@
 # trickle-cli
 
-Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values as you code.
+Runtime type annotations for Python and JavaScript — see tensor shapes, variable types, and crash-time values as you code.
 
 ```bash
 npm install -g trickle-cli
@@ -11,10 +11,10 @@ npm install -g trickle-cli
 Usage: trickle [options] [command]
 
 Commands:
-  init [options]              Set up trickle in your project
-  run [options] [command...]  Run any command with universal type observation
+  init [options]              Set up trickle so you can see runtime types
+  run [options] [command...]  Run a file or command with type observation
   vars [options]              Show captured variable types and sample values
-  hints [options] [file]      Output source code with inline type hints
+  hints [options] [file]      Print source with inline runtime types
 ```
 
 ## Quick Start
@@ -30,28 +30,30 @@ trickle run python train.py     # run with tracing
 trickle hints                   # view source with inline types
 ```
 
+Shorthand: `trickle train.py` is the same as `trickle run train.py`.
+
 ## Commands
 
 ### `trickle run`
 
-Run any Python script with automatic variable tracing. Zero code changes needed.
+Run any script with automatic variable tracing. Zero code changes needed.
 
 ```bash
 trickle run python train.py
 trickle run python -m pytest tests/
-trickle run python manage.py runserver
+trickle run node app.js
+trickle run app.ts
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--include <patterns>` | Only observe matching modules |
 | `--exclude <patterns>` | Skip matching modules |
-| `--stubs <dir>` | Auto-generate .pyi type stubs after run |
 | `-w, --watch` | Watch and re-run on changes |
 
 ### `trickle hints`
 
-Output source code with inline type annotations — designed for AI agents and terminal workflows.
+Print source with inline type annotations — for the terminal, Jupyter, or AI agents.
 
 ```bash
 trickle hints train.py                     # types for a file
@@ -94,7 +96,7 @@ trickle vars --file model.py     # filter by file
 
 ### `trickle init`
 
-Set up trickle in a project — configures tsconfig, package.json scripts, .gitignore.
+Install and set up trickle so you can see runtime types (Python or JavaScript).
 
 ```bash
 trickle init
@@ -103,7 +105,7 @@ trickle init --python
 
 ## How It Works
 
-Trickle rewrites your Python source via AST transformation before execution. After every variable assignment, it inserts a lightweight call that captures the type and a sample value, then writes to `.trickle/variables.jsonl`.
+Trickle rewrites your source before execution. After every variable assignment, it captures the type and a sample value, then writes to `.trickle/variables.jsonl`.
 
 - Only your code is traced — stdlib, site-packages, torch/numpy internals are skipped
 - No code changes. No decorators. No type annotations required
