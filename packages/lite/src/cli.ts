@@ -103,6 +103,10 @@ function printReport(r: Report, root: string) {
   if (drift.length) console.log(`\n${red(`${drift.length} drift${drift.length === 1 ? '' : 's'}`)} — runtime values the declared types do not allow:\n${drift.map(line).join('\n')}`);
   else console.log(`\n${c(32, 'no drift')}: every observed value fits its declared type.`);
   if (any.length) console.log(dim(`\n${any.length} values are declared any; ${path.join(dataDir(root), DRIFT_FILE)} has what they were at runtime.`));
+  if (r.staleFiles?.length) {
+    const n = r.staleFiles.length;
+    console.log(dim(`\n${n} file${n === 1 ? ' has' : 's have'} changed since ${n === 1 ? 'it was' : 'they were'} observed (edited, or observed at another version elsewhere): only values at unchanged positions were checked. Run the code again to check ${n === 1 ? 'it' : 'them'} fully.`));
+  }
   for (const p of r.problems) console.log(yellow(`  ! ${p}`));
 }
 
@@ -167,14 +171,15 @@ function show(root: string, args: string[]): number {
   const key = toKey(root, abs);
   const store = new Store(root);
   store.update();
-  const obs = store.get(key);
+  const source = fs.readFileSync(abs, 'utf8');
+  const obs = store.get(key, source);
   if (!obs.length) { console.log(`no observations for ${key}`); return 1; }
   let drifts: Drift[] = [];
   try {
     const report: Report = JSON.parse(fs.readFileSync(path.join(dataDir(root), DRIFT_FILE), 'utf8'));
     drifts = report.drifts.filter((d) => d.file === key);
   } catch { /* not checked yet */ }
-  const lines = fs.readFileSync(abs, 'utf8').split('\n');
+  const lines = source.split('\n');
   const notes = new Map<number, string[]>();
   for (const o of obs) {
     const loc = locate(lines, o.point);

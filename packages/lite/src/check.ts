@@ -53,6 +53,11 @@ export interface Report {
   drifts: Drift[];
   /** Things that stopped a project being checked. */
   problems: string[];
+  /**
+   * Files whose current source was never observed (edited since, or observed from another version elsewhere).
+   * Only values at positions that are unchanged were checked in them.
+   */
+  staleFiles?: string[];
 }
 
 // Declared at the end of each checked file. Type aliases and `declare var` are hoisted, so every check can use them.
@@ -60,6 +65,8 @@ export interface Report {
 //    union that have it (null and undefined have none); unknown when none do.
 //  - __TrickleS / __TrickleN / __TrickleBo: a string, number or boolean whose value was not kept is trusted to be whichever string or
 //    number types the declaration allows (literals, enums, template literals); it is drift only if none are allowed.
+//  - __TrickleFit / __TrickleV<n>: an object holding such a string is read against each variant of a declared union in
+//    turn (the string then takes that variant's value), and fits if it fits one; see render() in types.ts.
 //  - __TrickleB: a built-in instance (Date, Map, typed arrays...) is trusted to match a declared type of that class.
 //  - __TrickleO: any other class instance is trusted to be whichever object type is declared (plain objects are
 //    checked in full).
@@ -76,6 +83,7 @@ const HELPERS = '\n;type __TrickleP1<T, K extends PropertyKey> = T extends null 
   'type __TrickleA<D, E> = [Extract<D, readonly unknown[]>] extends [never] ? E[] : number extends Extract<D, readonly unknown[]>["length"] ? E[] : Extract<D, readonly unknown[]>;' +
   'type __TrickleX<D, E> = [Extract<D, RegExpMatchArray>] extends [never] ? __TrickleA<D, E> : Extract<D, RegExpMatchArray>;' +
   'type __TrickleNotAny<T> = 0 extends (1 & T) ? "declared-any" : 0;' +
+  'type __TrickleFit<R, F> = [R] extends [never] ? F : R;' +
   'declare var __tt_q: boolean;\n';
 
 const MARKER = /^__t([cpa])(\d+)(?:_(\d+))?/;
@@ -114,6 +122,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
   const store = new Store(root);
   store.update();
   const problems: string[] = [];
+  const staleFiles: string[] = [];
   let files = store.files().filter((f) => fs.existsSync(path.join(root, f)));
   if (options.files) files = files.filter((f) => options.files!.includes(f));
 
@@ -126,18 +135,22 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
     let analysis;
     try { analysis = analyze(source, abs); } catch (e) { problems.push(`${file}: could not parse (${(e as Error).message})`); continue; }
     const lines = source.split('\n');
-    const sameVersion = store.get(file)[0]?.hash === hashText(source);
+    const observed = store.get(file, source);
+    const sameVersion = observed[0]?.hash === hashText(source);
+    if (!sameVersion && observed.length) staleFiles.push(file);
     const byKey = new Map(analysis.sites.map((s) => [`${s.point.k}|${s.point.n}|${s.point.l}|${s.point.c}`, s]));
     const s = new MagicString(source);
     const planned = new Map<number, Planned>();
     const arrowChecks = new Map<number, { end: number; text: string[] }>();
-    for (const obs of store.get(file)) {
+    for (const obs of observed) {
       const p = obs.point;
       let site = sameVersion ? analysis.sites[p.i] : undefined;
       if (site && (site.point.k !== p.k || site.point.n !== p.n)) site = undefined;
       if (!site) {
+        // From another version of the file: a same-named value nearby may be a different one, so only an
+        // unchanged position is trusted (a drift there would otherwise be false).
         const loc = locate(lines, p);
-        if (!loc) continue;
+        if (!loc || (!sameVersion && !loc.exact)) continue;
         site = byKey.get(`${p.k}|${p.n}|${loc.line}|${loc.col}`);
         if (!site) continue;
       }
@@ -146,16 +159,18 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
       const ref = site.ref;
       const stmts: string[] = [];
       const props: string[] = [];
-      stmts.push(`const __tc${id}: ${ref} = null as unknown as (${render(obs.ty, { mode: 'ts', ctx: ref })});`);
+      const decls: string[] = [];
+      stmts.push(`const __tc${id}: ${ref} = null as unknown as (${render(obs.ty, { mode: 'ts', ctx: ref, decls })});`);
       // Per property too: TypeScript reports only the first mismatch of an object.
       if (isObjectOnly(obs.ty)) {
         Object.entries(commonProps(obs.ty)).forEach(([key, ty], j) => {
           const sub = `__TrickleProp<${ref}, ${JSON.stringify(key)}>`;
           props.push(key);
-          stmts.push(`const __tp${id}_${j}: ${sub} = null as unknown as (${render(ty, { mode: 'ts', ctx: sub })});`);
+          stmts.push(`const __tp${id}_${j}: ${sub} = null as unknown as (${render(ty, { mode: 'ts', ctx: sub, decls })});`);
         });
       }
       if (site.point.k !== 'r') stmts.push(`const __ta${id}: __TrickleNotAny<${ref}> = 0;`);
+      stmts.unshift(...decls);
       planned.set(id, { obs, site, line: site.point.l, col: site.point.c, props });
       checkedPoints++;
       const block = stmts.join(' ');
@@ -187,8 +202,11 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
 
   const drifts: Drift[] = [];
   if (projects.size) {
-    const shadow = path.join(dataDir(root), 'shadow');
+    let shadow = path.join(dataDir(root), 'shadow');
     syncShadow(root, shadow, new Map(plans.map((p) => [p.file, p.text])));
+    // tsc prints paths relative to its working directory, resolved through symlinks; give it the real path so
+    // they come out relative (the cache can sit under a symlink, e.g. macOS's /var -> /private/var).
+    try { shadow = fs.realpathSync(shadow); } catch { /* keep */ }
     const byFile = new Map(plans.map((p) => [p.file, p]));
     const queue = [...projects.keys()];
     const run = async () => {
@@ -220,6 +238,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
     observedFiles: files.length, checkedPoints, projects: [...projects.keys()].map((p) => path.relative(root, p)),
     drifts: unique, problems,
   };
+  if (staleFiles.length) report.staleFiles = staleFiles;
   fs.writeFileSync(path.join(ensureDataDir(root), DRIFT_FILE), JSON.stringify(report, null, 1));
   return report;
 }
@@ -320,7 +339,7 @@ function parseTsc(out: string, plans: Map<string, FilePlan>): Drift[] {
 /** Show the helper types in TypeScript's messages as the runtime types they stand for. */
 export function cleanHelpers(text: string): string {
   for (let guard = 0; guard < 200; guard++) {
-    const m = /__Trickle(Bo|S|N|B|A|X|O|Prop|El|NotAny)</.exec(text);
+    const m = /__Trickle(Bo|S|N|B|A|X|O|Prop|El|NotAny|Fit|V\d+)</.exec(text);
     if (!m) return text;
     const open = m.index + m[0].length;
     const args: string[] = [];
@@ -344,7 +363,8 @@ export function cleanHelpers(text: string): string {
     const el = args[1] ?? 'unknown';
     const out = kind === 'S' ? 'string' : kind === 'Bo' ? 'boolean' : kind === 'N' ? 'number' : kind === 'B' || kind === 'O' ? (args[1] ?? 'object')
       : kind === 'A' || kind === 'X' ? (/[|&]/.test(el) ? `(${el})[]` : `${el}[]`)
-      : kind === 'Prop' ? `${args[0]}[${args[1]}]` : (args[0] ?? '');
+      : kind === 'Prop' ? `${args[0]}[${args[1]}]` : kind === 'Fit' ? (args[1] ?? 'object')
+      : kind!.startsWith('V') ? 'object' : (args[0] ?? '');
     text = text.slice(0, m.index) + out + text.slice(end);
   }
   return text;

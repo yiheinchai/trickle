@@ -44,6 +44,8 @@ on any machine ────────┘
 
 The project name is the repository's folder name (`TRICKLE_PROJECT` overrides it; `trickleLite.project` in VS Code).
 
+**Versions.** Every record carries a hash of the source file it was observed in, so a Worker deployed from one commit and a laptop on another never mix. `check`, `show` and the editor use the observations taken from exactly the file you have. A file that has changed since (edited, or observed only at another commit) is checked only at unchanged positions, and `check` says so. Records from here carry no string values, so a discriminated union's tag (`op: "append"`) arrives as `string`. The check then accepts an object if it fits one of the union's variants.
+
 **Only types leave a machine.** No strings, literals, booleans or sample values are sent. Error messages are not sent, only that something was an `Error`. Objects whose keys are not plain identifiers (IDs, emails, file names) are sent as `{ [key: string]: T }`, with the keys dropped. What does leave is code structure: file paths, variable and property names, and positions. Local runs keep short literals for local drift checks, but strip them before uploading. If the database is unreachable, the Worker carries on unaffected.
 
 ## How it works

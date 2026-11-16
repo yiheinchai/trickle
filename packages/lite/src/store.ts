@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { mergeTy, type Ty } from './types.js';
 import type { Point } from './points.js';
-import { dataDir, OBS_FILE } from './common.js';
+import { dataDir, hashText, OBS_FILE } from './common.js';
 
 export interface Observation {
   file: string;
@@ -35,7 +35,7 @@ export class Store {
   private readonly latest = new Map<string, { hash: string; at: number }>();
   private cache = new Map<string, Observation[]>();
 
-  constructor(root: string) {
+  constructor(private readonly root: string) {
     this.path = path.join(dataDir(root), OBS_FILE);
   }
 
@@ -66,7 +66,7 @@ export class Store {
     } finally {
       fs.closeSync(fd);
     }
-    for (const f of changed) this.cache.delete(f);
+    if (changed.size) for (const k of [...this.cache.keys()]) if (changed.has(k.slice(0, k.lastIndexOf('#')))) this.cache.delete(k);
     return changed;
   }
 
@@ -98,14 +98,20 @@ export class Store {
   }
 
   /**
-   * Rewrite the log as one record per point (merged across writers), keeping only each file's latest version.
-   * Only safe when nothing is writing, e.g. after `trickle-lite run` has finished.
+   * Rewrite the log as one record per point (merged across writers), keeping each file's latest version and the
+   * version that matches its source on disk now. Only safe when nothing is writing, e.g. after `trickle-lite run`.
    */
   compact(): void {
     this.update();
     const lines: string[] = [];
     for (const file of this.files()) {
-      for (const o of this.get(file)) {
+      let source: string | undefined;
+      try { source = fs.readFileSync(path.join(this.root, file), 'utf8'); } catch { /* gone */ }
+      const latest = this.get(file);
+      const kept = [latest];
+      const current = source === undefined ? undefined : hashText(source);
+      if (current !== undefined && current !== latest[0]?.hash && this.recs.get(file)?.has(current)) kept.push(this.get(file, source));
+      for (const o of kept.flat()) {
         const p = o.point;
         const rec: Record<string, unknown> = { w: 'merged', f: file, h: o.hash, i: p.i, k: p.k, n: p.n, l: p.l, c: p.c, hl: p.hl, hc: p.hc, x: o.count, at: o.at, t: o.ty };
         if (p.fn) rec.fn = p.fn;
@@ -126,14 +132,22 @@ export class Store {
     return [...this.recs.keys()].sort();
   }
 
-  /** Observations for a file, from the most recently observed version of its source. */
-  get(file: string): Observation[] {
-    const cached = this.cache.get(file);
+  /**
+   * Observations for a file. Given the file's current source, they come from the version observed with exactly
+   * that source when there is one: observations from several machines or deploys can mix versions of a file,
+   * and positions are only meaningful in the version they were taken from. Otherwise (or without a source),
+   * from the most recently observed version; its positions may no longer match (see `locate`).
+   */
+  get(file: string, source?: string): Observation[] {
+    const versions = this.recs.get(file);
+    const current = source === undefined ? undefined : hashText(source);
+    const hash = current !== undefined && versions?.has(current) ? current : this.latest.get(file)?.hash;
+    const cacheKey = file + '#' + hash;
+    const cached = this.cache.get(cacheKey);
     if (cached) return cached;
-    const latest = this.latest.get(file);
-    const byPoint = latest && this.recs.get(file)?.get(latest.hash);
+    const byPoint = hash === undefined ? undefined : versions?.get(hash);
     const out: Observation[] = [];
-    if (byPoint && latest) {
+    if (byPoint && hash !== undefined) {
       for (const byWriter of byPoint.values()) {
         let ty: Ty = [];
         let count = 0;
@@ -149,11 +163,11 @@ export class Store {
         if (last.fn) point.fn = last.fn;
         if (last.a) point.a = 1;
         if (last.ann) point.ann = 1;
-        out.push({ file, hash: latest.hash, point, ty, count, at });
+        out.push({ file, hash, point, ty, count, at });
       }
     }
     out.sort((a, b) => a.point.l - b.point.l || a.point.c - b.point.c);
-    this.cache.set(file, out);
+    this.cache.set(cacheKey, out);
     return out;
   }
 }

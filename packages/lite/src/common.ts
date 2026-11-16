@@ -6,8 +6,17 @@ import { fileURLToPath } from 'node:url';
 export const OBS_FILE = 'observations.jsonl';
 export const DRIFT_FILE = 'drift.json';
 
-/** The project root: TRICKLE_ROOT, else the nearest directory above `from` with a .git or workspace marker. */
+/**
+ * The project root: TRICKLE_ROOT, else the nearest directory above `from` with a .git or workspace marker. Its
+ * real path, because Node loads modules by real path (on macOS the temp folder is under a /var -> /private/var
+ * symlink), and a root spelled differently would put every file outside the project.
+ */
 export function findRoot(from = process.cwd()): string {
+  const root = findRootAsGiven(from);
+  try { return fs.realpathSync(root); } catch { return root; }
+}
+
+function findRootAsGiven(from: string): string {
   if (process.env.TRICKLE_ROOT) return path.resolve(process.env.TRICKLE_ROOT);
   let dir = path.resolve(from);
   let fallback: string | undefined;

@@ -259,7 +259,9 @@ type Obj = Extract<Member, { k: 'object' }>;
 /**
  * Too many object shapes of one class: merge them. Objects that share a discriminant (a property whose value is
  * always one string literal, like `kind` or `op`) are merged per discriminant value, so a discriminated union
- * stays a union of its variants; without one, they merge into a single shape with optional properties.
+ * stays a union of its variants. Where the discriminant's values were not kept (types-only records), a property that
+ * every object has as a value-less string may be it: those objects are kept apart by their set of properties, which
+ * is what tells such variants apart. Otherwise they merge into a single shape with optional properties.
  */
 function collapseObjects(ms: Member[]): Member[] {
   const byClass = new Map<string, Obj[]>();
@@ -272,10 +274,15 @@ function collapseObjects(ms: Member[]): Member[] {
       const t = o.props[key];
       return t?.length === 1 && t[0]!.k === 'string' && !!t[0]!.lits?.length;
     }));
+    const hidden = !disc && Object.keys(list[0]!.props).some((key) => list.every((o) => {
+      const t = o.props[key];
+      return t?.length === 1 && t[0]!.k === 'string' && !t[0]!.lits;
+    }));
     const groups = new Map<string, Obj>();
     for (const o of list) {
       // An object whose discriminant already holds several values stands for one variant per value.
-      const values = disc ? (o.props[disc]![0] as { lits: string[] }).lits : [''];
+      const values = disc ? (o.props[disc]![0] as { lits: string[] }).lits
+        : hidden ? [Object.keys(o.props).filter((key) => !o.opt?.includes(key)).sort().join(',')] : [''];
       for (const value of values) {
         const variant: Obj = disc ? { ...o, props: { ...o.props, [disc]: [{ k: 'string', lits: [value] }] } } : o;
         const prev = groups.get(value);
@@ -331,14 +338,26 @@ export interface RenderOptions {
    * helper types that check.ts declares.
    */
   ctx?: string;
+  /**
+   * In 'ts' mode with a `ctx`: receives type alias declarations the rendered type uses. The caller declares
+   * them in the same block, before the type is used.
+   */
+  decls?: string[];
 }
 
 const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
 
-type Opts = Required<Omit<RenderOptions, 'ctx'>>;
+type Opts = Required<Omit<RenderOptions, 'ctx' | 'decls'>> & { decls?: string[] };
+let aliasN = 0;
+
+/** An object with a string property whose value was not kept (types-only records from elsewhere, or widened). */
+function hasValuelessString(m: Obj): boolean {
+  return Object.values(m.props).some((t) => t.some((x) => x.k === 'string' && !x.lits));
+}
 
 export function render(t: Ty, opts: RenderOptions): string {
   const o: Opts = { maxDepth: opts.mode === 'short' ? 2 : 6, maxProps: opts.mode === 'short' ? 4 : 1000, ...opts };
+  if (opts.mode !== 'ts') delete o.decls;
   return renderTy(t, o, 0, 0, opts.mode === 'ts' ? opts.ctx : undefined);
 }
 
@@ -428,13 +447,24 @@ function renderMember(m: Member, o: Opts, depth: number, indent: number, ctx: st
       const keys = Object.keys(m.props);
       if (depth >= o.maxDepth) return o.mode === 'ts' ? 'any' : (m.cls ?? '{…}');
       const opt = new Set(m.opt ?? []);
-      const entries: string[] = [];
       const shown = keys.slice(0, o.maxProps);
-      for (const key of shown) {
+      const entriesFor = (base: string | undefined) => shown.map((key) => {
         const name = IDENT_RE.test(key) ? key : JSON.stringify(key);
-        const sub = ctx && `__TrickleProp<${ctx}, ${JSON.stringify(key)}>`;
-        entries.push(`${name}${opt.has(key) ? '?' : ''}: ${renderTy(m.props[key]!, o, depth + 1, indent + 1, sub)}`);
+        const sub = base && `__TrickleProp<${base}, ${JSON.stringify(key)}>`;
+        return `${name}${opt.has(key) ? '?' : ''}: ${renderTy(m.props[key]!, o, depth + 1, indent + 1, sub)}`;
+      });
+      if (o.mode === 'ts' && ctx && o.decls && !m.cls && !m.more && hasValuelessString(m)) {
+        // A string whose value was not kept is trusted to be whichever string the declaration allows there. In a
+        // discriminated union (`{ op: "append"; text: string } | { op: "create"; ... }`) that would be every
+        // variant's value at once, and the object would fit none. So: the object, read against each declared
+        // variant in turn, fits if it fits one of them; if it fits none, it is checked against the whole
+        // declaration so that TypeScript says why. The alias keeps the type linear in size.
+        const alias = `__TrickleV${++aliasN}`;
+        const body = entriesFor('D');
+        o.decls.push(`type ${alias}<D> = ${body.length ? `{ ${body.join('; ')} }` : '{}'};`);
+        return `__TrickleFit<(${ctx} extends infer I ? I extends unknown ? (${alias}<I> extends I ? ${alias}<I> : never) : never : never), ${alias}<${ctx}>>`;
       }
+      const entries = entriesFor(ctx);
       if (o.mode === 'ts') {
         for (const name of m.methods ?? []) if (!(name in m.props)) entries.push(`${JSON.stringify(name)}: any`);
         if (m.more) entries.push('[key: string]: any');

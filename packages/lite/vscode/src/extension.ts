@@ -122,9 +122,10 @@ export function activate(context: vscode.ExtensionContext) {
     provideInlayHints(doc, range) {
       if (!config().get('hints.enabled')) return [];
       const file = toKey(root, doc.uri.fsPath);
-      const lines = doc.getText().split(/\r?\n/);
+      const source = doc.getText();
+      const lines = source.split(/\r?\n/);
       const hints: vscode.InlayHint[] = [];
-      for (const o of store.get(file)) {
+      for (const o of store.get(file, source)) {
         const loc = locate(lines, o.point);
         if (!loc || loc.line - 1 < range.start.line || loc.line - 1 > range.end.line) continue;
         const drift = driftsFor(file, o, loc.line).some((d) => d.severity === 'drift');
@@ -148,8 +149,9 @@ export function activate(context: vscode.ExtensionContext) {
       if (!word) return;
       const file = toKey(root, doc.uri.fsPath);
       const name = doc.getText(word);
-      const lines = doc.getText().split(/\r?\n/);
-      const hits = store.get(file).filter((o) => o.point.n.split('.').pop() === name && locate(lines, o.point)?.line === position.line + 1);
+      const source = doc.getText();
+      const lines = source.split(/\r?\n/);
+      const hits = store.get(file, source).filter((o) => o.point.n.split('.').pop() === name && locate(lines, o.point)?.line === position.line + 1);
       return hits.length ? new vscode.Hover(hover(hits, file, position.line + 1), word) : undefined;
     },
   }));
