@@ -215,6 +215,9 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
         log(`checking ${rel}`);
         try {
           const out = await runTsc(cfg, path.join(shadow, rel), shadow);
+          // An error with no file (a missing type library, a broken tsconfig) means nothing was really checked.
+          const global = out.split(/\r?\n/).filter((l) => /^error TS\d+:/.test(l));
+          if (global.length) problems.push(`${rel}: tsc could not check it: ${global.slice(0, 3).join('; ')}`);
           drifts.push(...parseTsc(out, byFile));
         } catch (e) {
           problems.push(`${rel}: ${(e as Error).message}`);

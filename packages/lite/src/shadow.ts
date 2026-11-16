@@ -29,15 +29,22 @@ function listSources(root: string): string[] {
   }
 }
 
-/** Link each entry of a node_modules directory, keeping relative (workspace) links relative. */
+/**
+ * Link each entry of a node_modules directory, keeping relative (workspace, pnpm store) links relative. Runs on
+ * every sync: an install since the last one can add packages or move a link to another version.
+ */
 function linkModules(real: string, link: string) {
   fs.mkdirSync(link, { recursive: true });
   for (const e of fs.readdirSync(real, { withFileTypes: true })) {
     const from = path.join(real, e.name), to = path.join(link, e.name);
-    try { fs.lstatSync(to); continue; } catch { /* missing */ }
     if (e.name.startsWith('@') && e.isDirectory()) { linkModules(from, to); continue; }
     const target = e.isSymbolicLink() ? fs.readlinkSync(from) : '';
-    fs.symlinkSync(target && !path.isAbsolute(target) ? target : from, to, 'junction');
+    const want = target && !path.isAbsolute(target) ? target : from;
+    try {
+      if (fs.readlinkSync(to) === want) continue;
+      fs.rmSync(to, { force: true });
+    } catch { /* missing, or not a link */ }
+    try { fs.symlinkSync(want, to, 'junction'); } catch { /* something else is there */ }
   }
 }
 
