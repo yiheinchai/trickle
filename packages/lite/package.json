@@ -1,0 +1,31 @@
+{
+  "name": "trickle-lite",
+  "version": "0.1.0",
+  "description": "Real-time runtime type monitoring for TypeScript: see what your values actually are, and where the declared types drift from them.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "trickle-lite": "dist/cli.js" },
+  "exports": {
+    "./register": "./dist/register.js",
+    "./runtime": "./dist/runtime.js",
+    "./vitest": "./dist/vitest.js",
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=20.6" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node vscode/build.mjs && node --test test/*.test.mjs",
+    "vscode:build": "node vscode/build.mjs",
+    "vscode:package": "node vscode/build.mjs && cd vscode && npx --yes @vscode/vsce package --no-dependencies -o trickle-lite.vsix"
+  },
+  "dependencies": {
+    "magic-string": "^0.30.21",
+    "typescript": "~5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.25.12"
+  }
+}

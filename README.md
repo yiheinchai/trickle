@@ -18,6 +18,8 @@ No more `print(x.shape)`. Run your code, see every variable's type and value inl
 
 ![Pytorch tensor shape annotations from runtime](image.png)
 
+> **Just want runtime types and type drift for a TypeScript codebase?** [`packages/lite`](packages/lite) is a slim core: inline runtime types in VS Code, and a check of every observed value against its declared type with your own `tsc`.
+
 ## Quick Start
 
 ```bash

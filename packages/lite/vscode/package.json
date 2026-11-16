@@ -1,0 +1,33 @@
+{
+  "name": "trickle-lite",
+  "displayName": "trickle lite — runtime types & drift",
+  "description": "See the runtime type of every value in your TypeScript, live, and where it drifts from the declared type.",
+  "version": "0.1.0",
+  "publisher": "yiheinchai",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/yiheinchai/trickle" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Linters", "Debuggers"],
+  "activationEvents": ["workspaceContains:.trickle/observations.jsonl", "onLanguage:typescript", "onLanguage:typescriptreact"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "trickleLite.check", "title": "trickle: Check Drift Now" },
+      { "command": "trickleLite.toggleHints", "title": "trickle: Toggle Runtime Type Hints" },
+      { "command": "trickleLite.clear", "title": "trickle: Clear Observations" },
+      { "command": "trickleLite.report", "title": "trickle: Show Drift Report" }
+    ],
+    "configuration": {
+      "title": "trickle lite",
+      "properties": {
+        "trickleLite.hints.enabled": { "type": "boolean", "default": true, "description": "Show the observed runtime type of each value inline." },
+        "trickleLite.hints.annotated": { "type": "boolean", "default": false, "description": "Also show inline hints where the source already declares a type (drifts are always shown)." },
+        "trickleLite.hints.maxLength": { "type": "number", "default": 60, "description": "Longest inline hint, in characters." },
+        "trickleLite.check.enabled": { "type": "boolean", "default": true, "description": "Re-check runtime types against declared types when observations change or a file is saved." },
+        "trickleLite.diagnostics.undeclaredProperties": { "type": "boolean", "default": false, "description": "Report runtime objects that carry properties their declared type does not mention (structural typing allows this, so it is off by default)." },
+        "trickleLite.diagnostics.declaredAny": { "type": "boolean", "default": true, "description": "Mark values declared as `any` with the type they actually had (as a hint)." }
+      }
+    }
+  },
+  "scripts": {}
+}
