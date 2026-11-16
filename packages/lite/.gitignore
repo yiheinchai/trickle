@@ -3,3 +3,6 @@ node_modules/
 dist/
 vscode/dist/
 *.vsix
+.neon
+.env
+.env.*

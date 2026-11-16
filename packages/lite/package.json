@@ -27,10 +27,11 @@
   },
   "dependencies": {
     "magic-string": "^0.30.21",
-    "typescript": "~5.9.3",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "typescript": "~5.9.3"
   },
   "devDependencies": {
+    "@neon/config": "^1.14.0",
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.85.0",
     "esbuild": "^0.25.12"
