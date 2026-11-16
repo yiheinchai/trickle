@@ -4,11 +4,13 @@
  *   POST /v1/observations   write token   { project, records }   from Workers (see worker-runtime.ts)
  *   GET  /v1/observations   read token    ?project=               for `trickle-lite pull`, the editor, checks
  *
- * Environment: DATABASE_URL, TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN, PORT (default 4889).
+ * Environment (or the env file `neon env pull` writes): DATABASE_URL (pooled), DATABASE_URL_UNPOOLED (direct,
+ * for the schema), TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN, PORT (default 4889).
  *
  * Whatever a client sends, only types are stored: every type is passed through typesOnly(), every other field
  * is validated against a narrow pattern, and anything else is dropped. Bodies over 1 MB are refused.
  */
+import fs from 'node:fs';
 import http from 'node:http';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import postgres from 'postgres';
@@ -50,18 +52,30 @@ function clean(r: Record<string, unknown>): Clean | undefined {
   return out;
 }
 
+/** The schema, as code. Idempotent; applied at start over the direct (unpooled) connection. */
+const SCHEMA = `create table if not exists trickle_observations (
+  project text not null, file text not null, hash text not null, point integer not null,
+  meta jsonb not null, ty jsonb not null, count bigint not null default 0,
+  updated_at timestamptz not null default now(),
+  primary key (project, file, hash, point))`;
+
+/** The env file `neon env pull` writes. Variables already in the environment win. */
+const NEON_ENV_FILE = ['.env', 'local'].join('.');
+
 export async function serve(): Promise<void> {
-  const { DATABASE_URL, TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN } = process.env;
+  if (fs.existsSync(NEON_ENV_FILE)) process.loadEnvFile(NEON_ENV_FILE);
+  const { DATABASE_URL, DATABASE_URL_UNPOOLED, TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN } = process.env;
   if (!DATABASE_URL || !TRICKLE_INGEST_TOKEN || !TRICKLE_READ_TOKEN) {
     throw new Error('trickle-lite serve needs DATABASE_URL, TRICKLE_INGEST_TOKEN and TRICKLE_READ_TOKEN');
   }
   if (TRICKLE_INGEST_TOKEN === TRICKLE_READ_TOKEN) throw new Error('use different ingest and read tokens');
-  const sql = postgres(DATABASE_URL, { max: 5, onnotice: () => {} });
-  await sql`create table if not exists trickle_observations (
-    project text not null, file text not null, hash text not null, point integer not null,
-    meta jsonb not null, ty jsonb not null, count bigint not null default 0,
-    updated_at timestamptz not null default now(),
-    primary key (project, file, hash, point))`;
+  // Schema changes go over the direct connection; Neon's pooler (PgBouncer, transaction mode) is for queries.
+  const direct = postgres(DATABASE_URL_UNPOOLED ?? DATABASE_URL, { max: 1, onnotice: () => {} });
+  await direct.unsafe(SCHEMA);
+  await direct.end();
+  // Request traffic over the pooled connection, without prepared statements, since the pooler hands each
+  // transaction to whichever backend is free.
+  const sql = postgres(DATABASE_URL, { max: 5, prepare: false, onnotice: () => {} });
 
   async function ingest(project: string, records: Clean[]) {
     await sql.begin(async (tx) => {

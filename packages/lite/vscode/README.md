@@ -36,7 +36,7 @@ Worker (instrumented build) --HTTPS, write token--> trickle-lite serve --> its o
 your machine / editor       <--read token---------- trickle-lite pull  (then check, show, VS Code as usual)
 ```
 
-1. **Server.** Run `trickle-lite serve` (the `Dockerfile` here runs it) with `DATABASE_URL`, `TRICKLE_INGEST_TOKEN` and `TRICKLE_READ_TOKEN`. Use two different random tokens. It creates its one table on start.
+1. **Server.** Run `trickle-lite serve` (the `Dockerfile` here runs it) with `TRICKLE_INGEST_TOKEN` and `TRICKLE_READ_TOKEN`, two different random tokens. Its database is the Neon project in `neon.ts`. `neon env pull` writes `DATABASE_URL` (pooled, used for requests) and `DATABASE_URL_UNPOOLED` (direct, used to apply the schema) to `.env.local`, which the server reads when it starts. In production, set those two as environment variables instead. The schema (one table) is applied at start and is idempotent.
 2. **Worker secrets**, once: `wrangler secret put TRICKLE_SERVER` (the server's https URL), `wrangler secret put TRICKLE_INGEST_TOKEN`, and optionally `TRICKLE_PROJECT`.
 3. **Deploy observed**, in the Worker's directory: `trickle-lite worker npx wrangler deploy`. This builds an instrumented copy of the repository in the data folder, with an entry that sends observations after each response (`ctx.waitUntil`, so responses are not delayed), and deploys that. The repository is unchanged. A normal deploy afterwards replaces it with the uninstrumented Worker.
 4. **Read**: `TRICKLE_SERVER=… TRICKLE_READ_TOKEN=… trickle-lite pull && trickle-lite check`. In VS Code, set `trickleLite.server` and run "trickle: Set Server Read Token" (kept in VS Code's secret storage); the extension pulls every 15 s.
