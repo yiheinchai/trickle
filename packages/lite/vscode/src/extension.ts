@@ -1,7 +1,7 @@
 /**
  * trickle lite for VS Code: the observed runtime type of each value inline, and drift from the declared
- * type as warnings. Follows `.trickle/observations.jsonl` as it grows and re-runs the bundled checker
- * (which writes `.trickle/drift.json`) when observations change or a file is saved.
+ * type as warnings. Follows the project's observations (kept outside it, in ~/.cache/trickle-lite) as they
+ * grow, and re-runs the bundled checker when observations change or a file is saved.
  */
 import * as vscode from 'vscode';
 import fs from 'node:fs';
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { Store, locate, type Observation } from '../../src/store.js';
 import { render } from '../../src/types.js';
-import { DATA_DIR, DRIFT_FILE, toKey } from '../../src/common.js';
+import { dataDir, DRIFT_FILE, toKey } from '../../src/common.js';
 import type { Drift, Report } from '../../src/check.js';
 
 const SELECTOR: vscode.DocumentSelector = [
@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const loadReport = () => {
-    try { report = JSON.parse(fs.readFileSync(path.join(root, DATA_DIR, DRIFT_FILE), 'utf8')); } catch { report = undefined; }
+    try { report = JSON.parse(fs.readFileSync(path.join(dataDir(root), DRIFT_FILE), 'utf8')); } catch { report = undefined; }
     diagnostics.clear();
     const byFile = new Map<string, vscode.Diagnostic[]>();
     for (const d of report?.drifts ?? []) {
@@ -137,7 +137,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   }));
 
-  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, `${DATA_DIR}/*`));
+  const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(dataDir(root)), '*'));
   watcher.onDidChange((uri) => (uri.fsPath.endsWith(DRIFT_FILE) ? !checking && loadReport() : refresh()));
   watcher.onDidCreate(refresh);
   const poll = setInterval(refresh, 1000); // appends are not always reported as changes

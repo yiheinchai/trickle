@@ -1,5 +1,5 @@
 /**
- * Read `.trickle/observations.jsonl` (appended to by any number of processes)
+ * Read the observations log (appended to by any number of processes)
  * into one merged view per observation point. Reading is incremental, so a
  * watcher can call `update()` whenever the file grows.
  */

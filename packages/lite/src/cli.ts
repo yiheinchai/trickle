@@ -17,9 +17,11 @@ const HELP = `trickle-lite — runtime types for TypeScript, and where they drif
 
 Usage:
   trickle-lite run <command...>   run a command observed (node, tsx, vitest), then check for drift
-  trickle-lite check [--json]     check observed types against declared types (writes .trickle/drift.json)
+  trickle-lite check [--json]     check observed types against declared types
   trickle-lite show <file>        print a file with the observed type of each value beside it
-  trickle-lite clear              delete .trickle/
+  trickle-lite clear              delete this project's trickle-lite data
+
+Data is kept outside the project, in ~/.cache/trickle-lite/.
 
 Environment: TRICKLE_INCLUDE / TRICKLE_EXCLUDE (comma-separated path fragments), TRICKLE_TESTS=1 (observe tests too)
 `;
@@ -37,7 +39,7 @@ async function main(argv: string[]) {
     case 'show': return show(root, rest);
     case 'clear':
       fs.rmSync(dataDir(root), { recursive: true, force: true });
-      console.log(`cleared ${path.relative(process.cwd(), dataDir(root)) || '.trickle'}`);
+      console.log(`cleared ${dataDir(root)}`);
       return 0;
     case undefined: case '-h': case '--help': case 'help':
       process.stdout.write(HELP);
@@ -61,7 +63,7 @@ async function run(root: string, args: string[]): Promise<number> {
   });
   const store = new Store(root);
   try { store.compact(); } catch { /* nothing recorded */ }
-  if (store.files().length) printReport(await check(root));
+  if (store.files().length) printReport(await check(root), root);
   else console.log(dim('\ntrickle-lite: nothing was observed (is the code TypeScript inside this repository?)'));
   return code;
 }
@@ -70,11 +72,11 @@ async function runCheck(root: string, args: string[]): Promise<number> {
   const json = args.includes('--json');
   const report = await check(root);
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-  else printReport(report);
+  else printReport(report, root);
   return report.drifts.some((d) => d.severity === 'drift') ? 1 : 0;
 }
 
-function printReport(r: Report) {
+function printReport(r: Report, root: string) {
   const drift = r.drifts.filter((d) => d.severity === 'drift');
   const any = r.drifts.filter((d) => d.severity === 'any');
   console.log(`\n${cyan('trickle-lite')} checked ${r.checkedPoints} observed values in ${r.observedFiles} files against their declared types`);
@@ -84,7 +86,7 @@ function printReport(r: Report) {
   };
   if (drift.length) console.log(`\n${red(`${drift.length} drift${drift.length === 1 ? '' : 's'}`)} — runtime values the declared types do not allow:\n${drift.map(line).join('\n')}`);
   else console.log(`\n${c(32, 'no drift')}: every observed value fits its declared type.`);
-  if (any.length) console.log(dim(`\n${any.length} values are declared any; .trickle/drift.json has what they were at runtime.`));
+  if (any.length) console.log(dim(`\n${any.length} values are declared any; ${path.join(dataDir(root), DRIFT_FILE)} has what they were at runtime.`));
   for (const p of r.problems) console.log(yellow(`  ! ${p}`));
 }
 

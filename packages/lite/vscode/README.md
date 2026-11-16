@@ -4,7 +4,7 @@ Runtime type monitoring for TypeScript. trickle-lite shows what every value actu
 
 A type annotation is a contract, and `tsc` proves the code consistent with it. Nothing checks that the contract matches reality: `JSON.parse(raw) as Lesson`, `items[0]` typed as present, or a regex group typed `string` all compile. trickle-lite records the types that really flow through the code. It then has your own `tsc` check each one against the declared type, and reports any mismatch as drift.
 
-It runs on a project from the outside. Nothing goes into the project's config or dependencies, and its output folder `.trickle/` ignores itself in git.
+It runs on a project from the outside: nothing goes into the project's config, dependencies or working tree. Its data (observations, drift report, the shadow copy it type-checks) lives in `~/.cache/trickle-lite/<project>-<hash>/` (or under `$XDG_CACHE_HOME`).
 
 ## Use
 
@@ -30,14 +30,14 @@ Observed types appear inline, live while the code runs: `: T` after values with 
 ## How it works
 
 1. **Capture.** `instrument.ts` parses each project file with the TypeScript parser and wraps parameters, variable initialisers, assignments, destructured names, `catch` bindings and `return` values with `__tt(point, value)`. No lines are added, so stack traces keep their line numbers.
-2. **Record.** `runtime.ts` infers a compact type per value and merges them into a union per point. It never calls getters or reads proxies, it bounds work per value, and it samples hot paths after warm-up but still checks every value's top-level kind. Types go to `.trickle/observations.jsonl`, which `run` compacts at the end.
-3. **Check.** `check.ts` writes a shadow copy of the project to `.trickle/shadow` with `node_modules` linked. Next to each observed value it adds `const __tcN: typeof value = null as unknown as (<runtime type>)`, then runs the project's own `tsc -p`. Errors on those lines are drift, in TypeScript's own words. Where the record is deliberately imprecise, the check trusts the declaration: long strings, class instances, `Date` and typed arrays, tuples, RegExp matches. Generic type parameters are skipped.
+2. **Record.** `runtime.ts` infers a compact type per value and merges them into a union per point. It never calls getters or reads proxies, it bounds work per value, and it samples hot paths after warm-up but still checks every value's top-level kind. Types go to `observations.jsonl` in the data folder, which `run` compacts at the end.
+3. **Check.** `check.ts` writes a shadow copy of the project to the data folder with `node_modules` linked. Next to each observed value it adds `const __tcN: typeof value = null as unknown as (<runtime type>)`, then runs the project's own `tsc -p`. Errors on those lines are drift, in TypeScript's own words. Where the record is deliberately imprecise, the check trusts the declaration: long strings, class instances, `Date` and typed arrays, tuples, RegExp matches. Generic type parameters are skipped.
 
 Only code that runs is checked. Instrumentation slows hot loops, so timing-sensitive tests can fail under it. `TRICKLE_EXCLUDE` (comma-separated path fragments) skips files, and `TRICKLE_TESTS=1` observes test files too.
 
 ## Privacy
 
-Only types are recorded, never values. The exception is short identifier-like strings (24 characters or fewer, `[A-Za-z0-9_\-.:/]`), kept as literal types so enum drift can be caught, and never under keys that look sensitive. Everything stays in `.trickle/`.
+Only types are recorded, never values. The exception is short identifier-like strings (24 characters or fewer, `[A-Za-z0-9_\-.:/]`), kept as literal types so enum drift can be caught, and never under keys that look sensitive. Everything stays on the machine, in the data folder; `trickle-lite clear` deletes it.
 
 ## Develop
 

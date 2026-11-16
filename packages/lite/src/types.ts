@@ -3,7 +3,7 @@
  * union, and render it as TypeScript text.
  *
  * A type is a list of union members. Members are small JSON objects, so they
- * can be written to `.trickle/observations.jsonl` and read back unchanged.
+ * can be written to the observations log and read back unchanged.
  */
 
 export type Member =

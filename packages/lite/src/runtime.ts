@@ -1,7 +1,7 @@
 /**
  * The in-process recorder. Instrumented code calls `globalThis.__trickle.o(...)`
  * with each observed value; the recorder infers its type, merges it with what it
- * has seen at that point, and appends changes to `.trickle/observations.jsonl`.
+ * has seen at that point, and appends changes to its observations log (see dataDir).
  *
  * It must never change what the program does: every value is passed straight
  * back, getters are never called, and any failure inside the recorder is swallowed.

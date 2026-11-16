@@ -1,8 +1,8 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DATA_DIR = '.trickle';
 export const OBS_FILE = 'observations.jsonl';
 export const DRIFT_FILE = 'drift.json';
 
@@ -20,17 +20,20 @@ export function findRoot(from = process.cwd()): string {
   }
 }
 
+/**
+ * Where trickle-lite keeps a project's data: outside the project, under ~/.cache/trickle-lite (or
+ * $XDG_CACHE_HOME), so observing a project never writes into it.
+ */
 export function dataDir(root: string): string {
-  return path.join(root, DATA_DIR);
+  let real = root;
+  try { real = fs.realpathSync(root); } catch { /* keep as given */ }
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(base, 'trickle-lite', `${path.basename(real)}-${hashText(real)}`);
 }
 
-/** Create .trickle/, ignored by git without the project having to say so. */
 export function ensureDataDir(root: string): string {
   const dir = dataDir(root);
-  if (!fs.existsSync(path.join(dir, '.gitignore'))) {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
-  }
+  fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
@@ -53,7 +56,7 @@ export function shouldInstrument(file: string, root: string): boolean {
   if (!TS_EXT.test(file) || file.endsWith('.d.ts')) return false;
   const rel = toKey(root, file);
   if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
-  if (rel.includes('node_modules/') || rel.startsWith(DATA_DIR + '/') || (SELF !== '' && file.startsWith(SELF + path.sep))) return false;
+  if (rel.includes('node_modules/') || (SELF !== '' && file.startsWith(SELF + path.sep))) return false;
   if (/(^|\/)(dist|build|out|\.next)\//.test(rel)) return false;
   if (process.env.TRICKLE_TESTS !== '1' && TEST_RE.test('/' + rel)) return false;
   const include = list(process.env.TRICKLE_INCLUDE);

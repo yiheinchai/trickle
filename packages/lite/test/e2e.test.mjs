@@ -5,6 +5,7 @@ import path from 'node:path';
 import { runFixture } from './helpers.mjs';
 import { check } from '../dist/check.js';
 import { Store } from '../dist/store.js';
+import { dataDir } from '../dist/common.js';
 
 const { dir, out } = runFixture();
 const report = await check(dir);
@@ -44,8 +45,8 @@ test('no false drift for literal constants, built-ins, generics or discriminated
 });
 
 test('drift.json is written for the editor', () => {
-  const saved = JSON.parse(fs.readFileSync(path.join(dir, '.trickle', 'drift.json'), 'utf8'));
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir(dir), 'drift.json'), 'utf8'));
   assert.equal(saved.drifts.length, report.drifts.length);
   assert.deepEqual(report.problems, []);
-  assert.equal(fs.readFileSync(path.join(dir, '.trickle', '.gitignore'), 'utf8'), '*\n'); // ignored without project changes
+  assert.ok(!fs.existsSync(path.join(dir, '.trickle')), 'nothing is written into the project');
 });

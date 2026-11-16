@@ -218,8 +218,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
     observedFiles: files.length, checkedPoints, projects: [...projects.keys()].map((p) => path.relative(root, p)),
     drifts: unique, problems,
   };
-  ensureDataDir(root);
-  fs.writeFileSync(path.join(dataDir(root), DRIFT_FILE), JSON.stringify(report, null, 1));
+  fs.writeFileSync(path.join(ensureDataDir(root), DRIFT_FILE), JSON.stringify(report, null, 1));
   return report;
 }
 
@@ -244,7 +243,7 @@ function listSources(root: string): string[] {
     const out: string[] = [];
     const walk = (dir: string) => {
       for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
-        if (['node_modules', '.git', '.trickle', 'dist', '.next'].includes(e.name)) continue;
+        if (['node_modules', '.git', 'dist', '.next'].includes(e.name)) continue;
         const rel = dir ? `${dir}/${e.name}` : e.name;
         if (e.isDirectory()) walk(rel);
         else out.push(rel);
@@ -263,7 +262,7 @@ function syncShadow(root: string, shadow: string, overrides: Map<string, string>
   const next: Record<string, string> = {};
   const dirs = new Set<string>(['']);
   for (const rel of listSources(root)) {
-    if (rel.startsWith('.trickle/') || !COPY_EXT.test(rel)) continue;
+    if (!COPY_EXT.test(rel)) continue;
     const src = path.join(root, rel);
     const dst = path.join(shadow, rel);
     let stamp: string;
