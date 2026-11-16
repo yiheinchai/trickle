@@ -80,20 +80,21 @@ export function activate(context: vscode.ExtensionContext) {
   };
   const scheduleCheck = (ms = 1500) => { clearTimeout(timer); timer = setTimeout(runCheck, ms); };
 
-  // Observations from deployed code: pull them from the trickle-lite server (read token in secret storage).
+  // Everything observed for this project (Cloudflare Workers, other machines), from trickle-lite's Neon database.
+  // The connection string is in VS Code's secret storage, or else wherever `trickle-lite connect` saved it.
   let pulling = false;
   const pull = async () => {
-    const server = config().get<string>('server');
-    if (!server || pulling) return;
-    const token = await context.secrets.get('trickleLite.readToken');
-    if (!token) return;
+    if (pulling) return;
     pulling = true;
-    const cli = context.asAbsolutePath(path.join('dist', 'cli.mjs'));
-    execFile(process.execPath, [cli, 'pull'], {
-      cwd: root,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TRICKLE_ROOT: root, TRICKLE_SERVER: server,
-        TRICKLE_PROJECT: config().get<string>('project') || 'default', TRICKLE_READ_TOKEN: token },
-    }, () => { pulling = false; refresh(); });
+    const url = await Promise.resolve(context.secrets?.get('trickleLite.databaseUrl')).catch(() => undefined);
+    const env: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1', TRICKLE_ROOT: root };
+    if (url) env.TRICKLE_DATABASE_URL = url;
+    const projectName = config().get<string>('project');
+    if (projectName) env.TRICKLE_PROJECT = projectName;
+    execFile(process.execPath, [context.asAbsolutePath(path.join('dist', 'cli.mjs')), 'pull'], { cwd: root, env }, () => {
+      pulling = false;
+      refresh();
+    });
   };
 
   const refresh = () => {
@@ -161,9 +162,9 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     watcher, diagnostics, status, hintsChanged, { dispose: () => { clearInterval(poll); clearInterval(pullTimer); clearTimeout(timer); } },
     vscode.commands.registerCommand('trickleLite.check', runCheck),
-    vscode.commands.registerCommand('trickleLite.setReadToken', async () => {
-      const token = await vscode.window.showInputBox({ prompt: 'trickle-lite server read token', password: true, ignoreFocusOut: true });
-      if (token) { await context.secrets.store('trickleLite.readToken', token); void pull(); }
+    vscode.commands.registerCommand('trickleLite.connect', async () => {
+      const url = await vscode.window.showInputBox({ prompt: "trickle-lite's Neon connection string (postgres://…)", password: true, ignoreFocusOut: true });
+      if (url) { await context.secrets.store('trickleLite.databaseUrl', url.trim()); void pull(); }
     }),
     vscode.workspace.onDidSaveTextDocument((doc) => { if (store.get(toKey(root, doc.uri.fsPath)).length) scheduleCheck(500); }),
     vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration('trickleLite')) hintsChanged.fire(); }),

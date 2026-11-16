@@ -3,12 +3,15 @@
  * trickle-lite: real-time runtime types for TypeScript, and where they drift from the declared ones.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, type Drift, type Report } from './check.js';
 import { Store, locate } from './store.js';
-import { render } from './types.js';
+import { render, typesOnly } from './types.js';
+import { fetchRecords, insertRecords } from './neon.js';
+import type { Rec } from './recorder.js';
 import { dataDir, DRIFT_FILE, ensureDataDir, findRoot, OBS_FILE, toKey } from './common.js';
 
 const HOME = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -21,12 +24,15 @@ Usage:
   trickle-lite show <file>        print a file with the observed type of each value beside it
   trickle-lite clear              delete this project's trickle-lite data
 
-Deployed code (Cloudflare Workers), types only:
-  trickle-lite worker <command>   run e.g. \`npx wrangler deploy\` on an instrumented copy of the repository
-  trickle-lite serve              the store for deployed observations (DATABASE_URL, TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN)
-  trickle-lite pull               fetch them (TRICKLE_SERVER, TRICKLE_READ_TOKEN, TRICKLE_PROJECT), then check/show as usual
+Shared, in trickle-lite's Neon database (types only):
+  trickle-lite connect            save its connection string, read from stdin (e.g. \`neon connection-string | trickle-lite connect\`)
+  trickle-lite push               upload this machine's last run (\`run\` does this itself once connected)
+  trickle-lite pull               download everything observed for the project, then check/show as usual
+  trickle-lite worker <command>   run e.g. \`npx wrangler deploy\` on an instrumented copy; the Worker needs the secret TRICKLE_DATABASE_URL
 
-Data is kept outside the project, in ~/.cache/trickle-lite/.
+Local data is kept outside the project, in ~/.cache/trickle-lite/. The connection string is kept in
+~/.config/trickle-lite/database-url (or TRICKLE_DATABASE_URL). The project name is the repository's folder name
+(or TRICKLE_PROJECT).
 
 Environment: TRICKLE_INCLUDE / TRICKLE_EXCLUDE (comma-separated path fragments), TRICKLE_TESTS=1 (observe tests too)
 `;
@@ -43,7 +49,8 @@ async function main(argv: string[]) {
     case 'check': return runCheck(root, rest);
     case 'show': return show(root, rest);
     case 'worker': return (await import('./worker.js')).worker(rest[0] === '--' ? rest.slice(1) : rest);
-    case 'serve': await (await import('./server.js')).serve(); return new Promise<number>(() => {});
+    case 'connect': return connect();
+    case 'push': return push(root);
     case 'pull': return pull(root);
     case 'clear':
       fs.rmSync(dataDir(root), { recursive: true, force: true });
@@ -71,6 +78,7 @@ async function run(root: string, args: string[]): Promise<number> {
   });
   const store = new Store(root);
   try { store.compact(); } catch { /* nothing recorded */ }
+  if (store.files().length && databaseUrl()) await push(root);
   if (store.files().length) printReport(await check(root), root);
   else console.log(dim('\ntrickle-lite: nothing was observed (is the code TypeScript inside this repository?)'));
   return code;
@@ -98,19 +106,57 @@ function printReport(r: Report, root: string) {
   for (const p of r.problems) console.log(yellow(`  ! ${p}`));
 }
 
-/** Replace the local observations with what deployed code reported to the trickle-lite server. */
+const CONFIG = path.join(os.homedir(), '.config', 'trickle-lite', 'database-url');
+const project = (root: string) => process.env.TRICKLE_PROJECT || path.basename(root);
+
+function databaseUrl(): string | undefined {
+  if (process.env.TRICKLE_DATABASE_URL) return process.env.TRICKLE_DATABASE_URL;
+  try { return fs.readFileSync(CONFIG, 'utf8').trim() || undefined; } catch { return undefined; }
+}
+
+/** Save the connection string from stdin, readable only by this user. Never echoed. */
+async function connect(): Promise<number> {
+  let input = '';
+  for await (const chunk of process.stdin) input += chunk;
+  const url = input.trim().split(/\s+/).find((w) => /^postgres(ql)?:\/\//.test(w));
+  if (!url) { process.stderr.write('trickle-lite connect: no postgres:// connection string on stdin\n'); return 2; }
+  fs.mkdirSync(path.dirname(CONFIG), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CONFIG, url + '\n', { mode: 0o600 });
+  console.error(`trickle-lite: connection saved to ${CONFIG}`);
+  return 0;
+}
+
+/** Upload this machine's last run, as types only. */
+async function push(root: string): Promise<number> {
+  const url = databaseUrl();
+  if (!url) { process.stderr.write('trickle-lite push: not connected (see `trickle-lite connect`)\n'); return 2; }
+  let lines: string[] = [];
+  try { lines = fs.readFileSync(path.join(dataDir(root), OBS_FILE), 'utf8').split('\n').filter(Boolean); } catch { /* nothing */ }
+  const writer = `run-${Math.random().toString(36).slice(2, 10)}`;
+  const records = lines.map((l) => {
+    const r = JSON.parse(l) as Rec;
+    if (r.t) r.t = typesOnly(r.t); // only types leave this machine, even if this run kept literals locally
+    return { ...r, w: writer };
+  });
+  await insertRecords(url, project(root), records);
+  console.error(`trickle-lite: uploaded ${records.length} observed values to project "${project(root)}"`);
+  return 0;
+}
+
+/** Replace the local observations with everything observed for the project (Workers, other machines). */
 async function pull(root: string): Promise<number> {
-  const { TRICKLE_SERVER, TRICKLE_READ_TOKEN, TRICKLE_PROJECT } = process.env;
-  if (!TRICKLE_SERVER || !TRICKLE_READ_TOKEN) { process.stderr.write('trickle-lite pull needs TRICKLE_SERVER and TRICKLE_READ_TOKEN\n'); return 2; }
-  const url = new URL('/v1/observations', TRICKLE_SERVER);
-  url.searchParams.set('project', TRICKLE_PROJECT || 'default');
-  const res = await fetch(url, { headers: { authorization: `Bearer ${TRICKLE_READ_TOKEN}` }, signal: AbortSignal.timeout(15000) });
-  if (!res.ok) { process.stderr.write(`trickle-lite pull: ${res.status} from ${url.origin}\n`); return 1; }
-  const { records } = (await res.json()) as { records: unknown[] };
+  const url = databaseUrl();
+  if (!url) { process.stderr.write('trickle-lite pull: not connected (see `trickle-lite connect`)\n'); return 2; }
+  const records = await fetchRecords(url, project(root));
+  const text = records.map((r) => JSON.stringify(r)).join('\n') + (records.length ? '\n' : '');
   const file = path.join(ensureDataDir(root), OBS_FILE);
-  fs.writeFileSync(file + '.tmp', records.map((r) => JSON.stringify(r)).join('\n') + (records.length ? '\n' : ''));
-  fs.renameSync(file + '.tmp', file);
-  console.error(`trickle-lite: ${records.length} observed values from ${url.origin}`);
+  let same = false;
+  try { same = fs.readFileSync(file, 'utf8') === text; } catch { /* first pull */ }
+  if (!same) {
+    fs.writeFileSync(file + '.tmp', text);
+    fs.renameSync(file + '.tmp', file);
+  }
+  console.error(`trickle-lite: ${records.length} records for project "${project(root)}"`);
   return 0;
 }
 

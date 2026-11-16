@@ -4,8 +4,10 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-// Keep trickle-lite's data for test projects out of the real ~/.cache.
-process.env.XDG_CACHE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trickle-lite-cache-'));
+// Keep tests away from this machine's trickle-lite data and Neon connection (~/.cache, ~/.config).
+process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'trickle-lite-home-'));
+process.env.XDG_CACHE_HOME = path.join(process.env.HOME, '.cache');
+delete process.env.TRICKLE_DATABASE_URL;
 
 export const PKG = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const dist = (f) => path.join(PKG, 'dist', f);

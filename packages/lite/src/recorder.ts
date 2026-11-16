@@ -43,7 +43,7 @@ export interface RecorderOptions {
 }
 
 export class Recorder {
-  readonly writer: string;
+  writer: string;
   private readonly files = new Map<string, Slot[]>();
   private readonly all: Slot[] = [];
   private readonly dirty = new Set<Slot>();

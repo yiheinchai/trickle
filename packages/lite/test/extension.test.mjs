@@ -74,7 +74,7 @@ test('inline hints, hovers and drift diagnostics', { skip }, async () => {
   const subscriptions = [];
   try {
     const ext = createRequire(import.meta.url)(bundle);
-    ext.activate({ subscriptions, asAbsolutePath: (p) => path.join(PKG, 'vscode', p) });
+    ext.activate({ subscriptions, asAbsolutePath: (p) => path.join(PKG, 'vscode', p), secrets: { get: async () => undefined, store: async () => {} } });
     const file = path.join(dir, 'src', 'lib.ts');
     const d = doc(file);
     const hints = registered.inlay.provideInlayHints(d, new api.Range(0, 0, 1000, 0));
