@@ -11,7 +11,7 @@ import path from 'node:path';
 import { threadId } from 'node:worker_threads';
 import { infer, mergeTy, quickKind, shrink, tyHash, type Ty } from './types.js';
 import { decodePoints, type Point } from './points.js';
-import { dataDir, findRoot, OBS_FILE } from './common.js';
+import { dataDir, ensureDataDir, findRoot, OBS_FILE } from './common.js';
 
 interface Slot {
   file: string;
@@ -39,7 +39,7 @@ class Recorder {
   private readonly out: string;
   private ready = false;
 
-  constructor(root: string) {
+  constructor(private readonly root: string) {
     this.out = path.join(dataDir(root), OBS_FILE);
     const timer = setInterval(() => this.flush(false), 1000);
     timer.unref?.();
@@ -143,7 +143,7 @@ class Recorder {
     if (!lines.length) return;
     try {
       if (!this.ready) {
-        fs.mkdirSync(path.dirname(this.out), { recursive: true });
+        ensureDataDir(this.root);
         this.ready = true;
       }
       fs.appendFileSync(this.out, lines.join('\n') + '\n');

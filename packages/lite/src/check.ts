@@ -19,9 +19,9 @@ import MagicString from 'magic-string';
 import { analyze, type Kind, type Site } from './instrument.js';
 import { Store, locate, type Observation } from './store.js';
 import { commonProps, isObjectOnly, render } from './types.js';
-import { dataDir, DRIFT_FILE, hashText } from './common.js';
+import { dataDir, DRIFT_FILE, ensureDataDir, hashText } from './common.js';
 
-export type Severity = 'drift' | 'excess' | 'any';
+export type Severity = 'drift' | 'any';
 
 export interface Drift {
   file: string;
@@ -63,8 +63,7 @@ export interface Report {
 //  - __TrickleO: any other class instance is trusted to be whichever object type is declared (plain objects are
 //    checked in full).
 //  - __TrickleA: an array checked against a declared tuple is trusted as that tuple.
-const HELPERS = '\n;type __TrickleKeys<T> = unknown extends T ? PropertyKey : T extends null | undefined ? never : T extends object ? keyof T : PropertyKey;' +
-  'type __TrickleP1<T, K extends PropertyKey> = T extends null | undefined ? never : K extends keyof T ? T[K] : never;' +
+const HELPERS = '\n;type __TrickleP1<T, K extends PropertyKey> = T extends null | undefined ? never : K extends keyof T ? T[K] : never;' +
   'type __TrickleProp<T, K extends PropertyKey> = [__TrickleP1<T, K>] extends [never] ? unknown : __TrickleP1<T, K>;' +
   'type __TrickleE1<T> = T extends readonly (infer E)[] ? E : never;' +
   'type __TrickleEl<T> = [__TrickleE1<T>] extends [never] ? unknown : __TrickleE1<T>;' +
@@ -77,7 +76,7 @@ const HELPERS = '\n;type __TrickleKeys<T> = unknown extends T ? PropertyKey : T 
   'type __TrickleNotAny<T> = 0 extends (1 & T) ? "declared-any" : 0;' +
   'declare var __tt_q: boolean;\n';
 
-const MARKER = /^__t([cepa])(\d+)(?:_(\d+))?/;
+const MARKER = /^__t([cpa])(\d+)(?:_(\d+))?/;
 const IGNORE = [
   /Cannot find name/, /used before its declaration/, /could be instantiated with/,
   /is private in type/, /is protected in type/, /private identifier/i, /Duplicate identifier '__/,
@@ -146,13 +145,9 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
       const stmts: string[] = [];
       const props: string[] = [];
       stmts.push(`const __tc${id}: ${ref} = null as unknown as (${render(obs.ty, { mode: 'ts', ctx: ref })});`);
+      // Per property too: TypeScript reports only the first mismatch of an object.
       if (isObjectOnly(obs.ty)) {
-        const common = commonProps(obs.ty);
-        const keys = [...new Set(obs.ty.flatMap((m) => (m.k === 'object' ? Object.keys(m.props) : [])))];
-        if (keys.length) {
-          stmts.push(`const __te${id}: never = null as unknown as Exclude<${keys.map((k) => JSON.stringify(k)).join(' | ')}, __TrickleKeys<${ref}>>;`);
-        }
-        Object.entries(common).forEach(([key, ty], j) => {
+        Object.entries(commonProps(obs.ty)).forEach(([key, ty], j) => {
           const sub = `__TrickleProp<${ref}, ${JSON.stringify(key)}>`;
           props.push(key);
           stmts.push(`const __tp${id}_${j}: ${sub} = null as unknown as (${render(ty, { mode: 'ts', ctx: sub })});`);
@@ -223,7 +218,7 @@ export async function check(root: string, options: CheckOptions = {}): Promise<R
     observedFiles: files.length, checkedPoints, projects: [...projects.keys()].map((p) => path.relative(root, p)),
     drifts: unique, problems,
   };
-  fs.mkdirSync(dataDir(root), { recursive: true });
+  ensureDataDir(root);
   fs.writeFileSync(path.join(dataDir(root), DRIFT_FILE), JSON.stringify(report, null, 1));
   return report;
 }
@@ -366,11 +361,6 @@ function parseTsc(out: string, plans: Map<string, FilePlan>): Drift[] {
     if (kind === 'a') {
       severity = 'any';
       message = `declared as any; at runtime it is ${runtime}`;
-    } else if (kind === 'e') {
-      severity = 'excess';
-      const keys = [...(e.lines[0]!.match(/^Type '(.*)' is not assignable/)?.[1] ?? '').matchAll(/"([^"]+)"/g)].map((x) => x[1]);
-      if (!keys.length) continue;
-      message = `at runtime it also has ${keys.map((k) => `'${k}'`).join(', ')}, which the declared type does not`;
     } else {
       const prop = kind === 'p' && m[3] !== undefined ? planned.props[+m[3]] : undefined;
       message = summarize(e.lines.map(cleanHelpers), prop);
@@ -388,7 +378,7 @@ function parseTsc(out: string, plans: Map<string, FilePlan>): Drift[] {
 /** Show the helper types in TypeScript's messages as the runtime types they stand for. */
 export function cleanHelpers(text: string): string {
   for (let guard = 0; guard < 200; guard++) {
-    const m = /__Trickle(S|N|B|A|X|O|Prop|El|Keys|NotAny)</.exec(text);
+    const m = /__Trickle(S|N|B|A|X|O|Prop|El|NotAny)</.exec(text);
     if (!m) return text;
     const open = m.index + m[0].length;
     const args: string[] = [];

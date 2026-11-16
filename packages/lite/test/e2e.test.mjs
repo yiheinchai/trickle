@@ -32,8 +32,7 @@ test('drift: values the declared types do not allow', () => {
   assert.ok(at('second').some((d) => d.severity === 'drift' && /undefined/.test(d.message)), 'regex group typed string');
 });
 
-test('undeclared properties and declared any are reported separately', () => {
-  assert.ok(at('data').some((d) => d.severity === 'excess' && d.message.includes("'extra'")));
+test('values declared any are reported with what they were', () => {
   assert.ok(at('x').some((d) => d.severity === 'any' && /\{ value: number \}/.test(d.message)));
 });
 
@@ -48,4 +47,5 @@ test('drift.json is written for the editor', () => {
   const saved = JSON.parse(fs.readFileSync(path.join(dir, '.trickle', 'drift.json'), 'utf8'));
   assert.equal(saved.drifts.length, report.drifts.length);
   assert.deepEqual(report.problems, []);
+  assert.equal(fs.readFileSync(path.join(dir, '.trickle', '.gitignore'), 'utf8'), '*\n'); // ignored without project changes
 });

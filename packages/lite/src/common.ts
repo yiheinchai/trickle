@@ -24,6 +24,16 @@ export function dataDir(root: string): string {
   return path.join(root, DATA_DIR);
 }
 
+/** Create .trickle/, ignored by git without the project having to say so. */
+export function ensureDataDir(root: string): string {
+  const dir = dataDir(root);
+  if (!fs.existsSync(path.join(dir, '.gitignore'))) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, '.gitignore'), '*\n');
+  }
+  return dir;
+}
+
 export function toKey(root: string, file: string): string {
   return path.relative(root, file).split(path.sep).join('/');
 }

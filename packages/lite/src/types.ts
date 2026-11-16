@@ -428,7 +428,7 @@ function renderMember(m: Member, o: Opts, depth: number, indent: number, ctx: st
   }
 }
 
-/** Whether a type is a plain object (so excess-property checks make sense). */
+/** Whether a type is only plain objects (so per-property checks make sense). */
 export function isObjectOnly(t: Ty): boolean {
   return t.length > 0 && t.every((m) => m.k === 'object' && !m.cls);
 }

@@ -1,6 +1,6 @@
 /**
- * Node module loader hooks: instrument project TypeScript as it is imported.
- * Works alongside tsx (which compiles whatever we hand it) or on its own.
+ * Node module loader hooks: instrument project TypeScript as it is imported (with or without tsx),
+ * and add the Vitest plugin to Vitest configs.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -30,11 +30,14 @@ function packageType(dir: string): string {
 type ResolveResult = { url: string; format?: string; shortCircuit?: boolean };
 type NextResolve = (specifier: string, context?: unknown) => Promise<ResolveResult>;
 
-/** `import "./x.js"` written for TypeScript's NodeNext resolution: fall back to x.ts when there is no x.js. */
+const SHIM = '?trickle-vitest';
+
 export async function resolve(specifier: string, context: { parentURL?: string }, nextResolve: NextResolve): Promise<ResolveResult> {
+  let result: ResolveResult;
   try {
-    return await nextResolve(specifier, context);
+    result = await nextResolve(specifier, context);
   } catch (e) {
+    // `import "./x.js"` written for TypeScript's NodeNext resolution: fall back to x.ts when there is no x.js.
     const parent = context.parentURL;
     if (!parent?.startsWith('file:') || !/^\.{1,2}\//.test(specifier) || !/\.[mc]?js$/.test(specifier)) throw e;
     for (const ext of ['.ts', '.tsx', '.mts', '.cts']) {
@@ -43,6 +46,12 @@ export async function resolve(specifier: string, context: { parentURL?: string }
     }
     throw e;
   }
+  // A Vitest config (which Vite bundles into .vite-temp) importing vitest/config gets a defineConfig that also
+  // adds the trickle-lite plugin, so the project's config needs no changes.
+  if (/\/\.vite-temp\/vite(st)?\.config\./.test(context.parentURL ?? '') && /\/vitest\/dist\/config\.m?js$/.test(result.url)) {
+    return { url: result.url + SHIM, format: 'module', shortCircuit: true };
+  }
+  return result;
 }
 
 type LoadResult = { format?: string; source?: string | ArrayBuffer | Uint8Array; shortCircuit?: boolean };
@@ -61,6 +70,17 @@ async function passThrough(url: string, context: { format?: string }, nextLoad: 
 }
 
 export async function load(url: string, context: { format?: string }, nextLoad: NextLoad): Promise<LoadResult> {
+  if (url.endsWith(SHIM)) {
+    const real = JSON.stringify(url.slice(0, -SHIM.length));
+    const plugin = JSON.stringify(new URL('./vitest.js', import.meta.url).href);
+    const source = `export * from ${real}; import { trickle } from ${plugin};
+const add = (c) => ({ ...c, plugins: [...(c?.plugins ?? []), trickle()] });
+export function defineConfig(c) {
+  if (typeof c === 'function') return async (env) => add(await c(env));
+  return c && typeof c.then === 'function' ? c.then(add) : add(c);
+}`;
+    return { format: 'module', source, shortCircuit: true };
+  }
   if (!url.startsWith('file:')) return passThrough(url, context, nextLoad);
   const file = fileURLToPath(url);
   if (!shouldInstrument(file, root)) return passThrough(url, context, nextLoad);

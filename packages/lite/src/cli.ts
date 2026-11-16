@@ -16,26 +16,12 @@ const HOME = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const HELP = `trickle-lite — runtime types for TypeScript, and where they drift from the declared ones
 
 Usage:
-  trickle-lite run [--keep] [--no-check] [--no-node-hook] -- <command...>
-      Run a command with observation on (node, tsx, vitest via the plugin), then check for drift.
-      Observations from earlier runs are cleared first unless --keep. --no-node-hook leaves NODE_OPTIONS
-      alone, for runs that only need the Vitest plugin.
-  trickle-lite check [--json] [--file <path>]
-      Compare observed runtime types with the declared types using the project's own tsc.
-      Writes .trickle/drift.json.
-  trickle-lite show <file> [--all]
-      Print a file with the runtime type of each observed value beside it.
-  trickle-lite watch
-      Re-check whenever new observations arrive (the VS Code extension does this for you).
-  trickle-lite clear
-      Delete everything under .trickle/.
+  trickle-lite run <command...>   run a command observed (node, tsx, vitest), then check for drift
+  trickle-lite check [--json]     check observed types against declared types (writes .trickle/drift.json)
+  trickle-lite show <file>        print a file with the observed type of each value beside it
+  trickle-lite clear              delete .trickle/
 
-Environment:
-  TRICKLE_ROOT       project root (default: nearest directory with .git)
-  TRICKLE_INCLUDE    comma-separated path fragments to observe (default: all project TypeScript)
-  TRICKLE_EXCLUDE    comma-separated path fragments to skip
-  TRICKLE_TESTS=1    also observe test files
-  TRICKLE_DISABLE=1  turn observation off
+Environment: TRICKLE_INCLUDE / TRICKLE_EXCLUDE (comma-separated path fragments), TRICKLE_TESTS=1 (observe tests too)
 `;
 
 const color = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -49,7 +35,6 @@ async function main(argv: string[]) {
     case 'run': return run(root, rest);
     case 'check': return runCheck(root, rest);
     case 'show': return show(root, rest);
-    case 'watch': return watch(root);
     case 'clear':
       fs.rmSync(dataDir(root), { recursive: true, force: true });
       console.log(`cleared ${path.relative(process.cwd(), dataDir(root)) || '.trickle'}`);
@@ -64,16 +49,11 @@ async function main(argv: string[]) {
 }
 
 async function run(root: string, args: string[]): Promise<number> {
-  const sep = args.indexOf('--');
-  const flags = sep >= 0 ? args.slice(0, sep) : args.filter((a) => a.startsWith('--'));
-  const command = sep >= 0 ? args.slice(sep + 1) : args.filter((a) => !a.startsWith('--'));
+  const command = args[0] === '--' ? args.slice(1) : args;
   if (!command.length) { process.stderr.write('trickle-lite run: no command given\n'); return 2; }
-  if (!flags.includes('--keep')) fs.rmSync(path.join(dataDir(root), OBS_FILE), { force: true });
+  fs.rmSync(path.join(dataDir(root), OBS_FILE), { force: true });
   const register = pathToFileURL(path.join(HOME, 'dist', 'register.js')).href;
-  const env: NodeJS.ProcessEnv = { ...process.env, TRICKLE_ROOT: root, TRICKLE_LITE_HOME: HOME };
-  // The loader hook observes node/tsx processes. Test runs that only use the Vitest plugin can leave it out,
-  // so the node processes their tests spawn start exactly as they normally do.
-  if (!flags.includes('--no-node-hook')) env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --import ${register}`.trim();
+  const env = { ...process.env, TRICKLE_ROOT: root, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import ${register}`.trim() };
   const code: number = await new Promise((resolve) => {
     const child = spawn(command[0]!, command.slice(1), { stdio: 'inherit', env, shell: process.platform === 'win32' });
     child.on('error', (e) => { process.stderr.write(`trickle-lite: ${e.message}\n`); resolve(127); });
@@ -81,46 +61,32 @@ async function run(root: string, args: string[]): Promise<number> {
   });
   const store = new Store(root);
   try { store.compact(); } catch { /* nothing recorded */ }
-  if (!flags.includes('--no-check')) {
-    if (store.files().length) {
-      const report = await check(root);
-      printReport(report, false);
-    } else {
-      console.log(dim('\ntrickle-lite: nothing was observed. Is the code TypeScript under this repository, and (for Vitest) is the plugin in the config?'));
-    }
-  }
+  if (store.files().length) printReport(await check(root));
+  else console.log(dim('\ntrickle-lite: nothing was observed (is the code TypeScript inside this repository?)'));
   return code;
 }
 
 async function runCheck(root: string, args: string[]): Promise<number> {
   const json = args.includes('--json');
-  const fileIdx = args.indexOf('--file');
-  const files = fileIdx >= 0 && args[fileIdx + 1] ? [toKey(root, path.resolve(args[fileIdx + 1]!))] : undefined;
-  const report = await check(root, { log: json ? undefined : (m) => console.error(dim(m)), files });
+  const report = await check(root);
   if (json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-  else printReport(report, true);
+  else printReport(report);
   return report.drifts.some((d) => d.severity === 'drift') ? 1 : 0;
 }
 
-function printReport(r: Report, verbose: boolean) {
+function printReport(r: Report) {
   const drift = r.drifts.filter((d) => d.severity === 'drift');
-  const excess = r.drifts.filter((d) => d.severity === 'excess');
   const any = r.drifts.filter((d) => d.severity === 'any');
-  console.log(`\n${cyan('trickle-lite')} checked ${r.checkedPoints} observed values in ${r.observedFiles} files against their declared types (${(r.ms / 1000).toFixed(1)}s)`);
+  console.log(`\n${cyan('trickle-lite')} checked ${r.checkedPoints} observed values in ${r.observedFiles} files against their declared types`);
   const line = (d: Drift) => {
-    const where = `${d.file}:${d.line}:${d.col + 1}`;
     const what = d.kind === 'r' ? `return of ${d.name}` : d.kind === 'p' ? `parameter ${d.name}` : d.name;
-    return `  ${where}  ${what}${d.fn && d.kind !== 'r' ? dim(` in ${d.fn}`) : ''}\n    ${d.message} ${dim(`(${d.count}×)`)}`;
+    return `  ${d.file}:${d.line}:${d.col + 1}  ${what}\n    ${d.message} ${dim(`(${d.count}×)`)}`;
   };
   if (drift.length) console.log(`\n${red(`${drift.length} drift${drift.length === 1 ? '' : 's'}`)} — runtime values the declared types do not allow:\n${drift.map(line).join('\n')}`);
-  if (excess.length && verbose) console.log(`\n${yellow(`${excess.length} undeclared propert${excess.length === 1 ? 'y set' : 'y sets'}`)} — runtime objects carry fields the type does not mention:\n${excess.map(line).join('\n')}`);
-  if (any.length && verbose) console.log(`\n${dim(`${any.length} declared any`)} — no contract, but this is what ran:\n${any.map(line).join('\n')}`);
-  if (!verbose && (excess.length || any.length)) console.log(dim(`\n${excess.length} undeclared property sets and ${any.length} any-typed values; \`trickle-lite check\` lists them.`));
-  if (!drift.length) console.log(`\n${c(32, 'no drift')}: every observed value fits its declared type.`);
+  else console.log(`\n${c(32, 'no drift')}: every observed value fits its declared type.`);
+  if (any.length) console.log(dim(`\n${any.length} values are declared any; .trickle/drift.json has what they were at runtime.`));
   for (const p of r.problems) console.log(yellow(`  ! ${p}`));
-  console.log(dim(`\nDetails: ${path.join(DATA_DIR_REL, DRIFT_FILE)}`));
 }
-const DATA_DIR_REL = '.trickle';
 
 function show(root: string, args: string[]): number {
   const target = args.find((a) => !a.startsWith('--'));
@@ -149,7 +115,7 @@ function show(root: string, args: string[]): number {
   }
   for (const d of drifts) {
     const list = notes.get(d.line) ?? [];
-    list.push(`${d.severity === 'drift' ? '⚠ DRIFT' : d.severity === 'excess' ? '± extra' : '~ any'} ${d.name}: ${d.message}`);
+    list.push(`${d.severity === 'drift' ? '⚠ DRIFT' : '~ any'} ${d.name}: ${d.message}`);
     notes.set(d.line, list);
   }
   const width = String(lines.length).length;
@@ -163,28 +129,6 @@ function show(root: string, args: string[]): number {
 
 function nearNote(notes: Map<number, string[]>, line: number): boolean {
   return notes.has(line - 1) || notes.has(line + 1);
-}
-
-async function watch(root: string): Promise<number> {
-  const file = path.join(dataDir(root), OBS_FILE);
-  fs.mkdirSync(dataDir(root), { recursive: true });
-  console.log(dim(`watching ${path.relative(process.cwd(), file)}`));
-  let timer: NodeJS.Timeout | undefined;
-  let running = false;
-  let again = false;
-  const go = async () => {
-    if (running) { again = true; return; }
-    running = true;
-    try { printReport(await check(root), false); } catch (e) { console.error(e); }
-    running = false;
-    if (again) { again = false; void go(); }
-  };
-  fs.watchFile(file, { interval: 500 }, () => {
-    clearTimeout(timer);
-    timer = setTimeout(go, 1000);
-  });
-  await go();
-  return new Promise<number>(() => {});
 }
 
 main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (e) => {

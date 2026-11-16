@@ -17,7 +17,7 @@ function stubVscode(root) {
   class Range { constructor(a, b, c, d) { this.start = new Position(a, b); this.end = new Position(c, d); } }
   class MarkdownString { constructor() { this.value = ''; } appendMarkdown(s) { this.value += s; return this; } appendCodeblock(s, l) { this.value += '```' + l + '\n' + s + '\n```\n'; return this; } }
   const disposable = { dispose() {} };
-  const config = { get: (k) => ({ 'hints.enabled': true, 'hints.annotated': false, 'hints.maxLength': 60, 'check.enabled': false, 'diagnostics.undeclaredProperties': false, 'diagnostics.declaredAny': true })[k] };
+  const config = { get: (k) => ({ 'hints.enabled': true, 'hints.annotated': false })[k] };
   return {
     registered,
     api: {
@@ -27,9 +27,6 @@ function stubVscode(root) {
       Hover: class { constructor(contents, range) { this.contents = contents; this.range = range; } },
       Diagnostic: class { constructor(range, message, severity) { this.range = range; this.message = message; this.severity = severity; } },
       DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
-      CodeAction: class { constructor(title) { this.title = title; } },
-      CodeActionKind: { QuickFix: 'quickfix' },
-      WorkspaceEdit: class { constructor() { this.edits = []; } replace(uri, range, text) { this.edits.push({ range, text }); } },
       Uri: { file: (fsPath) => ({ fsPath, with: () => ({}) }) },
       RelativePattern: class {},
       StatusBarAlignment: { Left: 1 },
@@ -41,14 +38,12 @@ function stubVscode(root) {
         onDidChangeConfiguration: () => disposable,
       },
       window: {
-        createOutputChannel: () => ({ appendLine() {}, dispose() {} }),
         createStatusBarItem: () => (registered.status = { show() {}, hide() {}, dispose() {} }),
       },
       languages: {
         createDiagnosticCollection: () => ({ clear: () => registered.diagnostics.clear(), set: (uri, list) => registered.diagnostics.set(uri.fsPath, list), dispose() {} }),
         registerInlayHintsProvider: (_s, p) => ((registered.inlay = p), disposable),
         registerHoverProvider: (_s, p) => ((registered.hover = p), disposable),
-        registerCodeActionsProvider: (_s, p) => ((registered.actions = p), disposable),
       },
       commands: { registerCommand: (id, f) => ((registered.commands[id] = f), disposable) },
     },
@@ -95,18 +90,12 @@ test('inline hints, hovers and drift diagnostics', { skip }, async () => {
     const lines = fs.readFileSync(file, 'utf8').split('\n');
     const line = lines.findIndex((l) => l.includes('const data ='));
     const hover = registered.hover.provideHover(d, new api.Position(line, lines[line].indexOf('data') + 1));
-    assert.match(hover.contents.value, /Runtime type\*\* of `data` — seen 4×/);
+    assert.match(hover.contents.value, /Runtime type\*\* of `data`, seen 4×/);
     assert.match(hover.contents.value, /Drift from the declared type/);
 
     const diags = registered.diagnostics.get(file);
     assert.ok(diags.some((x) => x.severity === 1 && /^data: tags: runtime null/.test(x.message)), diags.map((x) => x.message).join('\n'));
-    assert.ok(!diags.some((x) => x.code === 'undeclared-properties'), 'off by default');
-    const anyDiag = diags.find((x) => x.code === 'declared-any' && x.message.startsWith('parameter x'));
-    assert.ok(anyDiag);
-    const [fix] = registered.actions.provideCodeActions(d, anyDiag.range, { diagnostics: [anyDiag] });
-    assert.equal(fix.edit.edits[0].text, ': { value: number }');
-    const { range } = fix.edit.edits[0]; // replaces the explicit `: any`
-    assert.equal(lines[range.start.line].slice(range.start.character, range.end.character), ': any');
+    assert.ok(diags.some((x) => x.severity === 3 && /^parameter x: declared as any; at runtime it is \{ value: number \}/.test(x.message)));
   } finally {
     Module._load = load;
     for (const s of subscriptions) s.dispose?.();
