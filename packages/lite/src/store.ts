@@ -27,6 +27,7 @@ interface Rec {
 export class Store {
   readonly path: string;
   private offset = 0;
+  private ino = 0;
   private partial = '';
   /** file -> hash -> point index -> writer -> latest record */
   private readonly recs = new Map<string, Map<string, Map<number, Map<string, Rec>>>>();
@@ -41,9 +42,10 @@ export class Store {
   /** Read anything appended since the last call. Returns the files whose observations changed. */
   update(): Set<string> {
     const changed = new Set<string>();
-    let size: number;
-    try { size = fs.statSync(this.path).size; } catch { size = 0; }
-    if (size < this.offset) this.reset(changed); // cleared or rewritten
+    let size = 0, ino = 0;
+    try { const st = fs.statSync(this.path); size = st.size; ino = st.ino; } catch { /* none yet */ }
+    if (size < this.offset || (this.ino && ino !== this.ino)) this.reset(changed); // cleared or replaced
+    this.ino = ino;
     if (size === this.offset) return changed;
     const fd = fs.openSync(this.path, 'r');
     try {

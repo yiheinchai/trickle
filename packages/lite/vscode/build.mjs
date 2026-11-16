@@ -12,7 +12,7 @@ await build({
 await build({
   entryPoints: [path.join(here, '../src/cli.ts')],
   outfile: path.join(here, 'dist/cli.mjs'),
-  bundle: true, platform: 'node', format: 'esm', target: 'node18', minify: true,
+  bundle: true, platform: 'node', format: 'esm', target: 'node18', minify: true, external: ['postgres'],
   banner: { js: "import { createRequire as __cr } from 'module'; import { fileURLToPath as __fu } from 'url'; import { dirname as __dn } from 'path'; const require = __cr(import.meta.url); const __filename = __fu(import.meta.url); const __dirname = __dn(__filename);" },
 });
 console.log('built vscode/dist');

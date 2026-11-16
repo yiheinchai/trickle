@@ -16,7 +16,7 @@ export type Member =
   | { k: 'symbol' }
   | { k: 'function'; ctor?: true }
   | { k: 'array'; el: Ty; re?: true } // el = [] for an empty array; re: a RegExp match (index, input, groups)
-  | { k: 'object'; cls?: string; props: Record<string, Ty>; opt?: string[]; methods?: string[]; more?: true }
+  | { k: 'object'; cls?: string; props: Record<string, Ty>; opt?: string[]; methods?: string[]; more?: true; dict?: Ty } // dict: keys not kept, values' type
   | { k: 'instance'; cls: string; args?: Ty[] } // Date, Map<K, V>, Promise, ...
   | { k: 'any'; why?: string }; // depth/budget cut, cycles, proxies, getters
 
@@ -48,11 +48,19 @@ try {
   if (util?.types?.isProxy) isProxy = util.types.isProxy;
 } catch { /* not Node */ }
 
-interface InferState { budget: number; seen: WeakSet<object> }
+interface InferState { budget: number; seen: WeakSet<object>; typesOnly: boolean }
 
-/** Infer the runtime type of a value. `budget` bounds the work per value. */
-export function infer(value: unknown, budget = 400): Ty {
-  return [inferMember(value, { budget, seen: new WeakSet() }, 0, '')];
+// In types-only mode a property name is kept only if it looks like code (an identifier), not data.
+const CODE_KEY_RE = /^[A-Za-z_$][A-Za-z_$]*[0-9]{0,2}[A-Za-z_$]*$/;
+const isCodeKey = (k: string) => k.length <= 40 && CODE_KEY_RE.test(k);
+
+/**
+ * Infer the runtime type of a value. `budget` bounds the work per value. With `typesOnly`, nothing
+ * derived from a value's content is kept: no string or boolean literals, and objects whose keys do not
+ * look like identifiers (IDs, emails, file names) become `{ [key: string]: T }` with the keys dropped.
+ */
+export function infer(value: unknown, budget = 400, typesOnly = false): Ty {
+  return [inferMember(value, { budget, seen: new WeakSet(), typesOnly }, 0, '')];
 }
 
 /** The cheap top-level kind of a value, used to notice new variants on hot paths without full inference. */
@@ -72,9 +80,9 @@ function inferMember(v: unknown, st: InferState, depth: number, key: string): Me
     case 'number': return { k: 'number' };
     case 'bigint': return { k: 'bigint' };
     case 'symbol': return { k: 'symbol' };
-    case 'boolean': return { k: 'boolean', lits: [v] };
+    case 'boolean': return st.typesOnly ? { k: 'boolean' } : { k: 'boolean', lits: [v] };
     case 'string':
-      return LITERAL_RE.test(v) && !SENSITIVE_KEY_RE.test(key) ? { k: 'string', lits: [v] } : { k: 'string' };
+      return !st.typesOnly && LITERAL_RE.test(v) && !SENSITIVE_KEY_RE.test(key) ? { k: 'string', lits: [v] } : { k: 'string' };
     case 'function': {
       let src = '';
       try { src = Function.prototype.toString.call(v); } catch { /* native */ }
@@ -121,6 +129,16 @@ function inferMember(v: unknown, st: InferState, depth: number, key: string): Me
     const keys = Object.keys(obj);
     // Nothing enumerable but own properties all the same (defined non-enumerable): its shape is not visible.
     if (keys.length === 0 && Object.getOwnPropertyNames(obj).length > 0) return { k: 'any', why: 'opaque' };
+    if (st.typesOnly && !keys.every(isCodeKey)) {
+      let dict: Ty = [];
+      for (const name of keys.slice(0, MAX_ARRAY_SAMPLE)) {
+        const d = Object.getOwnPropertyDescriptor(obj, name);
+        dict = mergeTy(dict, [d && 'value' in d ? inferMember(d.value, st, depth + 1, '') : { k: 'any', why: 'getter' }]);
+      }
+      const m: Member = { k: 'object', props: {}, dict };
+      if (ctorName) m.cls = ctorName;
+      return m;
+    }
     const props: Record<string, Ty> = {};
     let count = 0, more = false;
     for (const name of keys) {
@@ -177,6 +195,7 @@ function memberKey(m: Member): string {
 
 /** Keys, and the keys of nested objects: objects merge only with the same shape, so correlated variants stay apart. */
 function shapeKey(m: Extract<Member, { k: 'object' }>, depth: number): string {
+  if (m.dict) return '[dict]';
   return Object.keys(m.props).sort().map((key) => {
     const t = m.props[key]!;
     const inner = depth > 1 && t.length === 1 && t[0]!.k === 'object' ? `{${shapeKey(t[0]!, depth - 1)}}` : '';
@@ -231,6 +250,7 @@ function mergeObjects(a: Obj, b: Obj): Member {
   const methods = [...new Set([...(a.methods ?? []), ...(b.methods ?? [])])].sort();
   if (methods.length) m.methods = methods;
   if (a.more || b.more) m.more = true;
+  if (a.dict || b.dict) m.dict = mergeTy(a.dict ?? [], b.dict ?? []);
   return m;
 }
 
@@ -361,7 +381,9 @@ function renderMember(m: Member, o: Opts, depth: number, indent: number, ctx: st
       return ctx ? `__TrickleS<${ctx}>` : 'string';
     case 'number':
       return ctx ? `__TrickleN<${ctx}>` : 'number';
-    case 'undefined': case 'null': case 'bigint': case 'symbol': case 'boolean':
+    case 'boolean':
+      return ctx ? `__TrickleBo<${ctx}>` : 'boolean';
+    case 'undefined': case 'null': case 'bigint': case 'symbol':
       return m.k;
     case 'any':
       return 'any';
@@ -397,6 +419,12 @@ function renderMember(m: Member, o: Opts, depth: number, indent: number, ctx: st
       return m.cls;
     }
     case 'object': {
+      if (m.dict) {
+        // Keys were not kept: as a check, trusted to be whatever object type is declared.
+        const v = depth >= o.maxDepth ? 'any' : renderTy(m.dict.length ? m.dict : [{ k: 'any' }], o, depth + 1, indent, undefined);
+        if (o.mode !== 'ts') return `${m.cls ? m.cls + ' ' : ''}{ [key]: ${v} }`;
+        return ctx ? `__TrickleO<${ctx}, { [key: string]: ${v} }>` : `{ [key: string]: ${v} }`;
+      }
       const keys = Object.keys(m.props);
       if (depth >= o.maxDepth) return o.mode === 'ts' ? 'any' : (m.cls ?? '{…}');
       const opt = new Set(m.opt ?? []);
@@ -441,6 +469,49 @@ export function commonProps(t: Ty): Record<string, Ty> {
   for (const key of Object.keys(objs[0]!.props)) {
     if (objs.every((o) => key in o.props)) {
       out[key] = objs.reduce<Ty>((acc, o) => mergeTy(acc, o.props[key]!), []);
+    }
+  }
+  return out;
+}
+
+const KINDS = new Set(['undefined', 'null', 'string', 'number', 'boolean', 'bigint', 'symbol', 'function', 'array', 'object', 'instance', 'any']);
+const CLASS_RE = /^[A-Za-z_$][\w$]{0,60}$/;
+
+/**
+ * Reduce a type received from elsewhere to types only, whatever the sender did: drop literals, drop keys that
+ * do not look like code, drop anything unrecognised. Used by the server before storing, and by the Worker
+ * recorder before sending.
+ */
+export function typesOnly(t: unknown, depth = 0): Ty {
+  if (!Array.isArray(t) || depth > 8) return [{ k: 'any' }];
+  const out: Member[] = [];
+  for (const m of t.slice(0, 16) as Array<Record<string, unknown>>) {
+    const k = m?.k;
+    if (typeof k !== 'string' || !KINDS.has(k)) continue;
+    const cls = typeof m.cls === 'string' && CLASS_RE.test(m.cls) ? m.cls : undefined;
+    switch (k) {
+      case 'function': out.push(m.ctor ? { k, ctor: true } : { k }); break;
+      case 'array': out.push({ k, el: typesOnly(m.el, depth + 1) }); break;
+      case 'instance': out.push(cls ? { k, cls } : { k: 'any' }); break;
+      case 'object': {
+        const props = m.props && typeof m.props === 'object' ? (m.props as Record<string, unknown>) : {};
+        const keys = Object.keys(props);
+        const obj: Obj = { k, props: {} };
+        if (cls) obj.cls = cls;
+        if (m.dict !== undefined || !keys.every(isCodeKey)) {
+          obj.dict = keys.reduce<Ty>((acc, key) => mergeTy(acc, typesOnly(props[key], depth + 1)), m.dict !== undefined ? typesOnly(m.dict, depth + 1) : []);
+        } else {
+          for (const key of keys.slice(0, MAX_PROPS)) obj.props[key] = typesOnly(props[key], depth + 1);
+          const opt = Array.isArray(m.opt) ? m.opt.filter((x): x is string => typeof x === 'string' && x in obj.props) : [];
+          if (opt.length) obj.opt = opt;
+          const methods = Array.isArray(m.methods) ? m.methods.filter((x): x is string => typeof x === 'string' && isCodeKey(x)).slice(0, MAX_METHODS) : [];
+          if (methods.length) obj.methods = methods;
+          if (m.more) obj.more = true;
+        }
+        out.push(obj);
+        break;
+      }
+      default: out.push({ k } as Member);
     }
   }
   return out;

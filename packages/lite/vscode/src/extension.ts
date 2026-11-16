@@ -80,6 +80,22 @@ export function activate(context: vscode.ExtensionContext) {
   };
   const scheduleCheck = (ms = 1500) => { clearTimeout(timer); timer = setTimeout(runCheck, ms); };
 
+  // Observations from deployed code: pull them from the trickle-lite server (read token in secret storage).
+  let pulling = false;
+  const pull = async () => {
+    const server = config().get<string>('server');
+    if (!server || pulling) return;
+    const token = await context.secrets.get('trickleLite.readToken');
+    if (!token) return;
+    pulling = true;
+    const cli = context.asAbsolutePath(path.join('dist', 'cli.mjs'));
+    execFile(process.execPath, [cli, 'pull'], {
+      cwd: root,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TRICKLE_ROOT: root, TRICKLE_SERVER: server,
+        TRICKLE_PROJECT: config().get<string>('project') || 'default', TRICKLE_READ_TOKEN: token },
+    }, () => { pulling = false; refresh(); });
+  };
+
   const refresh = () => {
     let changed = new Set<string>();
     try { changed = store.update(); } catch { /* file mid-write */ }
@@ -141,14 +157,20 @@ export function activate(context: vscode.ExtensionContext) {
   watcher.onDidChange((uri) => (uri.fsPath.endsWith(DRIFT_FILE) ? !checking && loadReport() : refresh()));
   watcher.onDidCreate(refresh);
   const poll = setInterval(refresh, 1000); // appends are not always reported as changes
+  const pullTimer = setInterval(pull, 15_000);
   context.subscriptions.push(
-    watcher, diagnostics, status, hintsChanged, { dispose: () => { clearInterval(poll); clearTimeout(timer); } },
+    watcher, diagnostics, status, hintsChanged, { dispose: () => { clearInterval(poll); clearInterval(pullTimer); clearTimeout(timer); } },
     vscode.commands.registerCommand('trickleLite.check', runCheck),
+    vscode.commands.registerCommand('trickleLite.setReadToken', async () => {
+      const token = await vscode.window.showInputBox({ prompt: 'trickle-lite server read token', password: true, ignoreFocusOut: true });
+      if (token) { await context.secrets.store('trickleLite.readToken', token); void pull(); }
+    }),
     vscode.workspace.onDidSaveTextDocument((doc) => { if (store.get(toKey(root, doc.uri.fsPath)).length) scheduleCheck(500); }),
     vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration('trickleLite')) hintsChanged.fire(); }),
   );
   refresh();
   loadReport();
+  void pull();
 }
 
 export function deactivate() {}

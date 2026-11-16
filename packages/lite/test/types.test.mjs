@@ -72,3 +72,23 @@ test('ctx rendering defers to the declared type where the record is imprecise', 
   assert.equal(render(infer({ n: 1, d: new Date(0) }), { mode: 'ts', ctx: 'typeof x' }),
     '{ n: __TrickleN<__TrickleProp<typeof x, "n">>; d: __TrickleB<__TrickleProp<typeof x, "d">, Date> }');
 });
+
+test('types-only inference keeps no values and no data-like keys', async () => {
+  const { typesOnly } = await import('../dist/types.js');
+  const value = {
+    email: 'someone@example.com', kind: 'team', ok: true, apiKey: 'sk-live-123',
+    byUser: { 'u_8f2a91c3': { name: 'Ada' }, 'someone@example.com': { name: 'Bo' } },
+    tags: ['secret-project'],
+  };
+  const t = infer(value, 400, true);
+  const json = JSON.stringify(t);
+  for (const leaked of ['example.com', 'team', 'sk-live', 'u_8f2a91c3', 'secret-project', 'Ada', 'lits']) {
+    assert.ok(!json.includes(leaked), `${leaked} leaked: ${json}`);
+  }
+  assert.equal(render(t, { mode: 'short', maxProps: 9 }),
+    '{ email: string; kind: string; ok: boolean; apiKey: string; byUser: { [key]: {…} }; tags: string[] }');
+  // The server re-applies the same rule to whatever it is sent.
+  const sent = [{ k: 'object', props: { 'a@b.com': [{ k: 'string', lits: ['x'] }], ok: [{ k: 'boolean', lits: [true] }] }, evil: 'x' }];
+  assert.deepEqual(typesOnly(sent), [{ k: 'object', props: {}, dict: [{ k: 'string' }, { k: 'boolean' }] }]);
+  assert.deepEqual(typesOnly([{ k: 'string', lits: ['secret'] }, { k: 'instance', cls: 'bad name!' }, { k: 'nope' }]), [{ k: 'string' }, { k: 'any' }]);
+});

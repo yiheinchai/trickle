@@ -4,15 +4,21 @@
   "description": "Real-time runtime type monitoring for TypeScript: see what your values actually are, and where the declared types drift from them.",
   "license": "MIT",
   "type": "module",
-  "bin": { "trickle-lite": "dist/cli.js" },
+  "bin": {
+    "trickle-lite": "dist/cli.js"
+  },
   "exports": {
     "./register": "./dist/register.js",
     "./runtime": "./dist/runtime.js",
     "./vitest": "./dist/vitest.js",
     "./package.json": "./package.json"
   },
-  "files": ["dist"],
-  "engines": { "node": ">=20.6" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.6"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node vscode/build.mjs && node --test test/*.test.mjs",
@@ -21,7 +27,8 @@
   },
   "dependencies": {
     "magic-string": "^0.30.21",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

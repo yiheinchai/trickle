@@ -9,17 +9,22 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { check, type Drift, type Report } from './check.js';
 import { Store, locate } from './store.js';
 import { render } from './types.js';
-import { dataDir, DRIFT_FILE, findRoot, OBS_FILE, toKey } from './common.js';
+import { dataDir, DRIFT_FILE, ensureDataDir, findRoot, OBS_FILE, toKey } from './common.js';
 
 const HOME = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const HELP = `trickle-lite — runtime types for TypeScript, and where they drift from the declared ones
 
 Usage:
-  trickle-lite run <command...>   run a command observed (node, tsx, vitest), then check for drift
+  trickle-lite run <command...>   run a command observed locally (node, tsx, vitest), then check for drift
   trickle-lite check [--json]     check observed types against declared types
   trickle-lite show <file>        print a file with the observed type of each value beside it
   trickle-lite clear              delete this project's trickle-lite data
+
+Deployed code (Cloudflare Workers), types only:
+  trickle-lite worker <command>   run e.g. \`npx wrangler deploy\` on an instrumented copy of the repository
+  trickle-lite serve              the store for deployed observations (DATABASE_URL, TRICKLE_INGEST_TOKEN, TRICKLE_READ_TOKEN)
+  trickle-lite pull               fetch them (TRICKLE_SERVER, TRICKLE_READ_TOKEN, TRICKLE_PROJECT), then check/show as usual
 
 Data is kept outside the project, in ~/.cache/trickle-lite/.
 
@@ -37,6 +42,9 @@ async function main(argv: string[]) {
     case 'run': return run(root, rest);
     case 'check': return runCheck(root, rest);
     case 'show': return show(root, rest);
+    case 'worker': return (await import('./worker.js')).worker(rest[0] === '--' ? rest.slice(1) : rest);
+    case 'serve': await (await import('./server.js')).serve(); return new Promise<number>(() => {});
+    case 'pull': return pull(root);
     case 'clear':
       fs.rmSync(dataDir(root), { recursive: true, force: true });
       console.log(`cleared ${dataDir(root)}`);
@@ -88,6 +96,22 @@ function printReport(r: Report, root: string) {
   else console.log(`\n${c(32, 'no drift')}: every observed value fits its declared type.`);
   if (any.length) console.log(dim(`\n${any.length} values are declared any; ${path.join(dataDir(root), DRIFT_FILE)} has what they were at runtime.`));
   for (const p of r.problems) console.log(yellow(`  ! ${p}`));
+}
+
+/** Replace the local observations with what deployed code reported to the trickle-lite server. */
+async function pull(root: string): Promise<number> {
+  const { TRICKLE_SERVER, TRICKLE_READ_TOKEN, TRICKLE_PROJECT } = process.env;
+  if (!TRICKLE_SERVER || !TRICKLE_READ_TOKEN) { process.stderr.write('trickle-lite pull needs TRICKLE_SERVER and TRICKLE_READ_TOKEN\n'); return 2; }
+  const url = new URL('/v1/observations', TRICKLE_SERVER);
+  url.searchParams.set('project', TRICKLE_PROJECT || 'default');
+  const res = await fetch(url, { headers: { authorization: `Bearer ${TRICKLE_READ_TOKEN}` }, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) { process.stderr.write(`trickle-lite pull: ${res.status} from ${url.origin}\n`); return 1; }
+  const { records } = (await res.json()) as { records: unknown[] };
+  const file = path.join(ensureDataDir(root), OBS_FILE);
+  fs.writeFileSync(file + '.tmp', records.map((r) => JSON.stringify(r)).join('\n') + (records.length ? '\n' : ''));
+  fs.renameSync(file + '.tmp', file);
+  console.error(`trickle-lite: ${records.length} observed values from ${url.origin}`);
+  return 0;
 }
 
 function show(root: string, args: string[]): number {

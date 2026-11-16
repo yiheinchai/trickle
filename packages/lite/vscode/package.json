@@ -28,6 +28,10 @@
       {
         "command": "trickleLite.check",
         "title": "trickle: Check Drift Now"
+      },
+      {
+        "command": "trickleLite.setReadToken",
+        "title": "trickle: Set Server Read Token"
       }
     ],
     "configuration": {
@@ -42,6 +46,16 @@
           "type": "boolean",
           "default": false,
           "description": "Also show hints where the source already declares a type (drifts are always shown)."
+        },
+        "trickleLite.server": {
+          "type": "string",
+          "default": "",
+          "description": "trickle-lite server URL. When set, types observed in deployed code are pulled from it (set the read token with 'trickle: Set Server Read Token')."
+        },
+        "trickleLite.project": {
+          "type": "string",
+          "default": "default",
+          "description": "Project name on the trickle-lite server."
         }
       }
     }

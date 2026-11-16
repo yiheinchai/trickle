@@ -13,11 +13,12 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import MagicString from 'magic-string';
 import { analyze, type Kind, type Site } from './instrument.js';
 import { Store, locate, type Observation } from './store.js';
+import { syncShadow } from './shadow.js';
 import { commonProps, isObjectOnly, render } from './types.js';
 import { dataDir, DRIFT_FILE, ensureDataDir, hashText } from './common.js';
 
@@ -57,7 +58,7 @@ export interface Report {
 // Declared at the end of each checked file. Type aliases and `declare var` are hoisted, so every check can use them.
 //  - __TrickleProp / __TrickleEl: the declared type of a property / array element, across the members of a
 //    union that have it (null and undefined have none); unknown when none do.
-//  - __TrickleS / __TrickleN: a string or number whose value was not kept is trusted to be whichever string or
+//  - __TrickleS / __TrickleN / __TrickleBo: a string, number or boolean whose value was not kept is trusted to be whichever string or
 //    number types the declaration allows (literals, enums, template literals); it is drift only if none are allowed.
 //  - __TrickleB: a built-in instance (Date, Map, typed arrays...) is trusted to match a declared type of that class.
 //  - __TrickleO: any other class instance is trusted to be whichever object type is declared (plain objects are
@@ -68,6 +69,7 @@ const HELPERS = '\n;type __TrickleP1<T, K extends PropertyKey> = T extends null 
   'type __TrickleE1<T> = T extends readonly (infer E)[] ? E : never;' +
   'type __TrickleEl<T> = [__TrickleE1<T>] extends [never] ? unknown : __TrickleE1<T>;' +
   'type __TrickleS<D> = [Extract<D, string>] extends [never] ? string : Extract<D, string>;' +
+  'type __TrickleBo<D> = [Extract<D, boolean>] extends [never] ? boolean : Extract<D, boolean>;' +
   'type __TrickleN<D> = [Extract<D, number>] extends [never] ? number : Extract<D, number>;' +
   'type __TrickleB<D, C> = [Extract<D, C>] extends [never] ? C : Extract<D, C>;' +
   'type __TrickleO<D, S> = [Extract<D, object>] extends [never] ? S : Extract<D, object>;' +
@@ -233,65 +235,6 @@ function nearestTsconfig(dir: string, root: string): string | undefined {
 
 // ── Shadow copy ────────────────────────────────────────────────────────────
 
-const COPY_EXT = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/;
-
-function listSources(root: string): string[] {
-  try {
-    const out = execFileSync('git', ['-C', root, 'ls-files', '-co', '--exclude-standard', '-z'], { maxBuffer: 256 << 20 });
-    return out.toString('utf8').split('\0').filter(Boolean);
-  } catch {
-    const out: string[] = [];
-    const walk = (dir: string) => {
-      for (const e of fs.readdirSync(path.join(root, dir), { withFileTypes: true })) {
-        if (['node_modules', '.git', 'dist', '.next'].includes(e.name)) continue;
-        const rel = dir ? `${dir}/${e.name}` : e.name;
-        if (e.isDirectory()) walk(rel);
-        else out.push(rel);
-      }
-    };
-    walk('');
-    return out;
-  }
-}
-
-/** Mirror the project's sources into `shadow`, replacing `overrides`, with node_modules linked rather than copied. */
-function syncShadow(root: string, shadow: string, overrides: Map<string, string>) {
-  const manifestPath = path.join(shadow, '.manifest.json');
-  let manifest: Record<string, string> = {};
-  try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); } catch { /* first run */ }
-  const next: Record<string, string> = {};
-  const dirs = new Set<string>(['']);
-  for (const rel of listSources(root)) {
-    if (!COPY_EXT.test(rel)) continue;
-    const src = path.join(root, rel);
-    const dst = path.join(shadow, rel);
-    let stamp: string;
-    const override = overrides.get(rel);
-    if (override !== undefined) stamp = 'o:' + hashText(override);
-    else {
-      try { const st = fs.statSync(src); stamp = `${st.size}:${st.mtimeMs}`; } catch { continue; }
-    }
-    next[rel] = stamp;
-    if (rel.endsWith('package.json')) dirs.add(path.dirname(rel) === '.' ? '' : path.dirname(rel));
-    if (manifest[rel] === stamp && fs.existsSync(dst)) continue;
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    if (override !== undefined) fs.writeFileSync(dst, override);
-    else fs.copyFileSync(src, dst);
-  }
-  for (const rel of Object.keys(manifest)) {
-    if (!(rel in next)) fs.rmSync(path.join(shadow, rel), { force: true });
-  }
-  for (const dir of dirs) {
-    const real = path.join(root, dir, 'node_modules');
-    const link = path.join(shadow, dir, 'node_modules');
-    if (!fs.existsSync(real)) continue;
-    try { fs.lstatSync(link); continue; } catch { /* missing */ }
-    fs.mkdirSync(path.dirname(link), { recursive: true });
-    fs.symlinkSync(real, link, 'junction');
-  }
-  fs.writeFileSync(manifestPath, JSON.stringify(next));
-}
-
 // ── Running tsc ────────────────────────────────────────────────────────────
 
 function findTsc(fromDir: string): string {
@@ -377,7 +320,7 @@ function parseTsc(out: string, plans: Map<string, FilePlan>): Drift[] {
 /** Show the helper types in TypeScript's messages as the runtime types they stand for. */
 export function cleanHelpers(text: string): string {
   for (let guard = 0; guard < 200; guard++) {
-    const m = /__Trickle(S|N|B|A|X|O|Prop|El|NotAny)</.exec(text);
+    const m = /__Trickle(Bo|S|N|B|A|X|O|Prop|El|NotAny)</.exec(text);
     if (!m) return text;
     const open = m.index + m[0].length;
     const args: string[] = [];
@@ -399,7 +342,7 @@ export function cleanHelpers(text: string): string {
     const end = closed ? i + 1 : i;
     const kind = m[1];
     const el = args[1] ?? 'unknown';
-    const out = kind === 'S' ? 'string' : kind === 'N' ? 'number' : kind === 'B' || kind === 'O' ? (args[1] ?? 'object')
+    const out = kind === 'S' ? 'string' : kind === 'Bo' ? 'boolean' : kind === 'N' ? 'number' : kind === 'B' || kind === 'O' ? (args[1] ?? 'object')
       : kind === 'A' || kind === 'X' ? (/[|&]/.test(el) ? `(${el})[]` : `${el}[]`)
       : kind === 'Prop' ? `${args[0]}[${args[1]}]` : (args[0] ?? '');
     text = text.slice(0, m.index) + out + text.slice(end);

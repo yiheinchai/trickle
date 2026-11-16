@@ -27,6 +27,22 @@ npm run vscode:package && code --install-extension vscode/trickle-lite.vsix
 
 Observed types appear inline, live while the code runs: `: T` after values with no annotation, and `⇒ T` after a function's parameters for what it returned. `⚠` marks drift. Hover a hint or name for the full type, how often it was seen, and TypeScript's explanation of any drift. Drift shows as warnings in Problems, and values declared `any` as hints. The check reruns when observations change or you save. The settings are `trickleLite.hints.enabled` and `trickleLite.hints.annotated` (the second also shows hints where a type is already written).
 
+## Deployed code (Cloudflare Workers)
+
+The same observation works on a deployed Worker. Types go to a separate trickle-lite server with its own Postgres, never to the Worker's own database:
+
+```
+Worker (instrumented build) --HTTPS, write token--> trickle-lite serve --> its own Postgres
+your machine / editor       <--read token---------- trickle-lite pull  (then check, show, VS Code as usual)
+```
+
+1. **Server.** Run `trickle-lite serve` (the `Dockerfile` here runs it) with `DATABASE_URL`, `TRICKLE_INGEST_TOKEN` and `TRICKLE_READ_TOKEN`. Use two different random tokens. It creates its one table on start.
+2. **Worker secrets**, once: `wrangler secret put TRICKLE_SERVER` (the server's https URL), `wrangler secret put TRICKLE_INGEST_TOKEN`, and optionally `TRICKLE_PROJECT`.
+3. **Deploy observed**, in the Worker's directory: `trickle-lite worker npx wrangler deploy`. This builds an instrumented copy of the repository in the data folder, with an entry that sends observations after each response (`ctx.waitUntil`, so responses are not delayed), and deploys that. The repository is unchanged. A normal deploy afterwards replaces it with the uninstrumented Worker.
+4. **Read**: `TRICKLE_SERVER=… TRICKLE_READ_TOKEN=… trickle-lite pull && trickle-lite check`. In VS Code, set `trickleLite.server` and run "trickle: Set Server Read Token" (kept in VS Code's secret storage); the extension pulls every 15 s.
+
+**Only types leave the Worker.** It records no strings, no literals, no booleans and no sample values. Error messages are not recorded, only that something was an `Error`. Objects whose keys are not plain identifiers (IDs, emails, file names) are recorded as `{ [key: string]: T }` with the keys dropped. What does leave is code structure: file paths, variable and property names, and positions. The server applies the same rules again to everything it receives, validates every field, and refuses bodies over 1 MB. The ingest token can only write and the read token can only read. The Worker sends only over HTTPS (localhost excepted), and if the server is down the Worker carries on unaffected.
+
 ## How it works
 
 1. **Capture.** `instrument.ts` parses each project file with the TypeScript parser and wraps parameters, variable initialisers, assignments, destructured names, `catch` bindings and `return` values with `__tt(point, value)`. No lines are added, so stack traces keep their line numbers.
